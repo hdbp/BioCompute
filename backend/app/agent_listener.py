@@ -79,6 +79,21 @@ def start() -> str | None:
     return _state["url"]
 
 
+def ensure() -> str | None:
+    """Start the listener on the tailnet address if it isn't running (used when an admin enrolls a machine)."""
+    if _state["url"]:
+        return _state["url"]
+    s = get_settings()
+    if s.agent_listen and s.agent_listen.strip().lower() in ("off", "false", "0", "no"):
+        return None  # explicitly disabled
+    original = s.agent_listen
+    try:
+        s.agent_listen = original or "tailscale"
+        return start()
+    finally:
+        s.agent_listen = original
+
+
 def stop() -> None:
     if _state["server"] is not None:
         _state["server"].should_exit = True

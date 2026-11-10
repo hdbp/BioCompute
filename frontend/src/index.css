@@ -7,55 +7,59 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Darkfield (default) — tokens are RGB triplets so Tailwind opacity modifiers work */
+/* Dark (default): neutral near-black greys, no blue cast. Tokens are RGB triplets so Tailwind opacity modifiers work */
 :root, .dark {
-  --ink: 11 19 32;          /* #0B1320 page */
-  --surface: 18 28 43;      /* #121C2B panels */
-  --raised: 25 37 56;       /* #192538 hover / inputs */
-  --line: 37 52 75;         /* #25344B borders */
-  --text: 227 233 242;      /* #E3E9F2 */
-  --muted: 135 151 174;     /* #8797AE */
-  --accent: 138 164 255;    /* #8AA4FF fluorophore periwinkle */
-  --accent-ink: 11 19 40;
+  --ink: 10 10 11;          /* page */
+  --surface: 20 20 22;      /* panels */
+  --raised: 28 28 31;       /* hover / inputs */
+  --line: 44 44 48;         /* borders */
+  --text: 236 236 238;
+  --muted: 152 152 160;
+  --accent: 138 164 255;    /* periwinkle */
+  --accent-ink: 10 10 11;
   --run: 70 194 216;        /* teal  - running */
   --ok: 92 201 138;         /* green - completed */
   --bad: 240 106 123;       /* red   - failed */
   --wait: 232 176 75;       /* amber - queued / warning */
-  --well-off: 31 45 66;
-  /* discovery sources */
-  --src-controller: 138 164 255;
-  --src-agent: 92 201 138;
-  --src-tailscale: 90 176 255;
-  --src-neighbors: 160 174 196;
-  --src-mdns: 190 148 245;
-  --src-htcondor: 232 176 75;
-  --src-manual: 214 220 230;
-  --src-report: 242 140 192;
+  --well-off: 40 40 44;
+  /* discovery-source tags: filled chips sampled from viridis t=0.46..1.0 (bright half, stands out on black);
+     text is near-black. Every chip >= 3.8:1 against the page, text >= 4.5:1 against the chip. */
+  --src-controller: 37 135 141;
+  --src-agent: 33 154 137;
+  --src-tailscale: 39 171 129;
+  --src-htcondor: 65 189 114;
+  --src-mdns: 105 203 91;
+  --src-neighbors: 153 215 61;
+  --src-report: 204 225 38;
+  --src-manual: 253 231 37;
+  --src-ink: 10 10 11;
   color-scheme: dark;
 }
-/* Brightfield */
+/* Light */
 .light {
-  --ink: 240 243 247;
+  --ink: 244 244 245;
   --surface: 255 255 255;
-  --raised: 233 237 243;
-  --line: 214 221 231;
-  --text: 22 32 48;
-  --muted: 92 107 128;
+  --raised: 236 236 238;
+  --line: 220 220 224;
+  --text: 20 20 22;
+  --muted: 96 96 106;
   --accent: 64 92 214;
   --accent-ink: 255 255 255;
   --run: 14 140 166;
   --ok: 30 140 82;
   --bad: 200 50 70;
   --wait: 176 120 20;
-  --well-off: 224 230 238;
-  --src-controller: 64 92 214;
-  --src-agent: 30 130 76;
-  --src-tailscale: 22 110 200;
-  --src-neighbors: 84 98 120;
-  --src-mdns: 128 70 200;
-  --src-htcondor: 160 105 10;
-  --src-manual: 60 70 86;
-  --src-report: 190 50 120;
+  --well-off: 226 226 230;
+  /* viridis t=0.0..0.44 (dark half, stands out on white); text is white */
+  --src-controller: 68 1 84;
+  --src-agent: 71 23 105;
+  --src-tailscale: 70 44 122;
+  --src-htcondor: 66 64 133;
+  --src-mdns: 59 82 138;
+  --src-neighbors: 51 99 141;
+  --src-report: 45 114 142;
+  --src-manual: 38 130 141;
+  --src-ink: 255 255 255;
   color-scheme: light;
 }
 

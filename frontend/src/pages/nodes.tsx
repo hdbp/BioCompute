@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -225,7 +225,10 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
         )}
         <TabsContent value="details" className="py-4">
           {!participating && !n.is_controller && admin && n.tailnet.member && <SshEnroll node={n} />}
-          {!participating && !n.is_controller && <EnrollSteps node={n} admin={admin} onEnroll={onEnroll} manualOnly={admin && n.tailnet.member} />}
+          {!participating && !n.is_controller && (admin && n.tailnet.member
+            ? <details className="mb-5 text-[13px]"><summary className="cursor-pointer text-muted hover:text-text">Enroll manually instead</summary>
+                <div className="mt-3"><EnrollSteps node={n} admin={admin} onEnroll={onEnroll} manualOnly /></div></details>
+            : <EnrollSteps node={n} admin={admin} onEnroll={onEnroll} />)}
           {n.cpu_logical && <div className="mb-4"><CoreLattice total={n.cpu_logical} allocated={n.allocation?.enabled ? n.allocation.max_cpus : 0} busyPercent={n.utilization.cpu_percent} size="md" /></div>}
           <dl>
             <KV k="Hostname" v={n.hostname} />
@@ -277,7 +280,11 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
 
 interface SshStep { id: string; title: string; state: "pending" | "running" | "done" | "failed" | "skipped"; output: string }
 interface SshStatus { state: "running" | "done" | "warning" | "failed"; steps: SshStep[]; error: string | null; hint: string | null; host: string; user: string; port?: number; started_at: string }
-interface SshInfo { available: boolean; reasons: string[]; targets: string[]; controller_url: string | null; site: string; ssh_bin: string; status: SshStatus | null; agent_listener: string | null; agent_listener_error: string | null }
+interface SshInfo {
+  available: boolean; reasons: string[]; targets: string[]; controller_url: string | null; site: string; ssh_bin: string;
+  status: (SshStatus & { password_used?: boolean; enable_participation?: boolean }) | null;
+  agent_listener: string | null; agent_listener_error: string | null; default_user: string;
+}
 
 const SSH_USER_KEY = "biocompute.sshUser";
 const SSH_PORTS_KEY = "biocompute.sshPorts"; // { [nodeId]: port }
@@ -286,127 +293,162 @@ function loadPorts(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(SSH_PORTS_KEY) ?? "{}"); } catch { return {}; }
 }
 
+/** One-step enrollment of a tailnet machine: user (+ password if needed), Enroll. Everything else has defaults. */
 function SshEnroll({ node: n }: { node: ClusterNode }) {
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
   const info = useQuery({
     queryKey: ["ssh-enroll", n.id],
     queryFn: () => api.get<SshInfo>(`/api/nodes/${n.id}/ssh-enroll`),
-    refetchInterval: running ? 1500 : false,
+    refetchInterval: running ? 1200 : false,
   });
   const st = info.data?.status ?? null;
+  const pwRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const isRunning = st?.state === "running";
     if (running && !isRunning && st) {
-      if (st.state === "done") toast.success(`${n.hostname} enrolled. Participation is off until you enable it.`);
-      else if (st.state === "warning") toast.warning(`${n.hostname} enrolled, but no heartbeat from the service yet`);
-      else toast.error(`Enrollment of ${n.hostname} failed`);
+      if (st.state === "done") toast.success(`${n.hostname} enrolled${st.enable_participation ? " and accepting jobs" : ""}`);
+      else if (st.state === "warning") toast.warning(`${n.hostname} enrolled, but no heartbeat from its service yet`);
+      else {
+        toast.error(`Enrollment of ${n.hostname} failed`);
+        if (st.hint && /password/i.test(st.hint)) setTimeout(() => pwRef.current?.focus(), 50);
+      }
       qc.invalidateQueries({ queryKey: ["nodes"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
     }
     setRunning(isRunning);
   }, [st, running, n.hostname, qc]);
 
-  const [f, setF] = useState({ ssh_user: "", host: "", ssh_port: "", controller_url: "", site: "", install_service: true, allow_discovery_reports: false });
-  const [confirming, setConfirming] = useState(false);
+  const [f, setF] = useState({ ssh_user: "", password: "", host: "", ssh_port: "22", controller_url: "", site: "",
+    install_service: true, allow_discovery_reports: false, enable_participation: true });
+  const [advanced, setAdvanced] = useState(false);
   useEffect(() => {
     if (!info.data) return;
     let saved = "";
     try { saved = localStorage.getItem(SSH_USER_KEY) ?? ""; } catch { /* storage unavailable */ }
     const lastPort = info.data.status?.port ?? loadPorts()[n.id];
-    setF((x) => ({ ...x, ssh_user: x.ssh_user || saved, host: x.host || info.data!.targets[0] || "",
-      ssh_port: x.ssh_port || (lastPort ? String(lastPort) : "22"),
-      controller_url: x.controller_url || info.data!.controller_url || "", site: x.site || info.data!.site }));
-  }, [info.data]);
+    setF((x) => ({ ...x, ssh_user: x.ssh_user || saved || info.data!.default_user, host: x.host || info.data!.targets[0] || "",
+      ssh_port: lastPort ? String(lastPort) : x.ssh_port, site: x.site || info.data!.site }));
+  }, [info.data, n.id]);
   const start = useMutation({
-    mutationFn: () => api.post<SshStatus>(`/api/nodes/${n.id}/ssh-enroll`, { ...f, ssh_port: Number(f.ssh_port), site: f.site || null }),
+    mutationFn: () => api.post<SshStatus>(`/api/nodes/${n.id}/ssh-enroll`, {
+      ...f, ssh_port: Number(f.ssh_port), site: f.site || null, password: f.password || null,
+      controller_url: f.controller_url.trim() || null,
+    }),
     onSuccess: () => {
       try {
         localStorage.setItem(SSH_USER_KEY, f.ssh_user);
         localStorage.setItem(SSH_PORTS_KEY, JSON.stringify({ ...loadPorts(), [n.id]: Number(f.ssh_port) }));
       } catch { /* ignore */ }
-      setConfirming(false); setRunning(true); qc.invalidateQueries({ queryKey: ["ssh-enroll", n.id] });
+      setF((x) => ({ ...x, password: "" }));  // never kept in the page
+      setRunning(true); qc.invalidateQueries({ queryKey: ["ssh-enroll", n.id] });
     },
-    onError: (e) => { setConfirming(false); toast.error(errMsg(e)); },
+    onError: (e) => toast.error(errMsg(e)),
   });
   if (!info.data || (!info.data.available && !st)) return null;
   const busy = st?.state === "running" || start.isPending;
   const portNum = Number(f.ssh_port);
   const portOk = Number.isInteger(portNum) && portNum >= 1 && portNum <= 65535;
-  const valid = /^[A-Za-z_][A-Za-z0-9._-]*$/.test(f.ssh_user) && !!f.host && portOk && /^https?:\/\//.test(f.controller_url);
+  const valid = /^[A-Za-z_][A-Za-z0-9._-]*$/.test(f.ssh_user) && !!f.host && portOk;
+  const autoUrl = info.data.controller_url;
+  const noListener = !autoUrl && !f.controller_url.trim();
 
   return (
-    <div className="mb-5 rounded-md border p-4" style={{ borderColor: "rgb(var(--src-tailscale) / 0.45)", backgroundColor: "rgb(var(--src-tailscale) / 0.06)" }}>
-      <div className="flex items-start gap-2">
-        <Terminal className="mt-0.5 size-4" style={{ color: "rgb(var(--src-tailscale))" }} />
-        <div className="min-w-0">
-          <p className="text-[13.5px] font-medium">Enroll automatically over Tailscale SSH</p>
-          <p className="text-xs text-muted mt-0.5">
-            The controller connects to this machine through your tailnet, installs the agent in your home folder and enrolls it.
-            It needs Tailscale SSH (always port 22 on the tailnet address) or your own sshd with the controller's key, on whatever
-            port it listens on, and Python 3.9+ on the machine. Nothing needs root.
-          </p>
-        </div>
+    <div className="mb-5 rounded-lg border border-line bg-raised/40 p-4">
+      <div className="flex items-center gap-2">
+        <span className="rounded px-1.5 py-px text-[11px] font-medium" style={{ color: "rgb(var(--src-ink))", backgroundColor: "rgb(var(--src-tailscale))" }}>Tailnet</span>
+        <p className="text-[14px] font-semibold">Enroll {n.hostname}</p>
       </div>
 
-      {!st || st.state !== "running" ? (
-        info.data.available && (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Field label="SSH user on that machine" required>
-              <Input value={f.ssh_user} onChange={(e) => setF({ ...f, ssh_user: e.target.value.trim() })} placeholder="hugo" autoComplete="off" />
+      {info.data.available && st?.state !== "running" && (
+        <form className="mt-3" onSubmit={(e) => { e.preventDefault(); if (valid && !busy && !noListener) start.mutate(); }}>
+          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <Field label="User on that machine">
+              <Input value={f.ssh_user} onChange={(e) => setF({ ...f, ssh_user: e.target.value.trim() })} autoComplete="off" />
             </Field>
-            <div className="grid grid-cols-[1fr_96px] gap-3">
-              <Field label="Connect to">
-                <Select value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })}>
-                  {info.data.targets.map((t) => <option key={t}>{t}</option>)}
-                </Select>
-              </Field>
-              <Field label="SSH port" error={f.ssh_port && !portOk ? "1 to 65535" : null}>
-                <Input type="number" min={1} max={65535} value={f.ssh_port} aria-invalid={!portOk}
-                  onChange={(e) => setF({ ...f, ssh_port: e.target.value.replace(/\D/g, "") })} />
-              </Field>
-            </div>
-            <Field label="Controller address, as seen from that machine" required className="sm:col-span-2"
-              hint={info.data.agent_listener
-                ? <>BioCompute accepts workers at <button type="button" className="font-mono underline" onClick={() => setF({ ...f, controller_url: info.data!.controller_url ?? info.data!.agent_listener! })}>{info.data.controller_url ?? info.data.agent_listener}</button> (agent listener on the tailnet).</>
-                : <span className="text-wait">BioCompute is not listening for workers: the API only accepts connections from this computer.
-                    Restart it with <code className="font-mono">BIOCOMPUTE_AGENT_LISTEN=tailscale</code> (scripts/dev.sh does this when Tailscale is running){info.data.agent_listener_error ? ` (${info.data.agent_listener_error})` : ""}, or use your nginx/TLS address.</span>}>
-              <Input value={f.controller_url} onChange={(e) => setF({ ...f, controller_url: e.target.value.trim() })} placeholder="http://lab-ws.tail1234.ts.net:8080" className="font-mono text-[12px]" />
+            <Field label="Password (if needed)">
+              <Input ref={pwRef} type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })}
+                autoComplete="new-password" placeholder="leave empty if it accepts BioCompute's key" />
             </Field>
-            <Field label="Site"><Input value={f.site} onChange={(e) => setF({ ...f, site: e.target.value })} /></Field>
-            <div className="space-y-2 self-end pb-1 text-[13px]">
-              <label className="flex items-center gap-2"><Checkbox checked={f.install_service} onCheckedChange={(v) => setF({ ...f, install_service: !!v })} />Install as a background service</label>
-              <label className="flex items-center gap-2"><Checkbox checked={f.allow_discovery_reports} onCheckedChange={(v) => setF({ ...f, allow_discovery_reports: !!v })} />Report devices on its network</label>
-            </div>
-            <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
-              <Button variant="primary" disabled={!valid || busy} onClick={() => setConfirming(true)}><Terminal />{st?.state === "failed" ? "Try again" : "Enroll automatically"}</Button>
-              {st && st.state !== "running" && <span className="text-xs text-muted">Last attempt: {st.state} ({ago(st.started_at)})</span>}
-            </div>
+            <Button type="submit" variant="primary" disabled={!valid || busy || noListener} loading={start.isPending}>
+              <Terminal />{st?.state === "failed" ? "Try again" : "Enroll"}
+            </Button>
           </div>
-        )
-      ) : null}
+          <label className="mt-3 flex items-center gap-2 text-[13px]">
+            <Checkbox checked={f.enable_participation} onCheckedChange={(v) => setF({ ...f, enable_participation: !!v })} />
+            Start using it for jobs right away <span className="text-muted">(Balanced preset; laptops only when idle and on power)</span>
+          </label>
+          <p className="mt-2 text-xs text-muted">
+            BioCompute connects over SSH through your tailnet{f.password ? ", installs its own SSH key with the password (used once, never stored)" : ""},
+            copies the agent to <code className="font-mono">~/.local/share/biocompute-agent</code>, enrolls it{f.install_service ? " and starts it as a background service" : ""}.
+            Nothing runs as root; every step is shown below and recorded in the audit log.
+          </p>
+          {noListener && (
+            <p className="mt-2 text-xs text-wait">
+              Other machines can't reach BioCompute yet: start Tailscale on this controller (BioCompute then listens for workers on its tailnet address)
+              {info.data.agent_listener_error ? ` (${info.data.agent_listener_error})` : ""}, or enter the controller address under Advanced.
+            </p>
+          )}
+
+          <button type="button" className="mt-3 text-xs text-muted hover:text-text" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>
+            {advanced ? "Hide advanced options" : "Advanced options"}
+          </button>
+          {advanced && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[1fr_96px] gap-3">
+                <Field label="Connect to">
+                  <Select value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })}>
+                    {info.data.targets.map((t) => <option key={t}>{t}</option>)}
+                  </Select>
+                </Field>
+                <Field label="SSH port" error={!portOk ? "1 to 65535" : null}>
+                  <Input type="number" min={1} max={65535} value={f.ssh_port} aria-invalid={!portOk}
+                    onChange={(e) => setF({ ...f, ssh_port: e.target.value.replace(/\D/g, "") })} />
+                </Field>
+              </div>
+              <Field label="Site"><Input value={f.site} onChange={(e) => setF({ ...f, site: e.target.value })} /></Field>
+              <Field label="Controller address, as seen from that machine" className="sm:col-span-2"
+                hint={autoUrl ? `Automatic: ${autoUrl} (agent-only listener on the tailnet).` : "No automatic address: Tailscale is not running on the controller."}>
+                <Input value={f.controller_url} onChange={(e) => setF({ ...f, controller_url: e.target.value.trim() })}
+                  placeholder={autoUrl ?? "http://lab-ws.tail1234.ts.net:8765"} className="font-mono text-[12px]" />
+              </Field>
+              <div className="sm:col-span-2 flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
+                <label className="flex items-center gap-2"><Checkbox checked={f.install_service} onCheckedChange={(v) => setF({ ...f, install_service: !!v })} />Install as a background service</label>
+                <label className="flex items-center gap-2"><Checkbox checked={f.allow_discovery_reports} onCheckedChange={(v) => setF({ ...f, allow_discovery_reports: !!v })} />Report devices on its network</label>
+              </div>
+              <p className="sm:col-span-2 text-xs text-muted">Tailscale SSH always answers on port 22. Macs need Remote Login (System Settings, General, Sharing).</p>
+            </div>
+          )}
+        </form>
+      )}
 
       {st && <SshProgress st={st} />}
+      {advanced && <ControllerKey user={f.ssh_user} host={f.host} port={f.ssh_port || "22"} open={false} />}
+    </div>
+  );
+}
 
-      <ControllerKey user={f.ssh_user} host={f.host} port={f.ssh_port || "22"}
-        open={!!st?.hint && /SSH key/.test(st.hint)} />
-
-      <Dialog open={confirming} onOpenChange={setConfirming}>
-        <DialogContent title={`Enroll ${n.hostname} automatically?`} description="BioCompute will run exactly these steps on that machine, as the SSH user you entered.">
-          <ol className="list-decimal space-y-1.5 pl-5 text-[13px]">
-            <li>Connect with <code className="font-mono text-[12px]">{info.data.ssh_bin} -p {f.ssh_port} {f.ssh_user}@{f.host}</code> (no password prompts) and check for Python 3.9+.</li>
-            <li>Check the machine can reach <code className="font-mono text-[12px]">{f.controller_url}</code>.</li>
-            <li>Copy the agent to <code className="font-mono text-[12px]">~/.local/share/biocompute-agent</code>.</li>
-            <li>Enroll with a one-time token sent over the encrypted connection (never on a command line).</li>
-            {f.install_service && <li>Install a per-user background service (systemd user unit or launchd agent).</li>}
-          </ol>
-          <p className="mt-3 text-xs text-muted">No root access, no other software and no open ports. The node joins with participation switched off. This is recorded in the audit log.</p>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
-            <Button variant="primary" loading={start.isPending} onClick={() => start.mutate()}>Enroll {n.hostname}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+function SshProgress({ st }: { st: SshStatus }) {
+  const icon = (s: SshStep["state"]) => ({
+    done: <CheckCircle2 className="size-4 text-ok" />, failed: <CircleAlert className="size-4 text-bad" />,
+    running: <Loader2 className="size-4 animate-spin text-accent" />, skipped: <MinusCircle className="size-4 text-muted" />,
+    pending: <CircleDashed className="size-4 text-muted" />,
+  })[s];
+  const steps = st.steps.filter((s) => s.state !== "skipped");
+  return (
+    <div className="mt-4 rounded-md border border-line bg-surface p-3">
+      <ul className="space-y-2">
+        {steps.map((s) => (
+          <li key={s.id} className="text-[13px]">
+            <div className="flex items-center gap-2">{icon(s.state)}<span>{s.title}</span></div>
+            {s.output && s.state === "failed" && (
+              <pre className="ml-6 mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded bg-ink/60 px-2 py-1 font-mono text-[11.5px] text-muted">{s.output}</pre>
+            )}
+          </li>
+        ))}
+      </ul>
+      {st.error && <p className="mt-3 text-[13px] text-bad">{st.error}</p>}
+      {st.hint && <p className="mt-1 text-[13px] text-muted">{st.hint}</p>}
     </div>
   );
 }
@@ -474,30 +516,6 @@ function CopyBlock({ text, onCopy }: { text: string; onCopy: (t: string) => void
     <div className="flex items-start gap-2 rounded-md border border-line bg-ink/60 p-2">
       <code className="min-w-0 flex-1 break-all font-mono text-[11.5px]">{text}</code>
       <button type="button" className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-text" onClick={() => onCopy(text)} aria-label="Copy command"><Copy className="size-3.5" /></button>
-    </div>
-  );
-}
-
-function SshProgress({ st }: { st: SshStatus }) {
-  const icon = (s: SshStep["state"]) => ({
-    done: <CheckCircle2 className="size-4 text-ok" />, failed: <CircleAlert className="size-4 text-bad" />,
-    running: <Loader2 className="size-4 animate-spin text-accent" />, skipped: <MinusCircle className="size-4 text-muted" />,
-    pending: <CircleDashed className="size-4 text-muted" />,
-  })[s];
-  return (
-    <div className="mt-4 rounded-md border border-line bg-surface p-3">
-      <ul className="space-y-2">
-        {st.steps.map((s) => (
-          <li key={s.id} className="text-[13px]">
-            <div className="flex items-center gap-2">{icon(s.state)}<span className={cn(s.state === "skipped" && "text-muted")}>{s.title}</span></div>
-            {s.output && (s.state === "failed" || s.state === "done") && (
-              <pre className="ml-6 mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded bg-ink/60 px-2 py-1 font-mono text-[11.5px] text-muted">{s.output}</pre>
-            )}
-          </li>
-        ))}
-      </ul>
-      {st.error && <p className="mt-3 text-[13px] text-bad">{st.error}</p>}
-      {st.hint && <p className="mt-1 text-[13px] text-muted">{st.hint}</p>}
     </div>
   );
 }

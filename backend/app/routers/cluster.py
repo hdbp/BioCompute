@@ -159,13 +159,16 @@ def ssh_enroll_info(nid: str, _: User = Depends(require_admin), db: Session = De
     return {"available": not reasons, "reasons": reasons, "targets": ssh_enroll.targets(n),
             "controller_url": ssh_enroll.default_controller_url(ctl), "site": n.site or "home",
             "agent_listener": agent_listener.url(), "agent_listener_error": agent_listener.error(),
+            "default_user": ssh_enroll.default_user(), "key": ssh_enroll.key_info(),
             "ssh_bin": s.ssh_bin, "status": ssh_enroll.status(n.id)}
 
 
 @nodes_router.post("/{nid}/ssh-enroll")
 def ssh_enroll_start(nid: str, body: SshEnrollIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     n = get_node(db, nid)
-    st = ssh_enroll.start(db, n, user=body.ssh_user, host=body.host, port=body.ssh_port, controller_url=body.controller_url.rstrip("/"),
+    st = ssh_enroll.start(db, n, user=body.ssh_user, host=body.host, port=body.ssh_port,
+                          controller_url=body.controller_url.rstrip("/") if body.controller_url else None,
+                          password=body.password or None, enable_participation=body.enable_participation,
                           site=body.site, install_service=body.install_service,
                           allow_discovery_reports=body.allow_discovery_reports, actor=admin.username)
     events.publish("nodes", {"kind": "ssh_enroll", "node_id": nid})

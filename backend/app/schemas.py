@@ -355,7 +355,9 @@ class SshEnrollIn(BaseModel):
     ssh_user: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9._-]{0,63}$")
     host: str
     ssh_port: int = Field(default=22, ge=1, le=65535)
-    controller_url: str
+    controller_url: str | None = None  # default: the agent listener on the tailnet
+    password: str | None = Field(default=None, max_length=1024, repr=False)  # used once to install BioCompute's key
+    enable_participation: bool = False
     site: str | None = None
     install_service: bool = True
     allow_discovery_reports: bool = False

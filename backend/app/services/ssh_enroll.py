@@ -14,7 +14,9 @@ This is the single place where BioCompute changes another computer, so it is nar
 """
 from __future__ import annotations
 
+import getpass
 import io
+import os
 import re
 import shlex
 import shutil
@@ -43,6 +45,7 @@ _jobs: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
 
 STEPS = [
+    ("key", "Install BioCompute's SSH key using the password"),
     ("connect", "Connect over SSH and check Python"),
     ("reach", "Check that the machine can reach the controller"),
     ("copy", "Copy the BioCompute agent"),
@@ -52,9 +55,10 @@ STEPS = [
 ]
 
 HINTS = [
+    (r"BIOCOMPUTE_PASSWORD_REJECTED", "The password was not accepted. Check the user name and password for that machine."),
     (r"Permission denied \(publickey,password|Permission denied \(publickey,keyboard", "The machine's own SSH server "
-     "answered, so the port is right, but it did not accept any key from the controller (password login cannot be "
-     "used here). Authorize BioCompute's SSH key on that machine (see 'Controller SSH key' in this panel), then try again."),
+     "answered, so the port is right, but it does not accept BioCompute's key yet. Enter that user's password and try "
+     "again: it is used once to install the key and is not stored."),
     (r"Permission denied|publickey", "SSH refused the login. Allow SSH from the controller in your tailnet policy "
      "(Tailscale SSH: an 'accept' rule for this user) or authorize BioCompute's SSH key on the machine "
      "(see 'Controller SSH key' in this panel)."),
@@ -153,16 +157,41 @@ def _agent_tarball() -> bytes:
     return buf.getvalue()
 
 
-def _ssh(user: str, host: str, script: str, stdin: bytes | None = None, timeout: int = 120, port: int = 22) -> tuple[int, str]:
+ASKPASS = "#!/bin/sh\nprintf '%s\\n' \"$BIOCOMPUTE_SSH_PASSWORD\"\n"
+
+
+def _askpass_helper() -> Path:
+    """Tiny SSH_ASKPASS program that answers ssh's password prompt from its environment."""
+    p = Path(get_settings().state_dir).resolve() / "ssh" / "askpass.sh"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.parent.chmod(0o700)
+    if not p.exists() or p.read_text() != ASKPASS:
+        p.write_text(ASKPASS)
+    p.chmod(0o700)
+    return p
+
+
+def _ssh(user: str, host: str, script: str, stdin: bytes | None = None, timeout: int = 120, port: int = 22,
+         password: str | None = None) -> tuple[int, str]:
+    """Run a fixed script on the remote machine. With `password`, log in with it (once, to install the key);
+    otherwise key-only and fully non-interactive."""
     s = get_settings()
     known = Path(s.state_dir).resolve() / "ssh_known_hosts"
-    argv = [s.ssh_bin, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new",
+    if password is None:
+        auth = ["-o", "BatchMode=yes", *(["-i", str(key_path())] if key_path().is_file() else [])]  # + agent/default keys
+        env = None
+    else:
+        auth = ["-o", "BatchMode=no", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1",
+                "-o", "PreferredAuthentications=keyboard-interactive,password"]
+        # The password reaches ssh only through this process's environment (readable by the same account only)
+        env = {**os.environ, "SSH_ASKPASS": str(_askpass_helper()), "SSH_ASKPASS_REQUIRE": "force",
+               "DISPLAY": os.environ.get("DISPLAY", ":0"), "BIOCOMPUTE_SSH_PASSWORD": password}
+    argv = [s.ssh_bin, *auth, "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new",
             "-o", f"UserKnownHostsFile={known}", "-o", "LogLevel=ERROR", "-p", str(int(port)), "-l", user,
-            *(["-i", str(key_path())] if key_path().is_file() else []),  # plus any agent/default keys
-            "--", host,
-            "sh -c " + shlex.quote(script)]  # remote login shell may be zsh/fish: always run POSIX sh
+            "--", host, "sh -c " + shlex.quote(script)]  # remote login shell may be zsh/fish: always run POSIX sh
     try:
-        p = subprocess.run(argv, input=stdin or b"", capture_output=True, timeout=timeout)
+        # new session = no controlling terminal: ssh can never prompt on the controller's console
+        p = subprocess.run(argv, input=stdin or b"", capture_output=True, timeout=timeout, env=env, start_new_session=True)
     except FileNotFoundError:
         return 127, f"'{s.ssh_bin}' not found on the controller"
     except subprocess.TimeoutExpired:
@@ -181,8 +210,16 @@ def status(node_id: str) -> dict[str, Any] | None:
         return (n.network or {}).get("ssh_enroll") if n else None
 
 
-def start(db, node: Node, *, user: str, host: str, controller_url: str, site: str | None, port: int = 22,
-          install_service: bool, allow_discovery_reports: bool, actor: str) -> dict[str, Any]:
+def default_user() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:
+        return ""
+
+
+def start(db, node: Node, *, user: str, host: str, controller_url: str | None, site: str | None, port: int = 22,
+          install_service: bool, allow_discovery_reports: bool, actor: str, password: str | None = None,
+          enable_participation: bool = False) -> dict[str, Any]:
     s = get_settings()
     if not s.allow_ssh_enrollment:
         raise HTTPException(403, "SSH enrollment is disabled (BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false)")
@@ -198,6 +235,15 @@ def start(db, node: Node, *, user: str, host: str, controller_url: str, site: st
         raise HTTPException(400, "SSH port must be between 1 and 65535")
     if not USER_RE.match(user):
         raise HTTPException(400, "Invalid SSH user name")
+    if not controller_url:
+        from .. import agent_listener
+
+        ctl = db.query(Node).filter(Node.is_controller.is_(True)).first()
+        agent_listener.ensure()  # start the tailnet listener on demand when Tailscale is up
+        controller_url = default_controller_url(ctl)
+        if not controller_url:
+            raise HTTPException(400, "BioCompute is not reachable from other machines yet: start Tailscale on the controller "
+                                     "(BioCompute then listens for workers on its tailnet address) or enter the controller address.")
     if not URL_RE.match(controller_url):
         raise HTTPException(400, "Controller URL must look like http(s)://host[:port]")
     if site and not re.fullmatch(r"[\w.-]{1,80}", site):
@@ -207,17 +253,21 @@ def start(db, node: Node, *, user: str, host: str, controller_url: str, site: st
             raise HTTPException(409, "An enrollment for this machine is already running")
         job = {"node_id": node.id, "state": "running", "user": user, "host": host, "port": int(port), "controller_url": controller_url,
                "started_at": datetime.now(timezone.utc).isoformat(), "finished_at": None, "error": None, "hint": None,
-               "steps": [{"id": i, "title": t, "state": "skipped" if (i == "service" and not install_service) else "pending",
+               "password_used": bool(password), "enable_participation": enable_participation,
+               "steps": [{"id": i, "title": t,
+                          "state": "skipped" if (i == "service" and not install_service) or (i == "key" and not password) else "pending",
                           "output": ""} for i, t in STEPS]}
         _jobs[node.id] = job
+    if password or not key_path().is_file():
+        create_key()  # BioCompute's own key: installed with the password, used for everything else
     if node.state == "discovered":  # the admin's click is the authorization
         node.state = "candidate"
     token = cluster.issue_token(db, f"ssh enrollment: {node.hostname}", site or node.site, 1, actor,
                                 allow_discovery_reports, for_node=node.id)
     audit(db, actor, "node.ssh_enroll_started", node.hostname, ssh_user=user, host=host, port=int(port), controller=controller_url,
-          install_service=install_service)
+          install_service=install_service, password_used=bool(password), enable_participation=enable_participation)
     db.commit()
-    threading.Thread(target=_run, args=(node.id, token, install_service, allow_discovery_reports, actor),
+    threading.Thread(target=_run, args=(node.id, token, install_service, allow_discovery_reports, actor, password),
                      daemon=True, name=f"ssh-enroll-{node.id}").start()
     return status(node.id)
 
@@ -231,7 +281,7 @@ def _set(job, step_id, state, output=""):
                     st["output"] = output.strip()[-2000:]
 
 
-def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor: str) -> None:
+def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor: str, password: str | None = None) -> None:
     job = _jobs[node_id]
     user, host, url, port = job["user"], job["host"], job["controller_url"], job["port"]
 
@@ -239,11 +289,24 @@ def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor
         return _ssh(user, host, script, port=port, **kw)
 
     def fail(step_id, msg, out=""):
-        _set(job, step_id, "failed", out or msg)
+        _set(job, step_id, "failed", (out or msg).replace("\nBIOCOMPUTE_PASSWORD_REJECTED", ""))
         with _lock:
             job.update(state="failed", error=msg, hint=_hint(out or msg), finished_at=datetime.now(timezone.utc).isoformat())
 
     try:
+        if password:
+            _set(job, "key", "running")
+            pub = key_path().with_suffix(".pub").read_text().strip() + "\n"
+            rc, out = _ssh(user, host, 'IFS= read -r k; umask 077; mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/authorized_keys" && '
+                                       'chmod 700 "$HOME/.ssh" && chmod 600 "$HOME/.ssh/authorized_keys" && '
+                                       '{ grep -qxF "$k" "$HOME/.ssh/authorized_keys" || printf "%s\\n" "$k" >> "$HOME/.ssh/authorized_keys"; } && '
+                                       'echo "BioCompute key authorized in ~/.ssh/authorized_keys"',
+                           stdin=pub.encode(), port=port, password=password)
+            password = None  # never needed again
+            if rc != 0:
+                denied = "Permission denied" in out
+                return fail("key", "Logging in with the password failed", out + ("\nBIOCOMPUTE_PASSWORD_REJECTED" if denied else ""))
+            _set(job, "key", "done", out)
         _set(job, "connect", "running")
         rc, out = ssh('uname -s; command -v python3 >/dev/null 2>&1 || { echo "python3 not found"; exit 3; }; '
                                    'python3 -c "import sys; print(\'python %d.%d\' % sys.version_info[:2]); sys.exit(0 if sys.version_info >= (3, 9) else 4)"')
@@ -309,6 +372,16 @@ def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor
             time.sleep(3)
         _set(job, "verify", "done" if ok else "failed",
              "Agent is reporting." if ok else "Enrolled, but no heartbeat from the background service yet.")
+        if job.get("enable_participation"):
+            with SessionLocal() as db:
+                n = db.get(Node, node_id)
+                if n is not None:
+                    if n.allocation is None:
+                        cluster.apply_preset(n, "balanced")
+                    n.allocation.enabled = True
+                    n.allocation.draining = False
+                    audit(db, actor, "node.enable", n.hostname, via="ssh enrollment")
+                    db.commit()
         with _lock:
             job.update(state="done" if ok else "warning", finished_at=datetime.now(timezone.utc).isoformat())
     except Exception as exc:  # never leave a job stuck in "running"

@@ -44,7 +44,16 @@ def fake_ssh(tmp_path: Path, behaviour: str = "ok") -> Path:
     home.mkdir(exist_ok=True)
     log = tmp_path / "ssh.log"
     script = tmp_path / "ssh"
-    if behaviour == "denied":
+    if behaviour == "password":
+        # behaves like sshd with password auth: key logins are refused until the BioCompute key is authorized
+        body = (f'cmd="${{@: -1}}"\n'
+                f'if printf "%s " "$@" | grep -q "PubkeyAuthentication=no"; then\n'
+                f'  pw="$("$SSH_ASKPASS")"; [ "$pw" = "s3cret pass" ] || {{ echo "hugo@host: Permission denied (publickey,password)." >&2; exit 255; }}\n'
+                f'elif ! grep -qs "biocompute@" "{home}/.ssh/authorized_keys"; then\n'
+                f'  echo "hugo@host: Permission denied (publickey,password)." >&2; exit 255\n'
+                f'fi\n'
+                f'HOME="{home}" BIOCOMPUTE_MACHINE_ID=remote-pw-5678 sh -c "$cmd"')
+    elif behaviour == "denied":
         body = 'echo "hugo@100.110.224.52: Permission denied (publickey,password)." >&2; exit 255'
     else:
         body = (f'cmd="${{@: -1}}"\n'
@@ -88,7 +97,7 @@ def test_ssh_enrollment_end_to_end(client, auth, live_url, tmp_path, monkeypatch
     assert r.status_code == 200, r.text
     st = _wait(client, auth, nid)
     assert st["state"] == "done", json.dumps(st, indent=1)
-    assert [s["state"] for s in st["steps"]] == ["done", "done", "done", "done", "skipped", "done"]
+    assert [s["state"] for s in st["steps"]] == ["skipped", "done", "done", "done", "done", "skipped", "done"]
     node = client.get(f"/api/nodes/{nid}", headers=auth).json()
     assert node["agent_installed"] and node["state"] == "active" and node["site"] == "home"
     assert node["allocation"]["enabled"] is False  # participation stays off
@@ -111,12 +120,12 @@ def test_ssh_enrollment_failures(client, auth, live_url, tmp_path, monkeypatch):
     r = client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={"ssh_user": "hugo", "host": "100.101.0.10", "controller_url": live_url})
     assert r.status_code == 200
     st = _wait(client, auth, nid)
-    assert st["state"] == "failed" and "port is right" in st["hint"] and st["steps"][0]["state"] == "failed"
+    assert st["state"] == "failed" and "port is right" in st["hint"] and st["steps"][1]["state"] == "failed"
     # unreachable controller URL is caught before the token is used
     monkeypatch.setattr(get_settings(), "ssh_bin", str(fake_ssh(tmp_path)))
     r = client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={"ssh_user": "hugo", "host": "100.101.0.10", "controller_url": "http://127.0.0.1:9"})
     st = _wait(client, auth, nid)
-    assert st["state"] == "failed" and st["steps"][1]["id"] == "reach" and st["steps"][1]["state"] == "failed"
+    assert st["state"] == "failed" and st["steps"][2]["id"] == "reach" and st["steps"][2]["state"] == "failed"
     # machines outside the tailnet are refused
     with SessionLocal() as db:
         lan = cluster.upsert_node(db, {"hostname": "lan-only", "addresses": ["192.168.5.5"], "fingerprint": "host:lan-only"}, "neighbors")
@@ -168,4 +177,31 @@ def test_controller_ssh_key(client, auth, live_url, tmp_path, monkeypatch):
     client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={"ssh_user": "hugo", "host": "100.101.0.11", "controller_url": live_url})
     st = _wait(client, auth, nid)
     assert f"-i {k['path']}" in (tmp_path / "ssh.log").read_text()
-    assert "Controller SSH key" in st["hint"]
+    assert "password" in st["hint"]
+
+
+def test_password_installs_key_then_enrolls(client, auth, live_url, tmp_path, monkeypatch):
+    import shutil as _sh
+
+    if not _sh.which("ssh-keygen"):
+        pytest.skip("ssh-keygen not installed")
+    monkeypatch.setattr(get_settings(), "ssh_bin", str(fake_ssh(tmp_path, "password")))
+    nid = _tailnet_node("pw-box", "100.101.0.12")
+    body = {"ssh_user": "hugo", "host": "100.101.0.12", "controller_url": live_url, "install_service": False}
+    # wrong password
+    client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={**body, "password": "wrong"})
+    st = _wait(client, auth, nid)
+    assert st["state"] == "failed" and st["steps"][0]["id"] == "key" and "not accepted" in st["hint"]
+    assert "BIOCOMPUTE_PASSWORD_REJECTED" not in st["steps"][0]["output"]
+    # right password -> key installed, everything else key-based, participation switched on
+    r = client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={**body, "password": "s3cret pass", "enable_participation": True})
+    assert r.status_code == 200
+    st = _wait(client, auth, nid)
+    assert st["state"] == "done", json.dumps(st, indent=1)
+    assert [s["state"] for s in st["steps"]][:5] == ["done", "done", "done", "done", "done"]
+    assert "s3cret" not in json.dumps(st) and "s3cret" not in (tmp_path / "ssh.log").read_text()
+    node = client.get(f"/api/nodes/{nid}", headers=auth).json()
+    assert node["agent_installed"] and node["allocation"]["enabled"] is True
+    assert "biocompute@" in (tmp_path / "remote-home/.ssh/authorized_keys").read_text()
+    audit = json.dumps(client.get("/api/auth/audit", headers=auth).json())
+    assert "s3cret" not in audit and '"password_used": true' in audit
