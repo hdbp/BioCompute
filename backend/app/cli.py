@@ -11,14 +11,43 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
 import re
 import sys
+from pathlib import Path
 
 from .config import get_settings
 
 
 def _mask(url: str) -> str:
     return re.sub(r"://([^:/@]+):[^@]*@", r"://\1:****@", url)
+
+
+def _sqlite_file() -> Path | None:
+    url = get_settings().database_url
+    if url.startswith("sqlite:///"):
+        return Path(url.removeprefix("sqlite:///")).resolve()
+    return None
+
+
+def _check_config() -> bool:
+    """Warn when this command is probably not looking at the server's configuration."""
+    ok = True
+    s = get_settings()
+    explicit = os.environ.get("BIOCOMPUTE_DATABASE_URL") or Path(".env").is_file()
+    if not explicit:
+        print("warning: no backend/.env and no BIOCOMPUTE_DATABASE_URL - using built-in defaults, which is\n"
+              "         probably not the configuration your server uses. For the demo run this from the\n"
+              "         repository folder instead:  scripts/dev.sh admin info", file=sys.stderr)
+        ok = False
+    f = _sqlite_file()
+    if f is not None and not f.exists():
+        print(f"database {f} does not exist yet (no server has used this configuration); nothing to do.",
+              file=sys.stderr)
+        return False
+    if not s.data_roots:
+        print("note: no data roots configured in this configuration", file=sys.stderr)
+    return ok
 
 
 def _db():
@@ -33,12 +62,21 @@ def cmd_info(_a) -> int:
     s = get_settings()
     from .models import User
 
+    f = _sqlite_file()
+    if f is not None and not f.exists():
+        print(f"database       {_mask(s.database_url)}  (does not exist yet)")
+        print(f"state dir      {s.state_dir.resolve()}")
+        _check_config()
+        return 1
+
     print(f"database       {_mask(s.database_url)}")
     print(f"state dir      {s.state_dir.resolve()}")
     print(f"data roots     {', '.join(r['name'] + '=' + str(r['path']) for r in s.data_roots) or '(none)'}")
     print(f"admin password from env: {'yes' if s.admin_password else 'no (generated on first start)'}")
     with _db() as db:
         users = db.query(User).order_by(User.username).all()
+        if not users:
+            _check_config()
         print(f"users          {', '.join(f'{u.username} ({u.role}{'' if u.is_active else ', inactive'})' for u in users) or '(none yet - start the API once)'}")
     return 0
 
@@ -46,6 +84,11 @@ def cmd_info(_a) -> int:
 def cmd_reset(a) -> int:
     from .models import User
     from .security import hash_secret
+
+    f = _sqlite_file()
+    if f is not None and not f.exists() and not a.create:
+        _check_config()
+        return 1
 
     pw = a.password
     if not pw:
