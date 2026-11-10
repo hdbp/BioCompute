@@ -1,0 +1,32 @@
+{
+  "engine": "bcflow",
+  "name": "biocompute/fastq-qc",
+  "version": "1.0.0",
+  "description": "Same processes as main.nf, executable by the BioCompute native engine when Nextflow is not installed.",
+  "requires": ["bash", "awk", "gzip", "python3"],
+  "steps": [
+    {
+      "id": "FASTQ_STATS",
+      "scope": "per_sample",
+      "cpus": 1,
+      "command": ["bash", "{bin}/fastq_stats.sh", "{sample.id}", "{params.min_read_length}", "{params.min_mean_quality}",
+                  "{params.max_reads}", "{sample.reads}"],
+      "outputs": {"stats": "{sample.id}.stats.tsv", "reads": "{sample.id}.reads.tsv"},
+      "publish": "fastq_stats"
+    },
+    {
+      "id": "QC_REPORT",
+      "scope": "aggregate",
+      "after": ["FASTQ_STATS"],
+      "cpus": 1,
+      "command": ["python3", "{bin}/qc_report.py", "--title", "{params.report_title}", "--samplesheet", "{params.input}",
+                  "--stats", "{each:FASTQ_STATS.stats}", "--reads", "{each:FASTQ_STATS.reads}"],
+      "outputs": {"html": "qc_report.html", "summary": "qc_summary.tsv"},
+      "publish": "report"
+    }
+  ],
+  "outputs": [
+    {"name": "Per-sample statistics", "path": "fastq_stats", "description": "<sample>.stats.tsv per read file; <sample>.reads.tsv read-level sample"},
+    {"name": "QC report", "path": "report", "description": "qc_report.html and qc_summary.tsv"}
+  ]
+}

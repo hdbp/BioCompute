@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "biocompute/fastq-qc samplesheet",
+  "description": "Schema for the file provided with params.input",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "sample": {
+        "type": "string",
+        "pattern": "^\\S+$",
+        "errorMessage": "Sample name must be provided and cannot contain spaces",
+        "meta": ["id"]
+      },
+      "fastq_1": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "pattern": "^\\S+\\.f(ast)?q(\\.gz)?$",
+        "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must end in .fastq(.gz) or .fq(.gz)"
+      },
+      "fastq_2": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "pattern": "^(\\S+\\.f(ast)?q(\\.gz)?)?$",
+        "errorMessage": "FastQ file for reads 2 cannot contain spaces and must end in .fastq(.gz) or .fq(.gz)"
+      },
+      "condition": {
+        "type": "string",
+        "errorMessage": "Condition label (optional)",
+        "meta": ["condition"]
+      },
+      "replicate": {
+        "type": "integer",
+        "minimum": 1,
+        "errorMessage": "Replicate must be a positive integer",
+        "meta": ["replicate"]
+      }
+    },
+    "required": ["sample", "fastq_1"]
+  }
+}

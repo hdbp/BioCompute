@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/biocompute/fastq-qc/nextflow_schema.json",
+  "title": "BioCompute FASTQ QC pipeline parameters",
+  "description": "Portable FASTQ quality control: per-sample read statistics and an HTML QC report",
+  "type": "object",
+  "$defs": {
+    "input_output_options": {
+      "title": "Input/output options",
+      "type": "object",
+      "fa_icon": "fas fa-terminal",
+      "description": "Define where the pipeline should find input data and save output data.",
+      "required": ["input", "outdir"],
+      "properties": {
+        "input": {
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "schema": "assets/schema_input.json",
+          "mimetype": "text/csv",
+          "pattern": "^\\S+\\.csv$",
+          "description": "Path to comma-separated file containing information about the samples in the experiment.",
+          "help_text": "Generated automatically by BioCompute from the selected experiment. Columns: sample, fastq_1, fastq_2, condition, replicate.",
+          "fa_icon": "fas fa-file-csv"
+        },
+        "outdir": {
+          "type": "string",
+          "format": "directory-path",
+          "description": "The output directory where the results will be saved.",
+          "fa_icon": "fas fa-folder-open"
+        }
+      }
+    },
+    "qc_options": {
+      "title": "QC thresholds",
+      "type": "object",
+      "fa_icon": "fas fa-filter",
+      "description": "Thresholds used to classify reads as passing.",
+      "properties": {
+        "min_read_length": {
+          "type": "integer",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Minimum read length for a read to pass.",
+          "fa_icon": "fas fa-ruler-horizontal"
+        },
+        "min_mean_quality": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 0,
+          "maximum": 41,
+          "description": "Minimum mean Phred quality for a read to pass.",
+          "help_text": "Phred+33 encoding is assumed (Illumina 1.8+).",
+          "fa_icon": "fas fa-star-half-alt"
+        }
+      }
+    },
+    "reporting_options": {
+      "title": "Reporting",
+      "type": "object",
+      "fa_icon": "fas fa-chart-bar",
+      "properties": {
+        "report_title": {
+          "type": "string",
+          "default": "FASTQ QC report",
+          "pattern": "^[^'\"`$\\\\]*$",
+          "description": "Title shown at the top of the HTML report (no quotes or backslashes)."
+        }
+      }
+    },
+    "advanced_options": {
+      "title": "Advanced options",
+      "type": "object",
+      "fa_icon": "fas fa-cogs",
+      "description": "Less common options.",
+      "properties": {
+        "max_reads": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "Only analyse the first N reads of each file (0 = all reads).",
+          "help_text": "Useful for quick checks of very large runs.",
+          "hidden": true
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "$ref": "#/$defs/input_output_options" },
+    { "$ref": "#/$defs/qc_options" },
+    { "$ref": "#/$defs/reporting_options" },
+    { "$ref": "#/$defs/advanced_options" }
+  ]
+}
