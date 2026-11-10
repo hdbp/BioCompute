@@ -212,9 +212,10 @@ def status(node_id: str) -> dict[str, Any] | None:
 
 def default_user() -> str:
     try:
-        return getpass.getuser()
+        u = getpass.getuser()
     except Exception:
         return ""
+    return "" if u == "root" else u  # never suggest logging in to another machine as root
 
 
 def start(db, node: Node, *, user: str, host: str, controller_url: str | None, site: str | None, port: int = 22,

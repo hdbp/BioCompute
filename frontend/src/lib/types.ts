@@ -83,6 +83,12 @@ export interface ClusterNode {
   last_seen: string | null; notes: string; allocation: Allocation | null; eligibility: { eligible: boolean; reasons: string[] }; created_at: string;
   network: { tailscale?: { online?: boolean; dns_name?: string | null; ips?: string[]; os?: string; seen_at?: string } };
   tailnet: { member: boolean; via: string | null; online: boolean | null; dns_name: string | null; ips: string[] };
+  capacity: NodeCapacity;
+}
+export interface NodeCapacity {
+  cpus_allocated: number; cpus_free: number; cpus_total: number; mem_allocated_gb: number; mem_free_gb: number;
+  disk_free_gb: number | null; scratch_path: string | null; gpus_allocated: number; gpus_total: number; gpu_names: string[];
+  link: { down_mbps: number | null; up_mbps: number | null; rtt_ms: number | null; measured_at: string | null; basis: string };
 }
 export type NodeState = "discovered" | "candidate" | "enrolled" | "active" | "draining" | "disabled" | "offline";
 

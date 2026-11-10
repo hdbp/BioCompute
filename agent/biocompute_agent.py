@@ -31,7 +31,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hostinfo  # noqa: E402
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
+LINK_INTERVAL = 6 * 3600  # re-measure the connection to the controller every 6 hours
 CONFIG = Path(os.environ.get("BIOCOMPUTE_AGENT_CONFIG", Path.home() / ".config" / "biocompute" / "agent.json"))
 
 
@@ -58,6 +59,59 @@ def post(cfg: dict, path: str, body: dict, token: str | None = None) -> dict:
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"{e.code} {e.read().decode(errors='replace')[:300]}") from None
+
+
+def _req(cfg: dict, method: str, path: str, data: bytes | None = None, token: str | None = None, timeout: int = 120):
+    url = cfg["controller"].rstrip("/") + path
+    ctx = ssl.create_default_context(cafile=cfg.get("ca_file")) if url.startswith("https") else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={**({"Authorization": f"Bearer {token}"} if token else {}),
+                                          **({"Content-Type": "application/octet-stream"} if data is not None else {})})
+    return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+
+
+def measure_link(cfg: dict) -> dict | None:
+    """Round-trip time and throughput between this machine and the controller.
+
+    Starts with 4 MB and repeats with 32 MB if that was quick, so slow links are not flooded.
+    The controller uses this to estimate how long moving input data here would take.
+    """
+    tok = cfg["agent_token"]
+    try:
+        rtts = []
+        for _ in range(3):
+            t = time.perf_counter()
+            _req(cfg, "GET", "/api/health", timeout=10).read()
+            rtts.append((time.perf_counter() - t) * 1000)
+
+        def down(size):
+            t = time.perf_counter()
+            with _req(cfg, "GET", f"/api/agent/speedtest?size={size}", token=tok) as r:
+                n = 0
+                while True:
+                    b = r.read(1 << 16)
+                    if not b:
+                        break
+                    n += len(b)
+            return n, time.perf_counter() - t
+
+        def up(size):
+            payload = os.urandom(size)
+            t = time.perf_counter()
+            _req(cfg, "POST", "/api/agent/speedtest", data=payload, token=tok).read()
+            return size, time.perf_counter() - t
+
+        result = {"rtt_ms": round(min(rtts), 1), "measured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        for name, fn in (("down_mbps", down), ("up_mbps", up)):
+            n, sec = fn(4 << 20)
+            if sec < 1.0:
+                n, sec = fn(32 << 20)
+            result[name] = round(n * 8 / max(sec, 1e-6) / 1e6, 1)
+            result[name.replace("mbps", "bytes")] = n
+        return result
+    except (OSError, urllib.error.URLError) as exc:
+        print(f"link measurement failed: {exc}", file=sys.stderr)
+        return None
 
 
 def inventory(full: bool) -> dict:
@@ -111,18 +165,34 @@ def cmd_enroll(a) -> None:
                 "heartbeat_seconds": r.get("heartbeat_seconds", 30)})
     save(cfg)
     print(f"Enrolled as node {r['node_id']}. {r.get('message', '')}\nConfiguration saved to {CONFIG}")
+    # first report straight away, including the connection speed, so scheduling has real numbers immediately
+    inv = inventory(True)
+    link = measure_link(cfg)
+    if link:
+        inv["link"] = link
+        print(f"Link to controller: {link['down_mbps']} Mbit/s down, {link['up_mbps']} Mbit/s up, {link['rtt_ms']} ms")
+    try:
+        post(cfg, "/api/agent/heartbeat", {"inventory": inv}, cfg["agent_token"])
+    except RuntimeError as exc:
+        print(f"first heartbeat failed: {exc}", file=sys.stderr)
 
 
 def cmd_run(a) -> None:
     cfg = load()
     zc = advertise(int(os.environ.get("BIOCOMPUTE_AGENT_PORT", "8765"))) if not a.no_mdns else None
-    last_full, last_disc = 0.0, 0.0
+    last_full, last_disc, last_link = 0.0, 0.0, 0.0
     try:
         while True:
             now = time.time()
             try:
                 full = now - last_full > 3600
-                r = post(cfg, "/api/agent/heartbeat", {"inventory": inventory(full)}, cfg["agent_token"])
+                inv = inventory(full)
+                if now - last_link > LINK_INTERVAL:
+                    link = measure_link(cfg)
+                    if link:
+                        inv["link"] = link
+                    last_link = now  # also after a failure: retry at the next interval, not every heartbeat
+                r = post(cfg, "/api/agent/heartbeat", {"inventory": inv}, cfg["agent_token"])
                 if full:
                     last_full = now
                 el = r.get("eligibility", {})

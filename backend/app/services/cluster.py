@@ -237,8 +237,9 @@ def upsert_node(db: Session, inv: dict[str, Any], source: str, *, site: str | No
     for attr in ("gpus", "disks", "software", "htcondor"):
         if inv.get(attr):
             setattr(node, attr, inv[attr])
-    if isinstance(inv.get("tailscale"), dict):
-        node.network = {**(node.network or {}), "tailscale": inv["tailscale"]}
+    for key in ("tailscale", "link", "scratch"):  # network facts, measured link speed, scratch space
+        if isinstance(inv.get(key), dict):
+            node.network = {**(node.network or {}), key: inv[key]}
     if inv.get("utilization"):
         node.utilization = inv["utilization"]
     return node
@@ -337,6 +338,8 @@ def enroll(db: Session, token: str, inv: dict[str, Any]) -> tuple[Node, str]:
         node.allocation = alloc
         apply_preset(node, "balanced")
         node.allocation.enabled = False
+        # workers may receive inputs for their jobs; restricted data is still never placed outside the site
+        node.allocation.data_policy = "approved-staging"
     return node, agent_token
 
 
@@ -604,21 +607,80 @@ def condor_config(node: Node) -> str:
 
 
 # --------------------------------------------------------------------------- placement
+GB = 2**30
+
+
+def capacity(node: Node) -> dict[str, Any]:
+    """What this node can offer a job right now, from its allocation and its latest report."""
+    s = get_settings()
+    a = node.allocation
+    u = node.utilization or {}
+    logical = node.cpu_logical or 0
+    alloc_cpus = (a.max_cpus if a else 0) or 0
+    busy = (u.get("cpu_percent") or 0) / 100 * logical  # cores used by anything right now
+    free_cpus = max(0.0, min(alloc_cpus, logical - busy)) if logical else float(alloc_cpus)
+    mem_alloc = a.max_memory_gb if a else 0.0
+    mem_avail = (node.mem_available or 0) / GB if node.mem_available else None
+    mem_free = min(mem_alloc, mem_avail) if mem_avail is not None else mem_alloc
+    net = node.network or {}
+    scratch = net.get("scratch")
+    if node.is_controller:
+        try:
+            du = shutil.disk_usage(s.runs_path)
+            scratch = {"path": str(s.runs_path), "total": du.total, "free": du.free}
+        except OSError:
+            scratch = None
+    disk_free = scratch["free"] / GB if scratch else None
+    if disk_free is not None and a and a.scratch_limit_gb:
+        disk_free = min(disk_free, a.scratch_limit_gb)
+    link = net.get("link") or {}
+    if node.is_controller:
+        link_info = {"down_mbps": None, "up_mbps": None, "rtt_ms": 0, "measured_at": None, "basis": "local (data lives here)"}
+    elif link.get("down_mbps"):
+        link_info = {**link, "basis": "measured"}
+    else:
+        same_site = node.site == s.site_name
+        link_info = {"down_mbps": s.sched_default_lan_mbps if same_site else s.sched_default_wan_mbps, "up_mbps": None,
+                     "rtt_ms": None, "measured_at": None,
+                     "basis": "assumed (same site)" if same_site else "assumed (no measurement yet)"}
+    return {"cpus_allocated": alloc_cpus, "cpus_free": round(free_cpus, 1), "cpus_total": logical,
+            "mem_allocated_gb": round(mem_alloc, 1), "mem_free_gb": round(mem_free, 1),
+            "disk_free_gb": round(disk_free, 1) if disk_free is not None else None,
+            "scratch_path": scratch["path"] if scratch else None,
+            "gpus_allocated": (a.gpus_allowed if a else 0) or 0, "gpus_total": len(node.gpus or []),
+            "gpu_names": [g.get("name") for g in node.gpus or [] if g.get("name")],
+            "link": link_info}
+
+
+def _fmt_s(sec: float) -> str:
+    if sec < 90:
+        return f"{sec:.0f} s"
+    if sec < 5400:
+        return f"{sec / 60:.0f} min"
+    return f"{sec / 3600:.1f} h"
+
+
 def placement(db: Session, *, input_bytes: int, restricted: bool, requested_cpus: int, requested_mem_gb: float,
               requested_nodes: list[str] | None, requires_arch: str | None = None,
-              requires_gpu: bool = False) -> dict[str, Any]:
-    """Score candidate nodes for a run; data-local execution on the controller is preferred.
+              requires_gpu: bool = False, requested_disk_gb: float | None = None) -> dict[str, Any]:
+    """Rank nodes for a run by estimated time to finish, given what each can offer right now.
 
-    Returns the recommendation, per-node rationale and a speed-up estimate for
-    recruiting additional nodes (Amdahl-style with a transfer penalty).
+    Hard constraints (reasons shown): eligibility (policy, hours, power, heartbeat), restricted
+    data, data policy, architecture, GPU, free RAM, free scratch disk. Among the rest:
+    time = transfer (input size / measured or assumed link speed; zero on the controller,
+    where the data lives) + compute (input size / (per-core rate x usable cores)).
     """
     s = get_settings()
+    disk_explicit = requested_disk_gb is not None
+    need_disk = requested_disk_gb if disk_explicit else round(input_bytes / GB * s.sched_scratch_factor + 5, 1)
     nodes = db.query(Node).filter(Node.state.notin_(("discovered", "candidate", "disabled"))).all()
     scored = []
     for n in nodes:
         el = eligibility(n)
         a = n.allocation
+        cap = capacity(n)
         reasons = list(el["reasons"])
+        warnings: list[str] = []
         if requested_nodes and n.id not in requested_nodes and n.hostname not in requested_nodes:
             reasons.append("not selected for this run")
         if restricted and (n.site != s.site_name) and not n.is_controller:
@@ -627,32 +689,57 @@ def placement(db: Session, *, input_bytes: int, restricted: bool, requested_cpus
             reasons.append("node policy forbids receiving staged data")
         if requires_arch and n.arch and n.arch != requires_arch:
             reasons.append(f"architecture {n.arch} != {requires_arch}")
-        if requires_gpu and not (n.gpus and a and a.gpus_allowed):
-            reasons.append("no GPU allocated")
-        cpus = a.max_cpus if a else 0
-        transfer_s = 0 if n.is_controller or n.site == s.site_name else input_bytes / (12.5e6)  # ~100 Mbit/s WAN
-        score = (a.priority if a else 0) + min(cpus, 64) + (40 if n.is_controller else 0) - min(transfer_s / 60, 50)
+        if requires_gpu and not cap["gpus_allocated"]:
+            reasons.append("no GPU allocated" if cap["gpus_total"] else "no GPU")
+        if requested_mem_gb and cap["mem_free_gb"] < requested_mem_gb:
+            reasons.append(f"only {cap['mem_free_gb']:g} GB RAM free (needs {requested_mem_gb:g})")
+        if cap["disk_free_gb"] is not None and cap["disk_free_gb"] < need_disk:
+            msg = f"only {cap['disk_free_gb']:g} GB scratch free ({'needs' if disk_explicit else 'estimated need'} {need_disk:g} GB)"
+            (reasons if disk_explicit else warnings).append(msg)  # an estimate warns, a stated requirement excludes
+        usable = max(0.5, min(cap["cpus_free"], requested_cpus or cap["cpus_free"]) or 0.5)
+        mbps = cap["link"]["down_mbps"]
+        transfer_s = 0.0 if n.is_controller or not input_bytes or not mbps else input_bytes * 8 / (mbps * 1e6)
+        compute_s = input_bytes / (s.sched_mb_per_core_second * 1e6 * usable) if input_bytes else None
+        total_s = (transfer_s + compute_s) if compute_s is not None else None
+        facts = [f"{cap['cpus_free']:g} of {cap['cpus_allocated']} allocated cores free",
+                 f"{cap['mem_free_gb']:g} GB RAM free"]
+        if cap["disk_free_gb"] is not None:
+            facts.append(f"{cap['disk_free_gb']:g} GB scratch free")
+        if cap["gpus_allocated"]:
+            facts.append(f"{cap['gpus_allocated']} GPU" + (f" ({', '.join(cap['gpu_names'][:2])})" if cap["gpu_names"] else ""))
+        if not n.is_controller and mbps:
+            facts.append(f"{mbps:.0f} Mbit/s link ({cap['link']['basis']})")
+        if total_s is not None:
+            facts.append(f"est. {_fmt_s(transfer_s)} transfer + {_fmt_s(compute_s)} compute" if transfer_s else f"est. {_fmt_s(compute_s)} compute, data local")
         scored.append({"node_id": n.id, "hostname": n.hostname, "eligible": not reasons, "reasons": reasons,
-                       "cpus": cpus, "memory_gb": a.max_memory_gb if a else 0, "transfer_seconds": round(transfer_s),
-                       "score": round(score, 1), "is_controller": n.is_controller, "site": n.site})
-    scored.sort(key=lambda x: (-x["eligible"], -x["score"]))
+                       "cpus": cap["cpus_allocated"], "cpus_free": cap["cpus_free"], "memory_gb": cap["mem_free_gb"],
+                       "disk_free_gb": cap["disk_free_gb"], "gpus": cap["gpus_allocated"], "link": cap["link"],
+                       "transfer_seconds": round(transfer_s), "compute_seconds": round(compute_s) if compute_s is not None else None,
+                       "estimated_seconds": round(total_s) if total_s is not None else None, "facts": facts,
+                       "warnings": warnings,
+                       "priority": a.priority if a else 0, "is_controller": n.is_controller, "site": n.site})
+    # rank: eligible first, then estimated finish time (or free cores when the input size is unknown), then priority
+    def key(x):
+        t = x["estimated_seconds"] if x["estimated_seconds"] is not None else -x["cpus_free"] * 1e6
+        return (not x["eligible"], t, -x["priority"], not x["is_controller"])
+    scored.sort(key=key)
     eligible = [x for x in scored if x["eligible"]]
-    primary = next((x for x in eligible if x["is_controller"]), eligible[0] if eligible else None)
-    # speed-up estimate: parallel fraction p scales with added cores, transfer adds serial time
+    fastest = eligible[0] if eligible else None
+    controller = next((x for x in eligible if x["is_controller"]), None)
     est = None
-    if primary:
+    if fastest:
+        # recruiting all eligible nodes (HTCondor): compute split across all usable cores, transfer bounded by slowest link
         p = 0.85
-        base_cores = max(1, min(primary["cpus"], requested_cpus or primary["cpus"]))
-        extra = [x for x in eligible if x is not primary]
-        add_cores = sum(x["cpus"] for x in extra)
+        base = max(0.5, (controller or fastest)["cpus_free"])
+        extra = [x for x in eligible if x is not (controller or fastest)]
+        add = sum(x["cpus_free"] for x in extra)
+        t_local = (1 - p) + p / base
+        t_dist = (1 - p) + p / (base + add) if add else t_local
         transfer = max((x["transfer_seconds"] for x in extra), default=0)
-        t1 = 1.0
-        t_local = (1 - p) + p / base_cores
-        t_dist = (1 - p) + p / (base_cores + add_cores) if add_cores else t_local
-        est = {"local_relative_time": round(t_local / t1, 4), "distributed_relative_time": round(t_dist / t1, 4),
-               "speedup_if_recruited": round(t_local / t_dist, 2) if add_cores else 1.0,
-               "additional_cores": add_cores, "max_transfer_seconds": transfer,
-               "worthwhile": bool(add_cores) and t_local / t_dist > 1.3 and transfer < 1800,
-               "assumptions": "85% parallelizable workload; ~100 Mbit/s between sites; shared filesystem required for Nextflow condor executor"}
-    return {"recommended": primary, "candidates": scored, "estimate": est,
-            "executor": "local" if not requested_nodes or (primary and requested_nodes == [primary["node_id"]]) else "condor"}
+        est = {"speedup_if_recruited": round(t_local / t_dist, 2) if add else 1.0, "additional_cores": round(add, 1),
+               "max_transfer_seconds": transfer, "worthwhile": bool(add) and t_local / t_dist > 1.3 and transfer < 1800,
+               "assumptions": f"{s.sched_mb_per_core_second:g} MB of input per core per second; 85% parallel; "
+                              "measured link speeds where available; HTCondor needs a shared filesystem"}
+    return {"recommended": controller or fastest, "fastest": fastest, "candidates": scored, "estimate": est,
+            "requested_disk_gb": need_disk, "disk_estimated": not disk_explicit,
+            "executor": "local" if not requested_nodes or (fastest and requested_nodes == [fastest["node_id"]] and fastest["is_controller"]) else "condor"}

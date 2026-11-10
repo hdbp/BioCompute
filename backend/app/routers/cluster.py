@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException
-from fastapi.responses import PlainTextResponse
+import os
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -25,6 +27,7 @@ def node_out(n: Node) -> NodeOut:
     o = NodeOut.model_validate(n)
     o.eligibility = cluster.eligibility(n)
     o.tailnet = cluster.tailnet_info(n)
+    o.capacity = cluster.capacity(n)
     return o
 
 
@@ -243,7 +246,7 @@ def placement(body: PlacementIn, _: User = Depends(require_viewer), db: Session 
             continue
     return cluster.placement(db, input_bytes=size, restricted=restricted, requested_cpus=body.requested_cpus,
                              requested_mem_gb=body.requested_mem_gb, requested_nodes=body.node_ids or None,
-                             requires_gpu=body.requires_gpu) | {"input_bytes": size, "restricted": restricted}
+                             requires_gpu=body.requires_gpu, requested_disk_gb=body.requested_disk_gb) | {"input_bytes": size, "restricted": restricted}
 
 
 # --------------------------------------------------------------------------- discovery
@@ -342,6 +345,38 @@ def agent_heartbeat(body: AgentHeartbeat, authorization: str | None = Header(Non
     return {"ok": True, "state": node.state, "eligibility": cluster.eligibility(node),
             "allocation": {"enabled": a.enabled, "max_cpus": a.max_cpus, "max_memory_gb": a.max_memory_gb,
                            "draining": a.draining} if a else None}
+
+
+SPEEDTEST_MAX = 64 * 2**20
+_SPEED_CHUNK = os.urandom(2**20)  # incompressible
+
+
+@agent_router.get("/speedtest")
+def agent_speedtest_download(size: int = 8 * 2**20, authorization: str | None = Header(None), db: Session = Depends(get_db)):
+    """Agents measure controller -> worker throughput (used to estimate data-transfer time)."""
+    _agent(db, authorization)
+    size = max(2**16, min(size, SPEEDTEST_MAX))
+
+    def gen():
+        sent = 0
+        while sent < size:
+            chunk = _SPEED_CHUNK[: min(len(_SPEED_CHUNK), size - sent)]
+            sent += len(chunk)
+            yield chunk
+
+    return StreamingResponse(gen(), media_type="application/octet-stream", headers={"Content-Length": str(size), "Cache-Control": "no-store"})
+
+
+@agent_router.post("/speedtest")
+async def agent_speedtest_upload(request: Request, authorization: str | None = Header(None), db: Session = Depends(get_db)):
+    """Agents measure worker -> controller throughput."""
+    _agent(db, authorization)
+    n = 0
+    async for chunk in request.stream():
+        n += len(chunk)
+        if n > SPEEDTEST_MAX:
+            raise HTTPException(413, "Too large")
+    return {"bytes": n}
 
 
 @agent_router.post("/discovery-report")

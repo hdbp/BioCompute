@@ -11,13 +11,22 @@ import { Badge, Checkbox, Empty, Panel, Skeleton, Slider } from "@/components/ui
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { PathInput } from "@/components/file-browser";
+import { TailnetTag } from "@/components/source-tag";
 import { formErrors, SchemaForm, type Params } from "@/components/schema-form";
 
+interface Candidate {
+  node_id: string; hostname: string; eligible: boolean; reasons: string[]; warnings: string[]; facts: string[];
+  cpus: number; cpus_free: number; memory_gb: number; disk_free_gb: number | null; gpus: number;
+  link: { down_mbps: number | null; basis: string }; transfer_seconds: number; compute_seconds: number | null;
+  estimated_seconds: number | null; is_controller: boolean; site: string | null;
+}
 interface Placement {
-  recommended: { node_id: string; hostname: string } | null; input_bytes: number; restricted: boolean; executor: string;
-  candidates: { node_id: string; hostname: string; eligible: boolean; reasons: string[]; cpus: number; memory_gb: number; transfer_seconds: number; score: number; is_controller: boolean; site: string | null }[];
+  recommended: Candidate | null; fastest: Candidate | null; input_bytes: number; restricted: boolean; executor: string;
+  requested_disk_gb: number; disk_estimated: boolean; candidates: Candidate[];
   estimate: { speedup_if_recruited: number; additional_cores: number; worthwhile: boolean; assumptions: string; max_transfer_seconds: number } | null;
 }
+
+const fmtTime = (s: number | null) => s == null ? "—" : s < 1 ? "< 1 s" : s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
 
 function Step({ n, title, done, children, description }: { n: number; title: string; done?: boolean; description?: string; children: React.ReactNode }) {
   return (
@@ -45,6 +54,9 @@ export default function LaunchPage() {
   const [cpus, setCpus] = useState(0);
   const [mem, setMem] = useState(0);
   const [nodeIds, setNodeIds] = useState<string[]>([]);
+  const [needMem, setNeedMem] = useState("");     // hard requirements (empty = none / estimated)
+  const [needDisk, setNeedDisk] = useState("");
+  const [needGpu, setNeedGpu] = useState(false);
   const [serverIssues, setServerIssues] = useState<Issue[]>([]);
 
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => api.get<Pipeline[]>("/api/pipelines") });
@@ -60,8 +72,11 @@ export default function LaunchPage() {
     enabled: !!experimentId && !!pipelineId,
   });
   const placement = useQuery({
-    queryKey: ["placement", experimentId, nodeIds],
-    queryFn: () => api.post<Placement>("/api/allocations/placement", { experiment_id: experimentId || null, node_ids: nodeIds }),
+    queryKey: ["placement", experimentId, nodeIds, needMem, needDisk, needGpu],
+    queryFn: () => api.post<Placement>("/api/allocations/placement", {
+      experiment_id: experimentId || null, node_ids: nodeIds, requested_mem_gb: Number(needMem) || 0,
+      requested_disk_gb: needDisk ? Number(needDisk) : null, requires_gpu: needGpu,
+    }),
   });
 
   useEffect(() => {  // accept a slug in ?pipeline=
@@ -96,7 +111,9 @@ export default function LaunchPage() {
   const body = (dry: boolean) => ({
     pipeline_id: pipelineId, version_id: versionId || null, engine, name: name || null, params, output_dir: outdir,
     experiment_id: experimentId || null, node_ids: nodeIds, dry_run: dry,
-    resources: { max_cpus: cpus, max_memory_gb: mem, profile: profile || undefined },
+    resources: { max_cpus: cpus, max_memory_gb: mem, profile: profile || undefined,
+      ...(Number(needMem) ? { min_memory_gb: Number(needMem) } : {}), ...(needDisk ? { min_disk_gb: Number(needDisk) } : {}),
+      ...(needGpu ? { requires_gpu: true } : {}) },
   });
   const launch = useMutation({
     mutationFn: (dry: boolean) => api.post<RunDetail>("/api/runs", body(dry)),
@@ -212,6 +229,15 @@ export default function LaunchPage() {
               </Field>
             </div>
             <p className="mt-2 text-xs text-muted">These are scheduler limits passed to the engine (Nextflow executor.cpus / executor.memory and process resourceLimits). They are not enforced by the operating system.</p>
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <Field label="Needs at least (GB RAM)" hint="Nodes with less free memory are excluded">
+                <Input type="number" min={0} value={needMem} placeholder="no requirement" onChange={(e) => setNeedMem(e.target.value)} />
+              </Field>
+              <Field label="Scratch space needed (GB)" hint={placement.data?.disk_estimated ? `Estimated ${placement.data.requested_disk_gb} GB from the input size (warning only)` : "Nodes with less free scratch are excluded"}>
+                <Input type="number" min={0} value={needDisk} placeholder={placement.data ? `~${placement.data.requested_disk_gb} (estimate)` : "estimate"} onChange={(e) => setNeedDisk(e.target.value)} />
+              </Field>
+              <label className="flex items-center gap-2 self-center text-[13px]"><Checkbox checked={needGpu} onCheckedChange={(v) => setNeedGpu(!!v)} />Needs a GPU</label>
+            </div>
             <NodePicker placement={placement.data} nodes={nodes.data ?? []} selected={nodeIds} onChange={setNodeIds} />
           </Step>
         </div>
@@ -251,35 +277,55 @@ function NodePicker({ placement, nodes, selected, onChange }: { placement?: Plac
   if (!placement) return null;
   const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   const est = placement.estimate;
+  const fastest = placement.fastest;
+  const recommended = placement.recommended;
   return (
     <div className="mt-5">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <p className="text-[13.5px] font-medium">Execution nodes</p>
         {placement.restricted && <Badge tone="wait"><Lock className="size-3" />Restricted inputs stay on the lab site</Badge>}
+        {fastest && recommended && fastest.node_id !== recommended.node_id && !selected.includes(fastest.node_id) && (
+          <Button size="sm" variant="secondary" className="ml-auto" onClick={() => onChange([fastest.node_id])}>
+            Use fastest: {fastest.hostname} ({fmtTime(fastest.estimated_seconds)} vs {fmtTime(recommended.estimated_seconds)})
+          </Button>
+        )}
       </div>
-      <p className="text-xs text-muted mt-0.5 mb-2">Leave all unchecked for data-local execution on the controller (recommended). Selecting other nodes uses Nextflow's HTCondor executor, which needs a filesystem shared by those nodes.</p>
+      <p className="text-xs text-muted mt-0.5 mb-2">
+        Nodes are ranked by estimated time to finish: copying the input over each node's measured link, plus computing on its free cores.
+        With none selected the run stays on the controller, next to the data. Selecting other nodes uses Nextflow's HTCondor executor, which needs a filesystem shared by those nodes.
+      </p>
       <div className="rounded-md border border-line divide-y divide-line/60">
         {placement.candidates.map((c) => {
           const n = nodes.find((x) => x.id === c.node_id);
+          const disabled = !c.eligible && !selected.includes(c.node_id);
           return (
-            <label key={c.node_id} className={cn("flex items-start gap-3 px-3 py-2.5 text-[13px]", !c.eligible && !selected.includes(c.node_id) ? "opacity-60" : "cursor-pointer")}>
-              <Checkbox className="mt-0.5" checked={selected.includes(c.node_id)} onCheckedChange={() => toggle(c.node_id)} disabled={!c.eligible && !selected.includes(c.node_id)} />
+            <label key={c.node_id} className={cn("flex items-start gap-3 px-3 py-2.5 text-[13px]", disabled ? "opacity-60" : "cursor-pointer")}>
+              <Checkbox className="mt-0.5" checked={selected.includes(c.node_id)} onCheckedChange={() => toggle(c.node_id)} disabled={disabled} />
               <Server className={cn("mt-0.5 size-4", c.is_controller ? "text-accent" : "text-muted")} />
               <span className="min-w-0 flex-1">
-                <span className="font-medium">{c.hostname}</span>
-                {placement.recommended?.node_id === c.node_id && <Badge tone="accent" className="ml-2">Recommended</Badge>}
-                <span className="block text-xs text-muted">
-                  {c.eligible ? `${c.cpus} cores, ${c.memory_gb} GB allocated${c.transfer_seconds ? `, about ${Math.round(c.transfer_seconds / 60)} min to stage inputs` : ""}` : c.reasons.join("; ")}
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium">{c.hostname}</span>
+                  {recommended?.node_id === c.node_id && <Badge tone="accent">Default: data-local</Badge>}
+                  {fastest?.node_id === c.node_id && c.estimated_seconds != null && <Badge tone="ok">Fastest</Badge>}
+                  {n?.tailnet.member && <TailnetTag tailnet={n.tailnet} />}
                 </span>
+                {c.eligible
+                  ? <span className="block text-xs text-muted">{c.facts.join(", ")}</span>
+                  : <span className="block text-xs text-wait">{c.reasons.join("; ")}</span>}
+                {c.warnings.length > 0 && <span className="block text-xs text-wait">{c.warnings.join("; ")}</span>}
               </span>
-              <span className="text-xs text-muted tabular-nums inline-flex items-center gap-1"><Cpu className="size-3" />{n?.utilization.cpu_percent?.toFixed(0) ?? "—"}%</span>
+              <span className="w-20 shrink-0 text-right">
+                <span className="block font-medium tabular-nums">{c.eligible ? fmtTime(c.estimated_seconds) : "—"}</span>
+                <span className="block text-[11px] text-muted tabular-nums inline-flex items-center gap-1"><Cpu className="size-3" />{n?.utilization.cpu_percent?.toFixed(0) ?? "—"}% busy</span>
+              </span>
             </label>
           );
         })}
       </div>
+      {placement.input_bytes === 0 && <p className="mt-2 text-xs text-muted">Choose an experiment to get time estimates (they depend on the input size).</p>}
       {est && est.additional_cores > 0 && (
         <p className={cn("mt-2 text-xs", est.worthwhile ? "text-ok" : "text-muted")}>
-          Recruiting the other {est.additional_cores} eligible cores would give an estimated {est.speedup_if_recruited}x speed-up{est.worthwhile ? "." : ", probably not worth the data movement."} <span className="text-muted">({est.assumptions})</span>
+          Recruiting the other {est.additional_cores} free cores would give an estimated {est.speedup_if_recruited}x speed-up{est.worthwhile ? "." : ", probably not worth the data movement."} <span className="text-muted">({est.assumptions})</span>
         </p>
       )}
     </div>

@@ -37,6 +37,7 @@ def test_enrollment_flow_and_allocations(client, auth):
     assert hb["state"] == "active" and hb["allocation"]["enabled"] is False  # opt-in required
     node = next(n for n in client.get("/api/nodes", headers=auth).json() if n["hostname"] == "mbp")
     assert node["allocation"]["require_ac_power"] and node["allocation"]["idle_only"]  # laptop -> opportunistic
+    assert node["allocation"]["data_policy"] == "approved-staging"  # may receive (non-restricted) inputs
     assert not node["eligibility"]["eligible"]
     # allocation validation: cannot exceed hardware, cannot accept unrestricted data off-site
     nid = node["id"]

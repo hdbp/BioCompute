@@ -243,6 +243,16 @@ def os_info() -> dict[str, str]:
     return {"os": name, "os_version": ver, "arch": platform.machine().replace("aarch64", "arm64").replace("AMD64", "x86_64")}
 
 
+def scratch_info(path: str | None = None) -> dict[str, Any] | None:
+    """Free space where work would be written (BIOCOMPUTE_SCRATCH, else the home folder)."""
+    p = path or os.environ.get("BIOCOMPUTE_SCRATCH") or os.path.expanduser("~")
+    try:
+        u = shutil.disk_usage(p)
+    except OSError:
+        return None
+    return {"path": p, "total": u.total, "free": u.free}
+
+
 def collect(full: bool = True, disk_paths: list[str] | None = None) -> dict[str, Any]:
     inv: dict[str, Any] = {
         "fingerprint": machine_id(),
@@ -253,8 +263,9 @@ def collect(full: bool = True, disk_paths: list[str] | None = None) -> dict[str,
         "addresses": addresses(),
         "utilization": utilization(),
     }
+    inv["disks"] = disk_info(disk_paths)  # cheap; free space changes, so report it every time
+    inv["scratch"] = scratch_info()
     if full:
         inv["gpus"] = gpu_info()
-        inv["disks"] = disk_info(disk_paths)
         inv["software"] = software()
     return inv

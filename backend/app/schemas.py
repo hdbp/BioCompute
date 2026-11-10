@@ -321,6 +321,7 @@ class NodeOut(ORM):
     network: dict[str, Any] = {}
     eligibility: dict[str, Any] = {}
     tailnet: dict[str, Any] = {}
+    capacity: dict[str, Any] = {}
     created_at: datetime
 
 
@@ -382,7 +383,8 @@ class PlacementIn(BaseModel):
     experiment_id: str | None = None
     input_paths: list[str] = []
     requested_cpus: int = 0
-    requested_mem_gb: float = 0
+    requested_mem_gb: float = 0          # hard requirement (0 = none)
+    requested_disk_gb: float | None = None  # hard requirement; None = estimate from input size (warning only)
     node_ids: list[str] = []
     requires_gpu: bool = False
 

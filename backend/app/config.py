@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # CIDRs within which active probing (TCP connect to agent/SSH port) is permitted.
     discovery_authorized_cidrs: Annotated[list[str], NoDecode] = []
     agent_port: int = 8765
+    # Scheduling estimates (shown to users with every placement)
+    sched_mb_per_core_second: float = 25.0   # assumed input processed per core per second
+    sched_default_lan_mbps: float = 1000.0   # link speed assumed for unmeasured nodes on the controller's site
+    sched_default_wan_mbps: float = 100.0    # ... and for unmeasured nodes elsewhere
+    sched_scratch_factor: float = 3.0        # scratch space needed ~ input size x factor (+ 5 GB)
     # Serve the worker-agent endpoints (only) on another address, e.g. "tailscale" or "100.64.1.2:8765"
     agent_listen: str | None = None
     # One-click enrollment of tailnet machines over SSH (admin-initiated, tailnet members only)

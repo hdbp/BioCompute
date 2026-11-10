@@ -180,6 +180,7 @@ function NodeCard({ n, onOpen }: { n: ClusterNode; onOpen: () => void }) {
           </div>
         </div>
       ) : <p className="mt-4 text-xs text-muted">Hardware unknown until the BioCompute agent reports.</p>}
+      {participating && n.cpu_logical ? <CapacityLine cap={n.capacity} controller={n.is_controller} /> : null}
       <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
         {participating && (n.eligibility.eligible
           ? <Badge tone="ok">Accepting work</Badge>
@@ -189,6 +190,26 @@ function NodeCard({ n, onOpen }: { n: ClusterNode; onOpen: () => void }) {
         {n.last_seen && !n.is_controller && <span className="text-muted ml-auto">seen {ago(n.last_seen)}</span>}
       </div>
     </button>
+  );
+}
+
+function CapacityLine({ cap, controller }: { cap: ClusterNode["capacity"]; controller: boolean }) {
+  const items: [string, string, string][] = [
+    ["Free cores", `${cap.cpus_free}`, `${cap.cpus_free} of ${cap.cpus_allocated} allocated cores are idle right now`],
+    ["RAM free", `${cap.mem_free_gb} GB`, `${cap.mem_free_gb} GB free within the ${cap.mem_allocated_gb} GB allocation`],
+    ["Scratch", cap.disk_free_gb == null ? "—" : `${Math.round(cap.disk_free_gb)} GB`, cap.scratch_path ? `Free space in ${cap.scratch_path}` : "Not reported yet"],
+    ["Link", controller ? "local" : cap.link.down_mbps ? `${Math.round(cap.link.down_mbps)} Mb/s` : "—", controller ? "Data lives here" : `Controller to node, ${cap.link.basis}`],
+  ];
+  if (cap.gpus_total) items.push(["GPU", `${cap.gpus_allocated}/${cap.gpus_total}`, cap.gpu_names.join(", ") || "GPUs allocated / detected"]);
+  return (
+    <dl className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(52px,1fr))] gap-2 border-t border-line pt-3">
+      {items.map(([k, v, t]) => (
+        <div key={k} title={t} className="min-w-0">
+          <dt className="text-[11px] text-muted">{k}</dt>
+          <dd className="truncate text-[12.5px] font-medium tabular-nums">{v}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -238,6 +259,11 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
             <KV k="Memory" v={n.mem_total ? `${gb(n.mem_total)} total, ${gb(n.mem_available)} available` : null} />
             <KV k="GPUs" v={n.gpus.length ? n.gpus.map((g) => `${g.name ?? g.vendor}${g.memory_mb ? ` (${Math.round(g.memory_mb / 1024)} GB)` : ""}`).join(", ") : "None detected"} />
             <KV k="Disks" v={n.disks.length ? n.disks.map((d) => `${d.path}: ${bytes(d.free)} free of ${bytes(d.total)}`).join("; ") : null} />
+            <KV k="Scratch space" v={n.capacity.disk_free_gb != null ? `${n.capacity.disk_free_gb} GB free in ${n.capacity.scratch_path}` : "not reported"} />
+            <KV k="Link to controller" v={n.is_controller ? "local (data lives here)" : n.capacity.link.down_mbps
+              ? `${n.capacity.link.down_mbps} Mbit/s down${n.capacity.link.up_mbps ? `, ${n.capacity.link.up_mbps} up` : ""}${n.capacity.link.rtt_ms != null ? `, ${n.capacity.link.rtt_ms} ms` : ""} (${n.capacity.link.basis}${n.capacity.link.measured_at ? `, ${ago(n.capacity.link.measured_at)}` : ""})`
+              : "not measured"} />
+            {participating && <KV k="Free right now" v={`${n.capacity.cpus_free} of ${n.capacity.cpus_allocated} allocated cores, ${n.capacity.mem_free_gb} GB RAM`} />}
             <KV k="Addresses" v={n.addresses.join(", ")} mono />
             <KV k="Discovered via" v={<span className="flex flex-wrap gap-1">{n.discovery_sources.map((s) => <SourceTag key={s} source={s} />)}</span>} />
             <KV k="Tailnet" v={n.tailnet.member

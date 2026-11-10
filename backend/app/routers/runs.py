@@ -82,13 +82,24 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
                         input_bytes += path.stat().st_size if path.is_file() else 0
                     except HTTPException:
                         pass
+    # max_cpus / max_memory_gb are ceilings; min_memory_gb / min_disk_gb / requires_gpu are hard requirements
     plan = cluster.placement(db, input_bytes=input_bytes, restricted=restricted,
-                             requested_cpus=int(res.get("max_cpus") or 0), requested_mem_gb=float(res.get("max_memory_gb") or 0),
-                             requested_nodes=body.node_ids or None)
-    selected = [c for c in plan["candidates"] if c["eligible"]]
-    if body.node_ids and not selected:
-        raise HTTPException(400, "None of the selected nodes may run this analysis: " +
-                            "; ".join(f"{c['hostname']}: {', '.join(c['reasons'])}" for c in plan["candidates"] if c["node_id"] in body.node_ids))
+                             requested_cpus=int(res.get("max_cpus") or 0), requested_mem_gb=float(res.get("min_memory_gb") or 0),
+                             requested_nodes=body.node_ids or None, requires_gpu=bool(res.get("requires_gpu")),
+                             requested_disk_gb=float(res["min_disk_gb"]) if res.get("min_disk_gb") else None)
+    eligible = [c for c in plan["candidates"] if c["eligible"]]
+    if body.node_ids:
+        selected = eligible
+        if not selected:
+            raise HTTPException(400, "None of the selected nodes may run this analysis: " +
+                                "; ".join(f"{c['hostname']}: {', '.join(c['reasons'])}" for c in plan["candidates"] if c["node_id"] in body.node_ids))
+    else:
+        # default: data-local execution on the controller; other nodes only when the user selects them
+        ctl = next((c for c in plan["candidates"] if c["is_controller"]), None)
+        if ctl is None or not ctl["eligible"]:
+            raise HTTPException(400, "The controller cannot run this analysis right now" +
+                                (f" ({', '.join(ctl['reasons'])})" if ctl else "") + ". Select execution nodes explicitly.")
+        selected = [ctl]
     controller = next((c for c in selected if c["is_controller"]), None)
     if len(selected) > 1 or (selected and not controller):
         if engine != "nextflow":
@@ -104,7 +115,9 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
             res["max_memory_gb"] = min(float(res.get("max_memory_gb") or cap_m), cap_m)
             res["limits_source"] = "controller allocation (scheduler-enforced by Nextflow executor limits, not OS-enforced)"
     placement = {"selected": [c["hostname"] for c in selected] or ["controller"], "restricted_inputs": restricted,
-                 "input_bytes": input_bytes, "estimate": plan["estimate"], "executor": res.get("executor", "local")}
+                 "input_bytes": input_bytes, "estimate": plan["estimate"], "executor": res.get("executor", "local"),
+                 "nodes": [{k: c[k] for k in ("hostname", "facts", "warnings", "estimated_seconds")} for c in selected],
+                 "fastest": plan["fastest"]["hostname"] if plan["fastest"] else None}
     run, issues = runner.prepare(db, pipeline=p, version=v, engine=engine, params=body.params, output_vpath=body.output_dir,
                                  experiment=exp, resources=res, name=body.name, user=user.username,
                                  column_map=body.column_map, placement=placement)
