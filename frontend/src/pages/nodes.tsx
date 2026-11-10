@@ -312,9 +312,9 @@ function ScanDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
   const qc = useQueryClient();
   const cfg = useQuery({ queryKey: ["discovery-config"], queryFn: () => api.get<{ authorized_cidrs: string[]; mdns: boolean; tailscale: boolean; htcondor: boolean; neighbors: boolean; site: string }>("/api/discovery/config"), enabled: open });
   const [methods, setMethods] = useState(["controller", "tailscale", "htcondor", "mdns", "neighbors"]);
-  const [result, setResult] = useState<Record<string, { available: boolean; detail?: string; found: number }> | null>(null);
+  const [result, setResult] = useState<Record<string, { available: boolean; detail?: string; found: number; errors?: string[] }> | null>(null);
   const scan = useMutation({
-    mutationFn: () => api.post<Record<string, { available: boolean; detail?: string; found: number }>>(`/api/discovery/scan${qs({ methods: methods.join(",") })}`),
+    mutationFn: () => api.post<Record<string, { available: boolean; detail?: string; found: number; errors?: string[] }>>(`/api/discovery/scan${qs({ methods: methods.join(",") })}`),
     onSuccess: (r) => { setResult(r); qc.invalidateQueries({ queryKey: ["nodes"] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); },
     onError: (e) => toast.error(errMsg(e)),
   });
@@ -340,6 +340,7 @@ function ScanDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
                   {!enabled && <Badge className="ml-2">disabled in settings</Badge>}
                   {result?.[id] && <Badge tone={result[id].available ? "ok" : "neutral"} className="ml-2">{result[id].available ? `${result[id].found} found` : result[id].detail ?? "unavailable"}</Badge>}
                   <span className="block text-xs text-muted">{help}</span>
+                  {result?.[id]?.errors?.length ? <span className="block text-xs text-wait">{result[id].detail}: {result[id].errors!.join("; ")}</span> : null}
                 </span>
               </label>
             );

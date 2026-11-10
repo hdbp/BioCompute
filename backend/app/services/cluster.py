@@ -152,11 +152,21 @@ def eligibility(node: Node) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- node upsert
+def short_hostname(name: str | None) -> str:
+    """'lab-ws.example.org' -> 'lab-ws'; IP addresses are kept whole."""
+    name = (name or "").strip().lower()
+    try:
+        ipaddress.ip_address(name)
+        return name
+    except ValueError:
+        return name.split(".")[0]
+
+
 def upsert_node(db: Session, inv: dict[str, Any], source: str, *, site: str | None = None) -> Node:
     """Insert or merge a discovered device. De-duplicates by fingerprint, then hostname/addresses."""
     fp = inv.get("fingerprint") or f"host:{(inv.get('hostname') or '').lower()}"
     node = db.query(Node).filter(Node.fingerprint == fp).one_or_none()
-    hostname = (inv.get("hostname") or "").split(".")[0].lower()
+    hostname = short_hostname(inv.get("hostname"))
     strong = fp.startswith("mid:")
 
     def compatible(cand: Node) -> bool:
@@ -176,6 +186,7 @@ def upsert_node(db: Session, inv: dict[str, Any], source: str, *, site: str | No
         node = Node(fingerprint=fp, hostname=hostname or (sorted(addrs)[0] if addrs else "unknown"), state="discovered",
                     site=site, addresses=[], discovery_sources=[], software={}, htcondor={}, utilization={}, gpus=[], disks=[])
         db.add(node)
+        db.flush()  # make it visible to the next lookup in this scan (sessions don't autoflush)
     elif fp.startswith("mid:") and not node.fingerprint.startswith("mid:"):
         node.fingerprint = fp  # upgrade weak key to machine id
     node.addresses = sorted(set(node.addresses or []) | addrs)
@@ -340,7 +351,7 @@ def discover_htcondor() -> dict[str, Any]:
         return {"available": False, "detail": "could not parse condor_status output", "devices": []}
     machines: dict[str, dict[str, Any]] = {}
     for ad in ads:
-        m = (ad.get("Machine") or "").split(".")[0].lower()
+        m = short_hostname(ad.get("Machine"))
         if not m:
             continue
         d = machines.setdefault(m, {"hostname": m, "fingerprint": f"host:{m}", "slots": 0,
@@ -374,7 +385,8 @@ def discover_neighbors() -> dict[str, Any]:
         for m in re.finditer(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f:]+)", out or ""):
             devs.append({"hostname": _rdns(m.group(1)) or m.group(1), "addresses": [m.group(1)],
                          "fingerprint": f"mac:{m.group(2)}"})
-    return {"available": out is not None, "devices": devs}
+    return {"available": out is not None, "devices": devs,
+            "detail": None if out is not None else "neither `ip neigh` nor `arp` is available on the controller"}
 
 
 def _rdns(ip: str) -> str | None:
@@ -398,7 +410,7 @@ def discover_mdns(timeout: float = 3.0) -> dict[str, Any]:
             info = zc.get_service_info(typ, name, timeout=1500)
             if not info:
                 return
-            host = (info.server or name).split(".")[0].lower()
+            host = short_hostname(info.server or name)
             d = found.setdefault(host, {"hostname": host, "addresses": [], "services": [], "fingerprint": f"host:{host}"})
             d["addresses"] = sorted(set(d["addresses"]) | set(info.parsed_addresses()))
             d["services"].append(typ.split(".")[0])
@@ -452,8 +464,12 @@ def run_discovery(db: Session, methods: list[str] | None = None) -> dict[str, An
         raise HTTPException(409, "A discovery scan is already running")
     try:
         if "controller" in methods:
-            register_controller(db)
-            summary["controller"] = {"available": True, "found": 1}
+            try:
+                with db.begin_nested():
+                    register_controller(db)
+                summary["controller"] = {"available": True, "found": 1}
+            except Exception as exc:
+                summary["controller"] = {"available": False, "found": 0, "detail": f"inventory failed: {type(exc).__name__}: {exc}"}
         providers = {
             "tailscale": (s.discovery_enable_tailscale, discover_tailscale),
             "htcondor": (s.discovery_enable_htcondor, discover_htcondor),
@@ -471,9 +487,17 @@ def run_discovery(db: Session, methods: list[str] | None = None) -> dict[str, An
             except Exception as exc:
                 summary[name] = {"available": False, "detail": str(exc), "found": 0}
                 continue
+            errors: list[str] = []
             for dev in res.get("devices", []):
-                upsert_node(db, dev, name)
+                try:
+                    with db.begin_nested():  # one malformed device must not fail the whole scan
+                        upsert_node(db, dev, name)
+                except Exception as exc:
+                    errors.append(f"{dev.get('hostname') or dev.get('addresses')}: {type(exc).__name__}")
             summary[name] = {"available": res["available"], "detail": res.get("detail"), "found": len(res.get("devices", []))}
+            if errors:
+                summary[name]["errors"] = errors[:20]
+                summary[name]["detail"] = f"{len(errors)} device(s) could not be recorded"
         db.flush()
     finally:
         _scan_lock.release()

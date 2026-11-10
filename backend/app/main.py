@@ -136,6 +136,19 @@ for r in (auth.router, pipelines.router, pipelines.versions_router, pipelines.sc
     app.include_router(r)
 
 
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    """Log the traceback and give the UI a message it can show (instead of a bare 500)."""
+    import logging
+    import traceback
+
+    logging.getLogger("biocompute").error("Unhandled error on %s %s\n%s", request.method, request.url.path,
+                                           "".join(traceback.format_exception(exc)))
+    return JSONResponse(status_code=500, content={
+        "detail": f"Internal error in {request.url.path}: {type(exc).__name__}: {str(exc)[:300]}. "
+                  "The full traceback is in the controller log."})
+
+
 @app.exception_handler(PermissionError)
 async def perm_error(_: Request, exc: PermissionError):
     return JSONResponse(status_code=403, content={"detail": f"Filesystem permission denied: {exc.filename or ''}"})

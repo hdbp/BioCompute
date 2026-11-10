@@ -118,7 +118,7 @@ def add_manual(body: ManualNodeIn, admin: User = Depends(require_admin), db: Ses
     if body.probe and body.ssh_port:
         reachable = cluster.probe_endpoint(body.hostname, body.ssh_port)
     n = cluster.upsert_node(db, {"hostname": body.hostname, "addresses": body.addresses, "os": body.os,
-                                 "fingerprint": f"host:{body.hostname.split('.')[0].lower()}"}, "manual", site=body.site)
+                                 "fingerprint": f"host:{cluster.short_hostname(body.hostname)}"}, "manual", site=body.site)
     if body.ssh_port:
         n.notes = (n.notes + f"\nSSH endpoint port {body.ssh_port}" + (f" (reachable: {reachable})" if reachable is not None else "")).strip()
     audit(db, admin.username, "node.manual_add", body.hostname)

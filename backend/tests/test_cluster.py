@@ -108,3 +108,63 @@ def test_nextflow_adapter_command(tmp_path):
     assert "cpus = 12" in cfg and "memory = '48 GB'" in cfg
     condor = a.config({"executor": "condor", "nodes": ["lab-ws", "homeserver", "bad host\""]}, tmp_path)
     assert "executor = 'condor'" in condor and 'Machine == "homeserver"' in condor and "bad host" not in condor
+
+
+def test_discovery_handles_real_world_provider_output(client, auth, monkeypatch):
+    """Regression: the neighbour table lists one device per address (IPv4 + IPv6, same MAC);
+    tailscale/condor return realistic shapes; a malformed entry must not fail the scan."""
+    from app.services import cluster
+
+    neigh = {"available": True, "devices": [
+        {"hostname": "fritz-box", "addresses": ["192.168.178.1"], "fingerprint": "mac:aa:bb:cc:dd:ee:01"},
+        {"hostname": "fritz-box", "addresses": ["2a02:810d::1"], "fingerprint": "mac:aa:bb:cc:dd:ee:01"},
+        {"hostname": "192.168.178.30", "addresses": ["192.168.178.30"], "fingerprint": "host:192.168.178.30"},
+        {"hostname": "192.168.178.30", "addresses": ["192.168.178.30"], "fingerprint": "host:192.168.178.30"},
+        {"hostname": None, "addresses": None, "fingerprint": None, "cpu": "not-a-dict"},  # malformed
+    ]}
+    ts = {"available": True, "devices": [
+        {"hostname": "imac", "os": "macOS", "addresses": ["100.101.1.2", "fd7a:115c::2"], "online": True, "fingerprint": "host:imac"},
+        {"hostname": "imac", "os": "macOS", "addresses": ["100.101.1.2"], "online": True, "fingerprint": "host:imac"},
+    ]}
+    condor = {"available": True, "devices": [
+        {"hostname": "condorbox", "fingerprint": "host:condorbox", "os": "Linux", "arch": "x86_64", "slots": 2,
+         "cpu": {"logical": 12}, "memory": {"total": 64 * 2**30}, "htcondor": {"installed": True, "slots": 2}},
+    ]}
+    monkeypatch.setattr(cluster, "discover_neighbors", lambda: neigh)
+    monkeypatch.setattr(cluster, "discover_tailscale", lambda: ts)
+    monkeypatch.setattr(cluster, "discover_htcondor", lambda: condor)
+    r = client.post("/api/discovery/scan", headers=auth, params={"methods": "controller,neighbors,tailscale,htcondor"})
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert s["neighbors"]["found"] == 5 and len(s["neighbors"]["errors"]) == 1
+    nodes = client.get("/api/nodes", headers=auth).json()
+    router = [n for n in nodes if "mac:aa:bb:cc:dd:ee:01" in n["id"] or n["hostname"] == "fritz-box"]
+    assert len(router) == 1 and set(router[0]["addresses"]) == {"192.168.178.1", "2a02:810d::1"}
+    assert sum(n["hostname"] == "imac" for n in nodes) == 1
+    assert sum(n["hostname"] == "192.168.178.30" for n in nodes) == 1
+    hs = next(n for n in nodes if n["hostname"] == "condorbox")
+    assert hs["state"] == "discovered" and hs["cpu_logical"] == 12
+    # scanning again is idempotent
+    assert client.post("/api/discovery/scan", headers=auth, params={"methods": "neighbors,tailscale,htcondor"}).status_code == 200
+    assert len(client.get("/api/nodes", headers=auth).json()) == len(nodes)
+
+
+def test_neighbor_table_parsing(monkeypatch):
+    import json as _json
+    from app.services import cluster
+
+    sample = [
+        {"dst": "192.168.178.1", "dev": "enp5s0", "lladdr": "3c:a6:2f:00:00:01", "router": None, "state": ["REACHABLE"]},
+        {"dst": "2a02:810d:1:2::1", "dev": "enp5s0", "lladdr": "3c:a6:2f:00:00:01", "router": None, "state": ["STALE"]},
+        {"dst": "fe80::3ea6:2fff:fe00:1", "dev": "enp5s0", "lladdr": "3c:a6:2f:00:00:01", "state": ["STALE"]},
+        {"dst": "192.168.178.77", "dev": "enp5s0", "state": ["FAILED"]},
+        {"dst": "172.17.0.2", "dev": "docker0", "lladdr": "02:42:ac:11:00:02", "state": ["STALE"]},
+    ]
+    monkeypatch.setattr(cluster.shutil, "which", lambda name: "/usr/sbin/ip" if name == "ip" else None)
+    monkeypatch.setattr(cluster, "_cmd", lambda argv, timeout=15: _json.dumps(sample))
+    monkeypatch.setattr(cluster, "_rdns", lambda ip: "fritz-box" if ip == "192.168.178.1" else None)
+    res = cluster.discover_neighbors()
+    fps = [d["fingerprint"] for d in res["devices"]]
+    assert res["available"] and len(res["devices"]) == 3  # link-local and FAILED skipped
+    assert fps.count("mac:3c:a6:2f:00:00:01") == 2      # same router twice -> merged at upsert
+    assert res["devices"][0]["hostname"] == "fritz-box" and res["devices"][1]["hostname"] == "2a02:810d:1:2::1"
