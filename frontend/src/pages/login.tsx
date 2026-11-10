@@ -38,7 +38,7 @@ export default function LoginPage() {
         <form onSubmit={submit} className="space-y-4">
           <Field label="Username"><Input value={username} onChange={(e) => setU(e.target.value)} autoComplete="username" required /></Field>
           <Field label="Password" error={error}
-            hint="First run: the initial admin password is in the controller's state directory (initial_admin_password.txt).">
+            hint={<>If no password was configured, the first start writes it to <code className="font-mono">initial_admin_password.txt</code> in the controller's state directory. Forgotten it? On the controller run <code className="font-mono">scripts/dev.sh admin reset-password</code> (demo) or <code className="font-mono">python -m app.cli reset-password</code> in <code className="font-mono">backend/</code>.</>}>
             <Input type="password" value={password} onChange={(e) => setP(e.target.value)} autoComplete="current-password" required autoFocus />
           </Field>
           <Button type="submit" variant="primary" size="lg" className="w-full" loading={busy}>Sign in</Button>
