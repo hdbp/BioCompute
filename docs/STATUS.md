@@ -54,6 +54,8 @@ These limits apply to everything below.
 | Agent services (systemd user unit, launchd agent) | Implemented | `install.sh` tested with stubbed systemctl/loginctl; launchd path not run here |
 | One-click enrollment of tailnet machines over SSH | Demonstrated | End-to-end test and browser run with a stand-in `ssh` that executes locally; not yet run against a real Tailscale SSH host |
 | Tailnet membership filter and discovery-source tags | Demonstrated | Tests + browser |
+| Password-assisted enrollment (installs BioCompute's key, then key-only) | Demonstrated | Real OpenSSH 9.6 server with password login in the dev container |
+| Spec-aware placement (free cores, RAM, scratch, GPU, measured link speed) | Demonstrated | Scenario tests; agent speed test against a live controller; browser |
 | Discovery: Tailscale, HTCondor, mDNS, neighbour table, agent reports, manual entry | Implemented | Agent reports and manual entry tested; the others degrade cleanly when absent |
 | De-duplication by machine ID, hostname, and address within a site | Demonstrated | Tests, including the "same private IP on two networks" case |
 | Per-node allocation (cores, RAM, GPUs, scratch, jobs, priority, idle-only, hours, AC power, data policy, drain) | Demonstrated | UI + tests |

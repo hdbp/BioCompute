@@ -737,7 +737,8 @@ def placement(db: Session, *, input_bytes: int, restricted: bool, requested_cpus
         t_dist = (1 - p) + p / (base + add) if add else t_local
         transfer = max((x["transfer_seconds"] for x in extra), default=0)
         est = {"speedup_if_recruited": round(t_local / t_dist, 2) if add else 1.0, "additional_cores": round(add, 1),
-               "max_transfer_seconds": transfer, "worthwhile": bool(add) and t_local / t_dist > 1.3 and transfer < 1800,
+               "max_transfer_seconds": transfer, "worthwhile": bool(add) and t_local / t_dist > 1.3 and transfer < 1800
+               and ((controller or fastest)["estimated_seconds"] or 0) > 600,  # only for jobs long enough to matter
                "assumptions": f"{s.sched_mb_per_core_second:g} MB of input per core per second; 85% parallel; "
                               "measured link speeds where available; HTCondor needs a shared filesystem"}
     return {"recommended": controller or fastest, "fastest": fastest, "candidates": scored, "estimate": est,

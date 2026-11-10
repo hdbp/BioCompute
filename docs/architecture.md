@@ -80,6 +80,39 @@ replacement: it has no containers, no remote executors and no retries.
 
 ## Distributed execution and data locality
 
+### What the scheduler knows about each node
+
+The agent reports its capacity in every heartbeat, and its link speed at enrollment and every 6 hours.
+`GET /api/nodes` returns it as `capacity`:
+
+| Fact | Source |
+|---|---|
+| Free cores | allocation `max_cpus`, reduced by the cores busy right now (`cpu_percent` × logical cores) |
+| Free RAM | `min(allocation, MemAvailable)` |
+| Scratch space | free bytes at `BIOCOMPUTE_SCRATCH`, or the home folder on workers / the run directory on the controller, capped by the allocation's scratch limit |
+| GPUs | allocated / detected (`nvidia-smi`, macOS system profiler) |
+| Link speed | **measured** by the agent: round-trip time to `/api/health`, plus download and upload throughput via the token-protected `/api/agent/speedtest` (4 MB, or 32 MB if that was quick). Unmeasured nodes use an assumed 1 Gbit/s on the controller's site and 100 Mbit/s elsewhere, labelled as such |
+
+### Placement
+
+`cluster.placement()` (and `POST /api/allocations/placement`) first **excludes** a node, with the reason shown,
+when any of these holds:
+* it is not eligible (disabled, draining, outside its hours, on battery, in interactive use, stale heartbeat);
+* the inputs are restricted and the node is outside the site, or its data policy forbids receiving inputs;
+* the architecture doesn't match;
+* the job needs a GPU and none is allocated;
+* the user stated a RAM or scratch requirement the node can't meet.
+
+An *estimated* scratch need (input × 3 + 5 GB) only produces a warning. The remaining nodes are **ranked by
+estimated time to finish**:
+
+    transfer = input bytes / link speed        (0 on the controller, where the data lives)
+    compute  = input bytes / (25 MB/s × usable cores)       (BIOCOMPUTE_SCHED_MB_PER_CORE_SECOND)
+
+Every candidate is listed with these facts, so the estimate can be checked. Runs stay **on the controller by
+default**, next to the data. The fastest node is offered as a one-click alternative. Choosing any other node
+uses Nextflow's HTCondor executor, which needs a shared filesystem.
+
 * `cluster.placement()` scores eligible nodes on several factors:
   * allocation priority and cores;
   * a bonus for the controller;
