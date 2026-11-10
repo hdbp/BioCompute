@@ -79,8 +79,9 @@ def parse_nextflow_config(text: str) -> dict[str, Any]:
     out: dict[str, Any] = {}
     m = re.search(r"manifest\s*\{(.*?)\n\}", text, re.S)
     if m:
-        for km in re.finditer(r"^\s*(\w+)\s*=\s*['\"](.*?)['\"]\s*$", m.group(1), re.M):
-            out[km.group(1)] = km.group(2)
+        # single, double and triple quoted values (nf-core uses """...""" for descriptions)
+        for km in re.finditer(r"^\s*(\w+)\s*=\s*(\"\"\"|'''|\"|')(.*?)\2\s*$", m.group(1), re.M | re.S):
+            out[km.group(1)] = km.group(3).strip()
     profiles = re.findall(r"^\s{4}(\w+)\s*\{", text.split("profiles", 1)[1], re.M) if "profiles" in text else []
     out["profiles"] = sorted(set(profiles))
     return out

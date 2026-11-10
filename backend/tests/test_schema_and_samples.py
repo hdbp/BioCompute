@@ -74,3 +74,23 @@ def test_detect_pairs():
 def test_parse_table_detects_delimiter():
     cols, rows = samplesheet.parse_table("a\tb\n1\t2\n")
     assert cols == ["a", "b"] and rows == [{"a": "1", "b": "2"}]
+
+
+def test_manifest_parsing_handles_nfcore_quotes():
+    from app.services.pipelines import parse_nextflow_config
+
+    cfg = (
+        "manifest {\n"
+        "    name            = 'nf-core/chipseq'\n"
+        '    description     = """ChIP-seq peak-calling and differential analysis pipeline."""\n'
+        "    version         = '2.1.0'\n"
+        "}\n"
+        "profiles {\n"
+        "    docker {\n        docker.enabled = true\n    }\n"
+        "    test { includeConfig 'conf/test.config' }\n"
+        "}\n"
+    )
+    m = parse_nextflow_config(cfg)
+    assert m["name"] == "nf-core/chipseq" and m["version"] == "2.1.0"
+    assert m["description"] == "ChIP-seq peak-calling and differential analysis pipeline."
+    assert {"docker", "test"} <= set(m["profiles"])
