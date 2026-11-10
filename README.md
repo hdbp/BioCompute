@@ -68,6 +68,7 @@ sudo systemctl enable --now biocompute     # API on 127.0.0.1:8000 (migrations r
 sudo cat /var/lib/biocompute/initial_admin_password.txt
 ```
 
+Single-machine install with your own data: [`docs/local-install.md`](docs/local-install.md).
 See [`docs/deployment.md`](docs/deployment.md) for TLS, Nextflow, Apptainer and HTCondor setup,
 backups and upgrades. To add workers, see [`docs/worker-agent.md`](docs/worker-agent.md).
 

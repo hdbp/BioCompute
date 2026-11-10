@@ -11,7 +11,11 @@ mkdir -p "$demo/raw" "$demo/analyses"
 export BIOCOMPUTE_STATE_DIR="${BIOCOMPUTE_STATE_DIR:-$root/var/state}"
 export BIOCOMPUTE_DATABASE_URL="${BIOCOMPUTE_DATABASE_URL:-sqlite:///$root/var/biocompute.db}"
 export BIOCOMPUTE_ADMIN_PASSWORD="${BIOCOMPUTE_ADMIN_PASSWORD:-biocompute-dev}"
-export BIOCOMPUTE_DATA_ROOTS="${BIOCOMPUTE_DATA_ROOTS:-[{\"name\":\"raw\",\"path\":\"$demo/raw\",\"restricted\":true,\"writable\":false,\"description\":\"Demo raw data (synthetic)\"},{\"name\":\"analyses\",\"path\":\"$demo/analyses\",\"restricted\":false,\"writable\":true,\"description\":\"Demo outputs\"},{\"name\":\"pipelines\",\"path\":\"$root/examples/pipelines\",\"restricted\":false,\"writable\":false,\"description\":\"Bundled example pipelines\"}]}"
+if [ -z "${BIOCOMPUTE_DATA_ROOTS:-}" ]; then
+  # (built separately: a "}" inside ${VAR:-default} would end the expansion early)
+  BIOCOMPUTE_DATA_ROOTS=$(printf '[{"name":"raw","path":"%s","restricted":true,"writable":false,"description":"Demo raw data (synthetic)"},{"name":"analyses","path":"%s","restricted":false,"writable":true,"description":"Demo outputs"},{"name":"pipelines","path":"%s","restricted":false,"writable":false,"description":"Bundled example pipelines"}]' "$demo/raw" "$demo/analyses" "$root/examples/pipelines")
+fi
+export BIOCOMPUTE_DATA_ROOTS
 cd "$root/backend"
 [ -d .venv ] || { python3 -m venv .venv && .venv/bin/pip install -q -r requirements-dev.txt; }
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 &
