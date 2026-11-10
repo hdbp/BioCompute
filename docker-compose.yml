@@ -1,0 +1,52 @@
+# BioCompute application services.
+#
+# The execution controller (FastAPI + Nextflow + HTCondor submit tools) runs NATIVELY on the
+# lab workstation as a systemd service (deploy/biocompute.service), because Nextflow needs the
+# host's Java, container runtime, scheduler and data directories. Compose provides:
+#   - db:  PostgreSQL, bound to 127.0.0.1
+#   - web: nginx serving the built UI and proxying /api to the native controller on 127.0.0.1:8000
+# Optional profile "container-backend" runs the API in a container for UI evaluation only
+# (no host Nextflow; only the native engine with read-only example data).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: biocompute
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: biocompute
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biocompute"]
+      interval: 10s
+      retries: 5
+
+  web:
+    build: { context: ., dockerfile: frontend/Dockerfile }
+    restart: unless-stopped
+    network_mode: host          # reach the native controller on 127.0.0.1:8000 without exposing it
+    environment:
+      BIOCOMPUTE_WEB_PORT: ${BIOCOMPUTE_WEB_PORT:-8080}
+    volumes:
+      - ./deploy/certs:/etc/nginx/certs:ro
+
+  backend:
+    profiles: ["container-backend"]
+    build: { context: ., dockerfile: backend/Dockerfile }
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BIOCOMPUTE_DATABASE_URL: postgresql+psycopg://biocompute:${POSTGRES_PASSWORD}@127.0.0.1:5432/biocompute
+      BIOCOMPUTE_STATE_DIR: /var/lib/biocompute
+    network_mode: host
+    volumes:
+      - biocompute-state:/var/lib/biocompute
+    read_only: false
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on: { db: { condition: service_healthy } }
+
+volumes:
+  pgdata:
+  biocompute-state:

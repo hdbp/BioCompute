@@ -1,0 +1,15 @@
+[Unit]
+Description=BioCompute worker agent (inventory and heartbeat only)
+After=network-online.target
+
+[Service]
+ExecStart=@PYTHON@ @DEST@/biocompute_agent.py run
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.config/biocompute
+
+[Install]
+WantedBy=default.target

@@ -131,10 +131,14 @@ def import_git(body: ImportGit, user: User = Depends(require_scientist), db: Ses
     p = svc.import_git(db, body.url, body.ref, body.name, body.category)
     # if this matched a catalog template, mark the template as installed by linking
     tmpl = db.query(Pipeline).filter(Pipeline.kind == "template", Pipeline.source_url == body.url.removesuffix(".git")).first()
-    if tmpl:
+    if tmpl:  # the catalog entry is now genuinely installed: replace the template
         p.category = body.category or tmpl.category
         p.description = p.description or tmpl.description
         p.tags = sorted(set((p.tags or []) + (tmpl.tags or [])))
+        slug = tmpl.slug
+        db.delete(tmpl)
+        db.flush()
+        p.slug = slug
     audit(db, user.username, "pipeline.import_git", p.slug, url=body.url, ref=body.ref)
     db.commit()
     return _summary(db, p)

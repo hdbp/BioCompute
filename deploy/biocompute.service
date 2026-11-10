@@ -1,0 +1,28 @@
+# Native BioCompute controller (API + run supervisor) on the lab workstation.
+# Runs as an unprivileged service account; Nextflow, Java, Apptainer/Docker client and
+# HTCondor submit tools must be installed for this account.
+[Unit]
+Description=BioCompute controller
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=biocompute
+Group=biocompute
+EnvironmentFile=/etc/biocompute/biocompute.env
+WorkingDirectory=/opt/biocompute/backend
+ExecStart=/opt/biocompute/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
+# Runs are detached supervisors; do not kill them when the API restarts.
+KillMode=process
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=no
+ProtectSystem=full
+ProtectHome=read-only
+# Writable state and output roots must be listed explicitly:
+ReadWritePaths=/var/lib/biocompute
+# ReadWritePaths=/path/to/analyses
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+sqlalchemy>=2.0.36
+alembic>=1.14
+psycopg[binary]>=3.2
+pydantic-settings>=2.7
+jsonschema>=4.23
+psutil>=6.1
+pyjwt>=2.10
+zeroconf>=0.136
+python-multipart>=0.0.18

@@ -258,7 +258,8 @@ def agent_enroll(body: AgentEnroll, db: Session = Depends(get_db)):
     db.commit()
     events.publish("nodes", {"kind": "enrolled", "node_id": node.id})
     return {"node_id": node.id, "agent_token": agent_token, "heartbeat_seconds": 30,
-            "message": "Enrolled. Participation is disabled until an administrator enables this node."}
+            "message": "Participation is enabled." if node.allocation and node.allocation.enabled
+            else "Participation is disabled until an administrator enables this node."}
 
 
 @agent_router.post("/heartbeat")
