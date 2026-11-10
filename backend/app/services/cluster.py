@@ -162,6 +162,35 @@ def short_hostname(name: str | None) -> str:
         return name.split(".")[0]
 
 
+TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")        # Tailscale CGNAT range
+TAILNET_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")  # Tailscale ULA range
+
+
+def tailnet_info(node: Node) -> dict[str, Any]:
+    """Is this machine part of the user's tailnet, and how do we know?
+
+    * seen by `tailscale status` on the controller (authoritative, includes online state)
+    * otherwise an address in Tailscale's ranges (e.g. reported by the machine's own agent)
+    """
+    ts = (node.network or {}).get("tailscale")
+    if ts or "tailscale" in (node.discovery_sources or []):
+        ts = ts or {}
+        return {"member": True, "via": "tailscale status", "online": ts.get("online"), "dns_name": ts.get("dns_name"),
+                "ips": ts.get("ips") or [a for a in node.addresses or [] if _in_tailnet_range(a)]}
+    ips = [a for a in node.addresses or [] if _in_tailnet_range(a)]
+    if ips:
+        return {"member": True, "via": "tailnet address", "online": None, "dns_name": None, "ips": ips}
+    return {"member": False, "via": None, "online": None, "dns_name": None, "ips": []}
+
+
+def _in_tailnet_range(addr: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(addr.split("%")[0])
+    except ValueError:
+        return False
+    return ip in (TAILNET_V4 if ip.version == 4 else TAILNET_V6)
+
+
 def upsert_node(db: Session, inv: dict[str, Any], source: str, *, site: str | None = None) -> Node:
     """Insert or merge a discovered device. De-duplicates by fingerprint, then hostname/addresses."""
     fp = inv.get("fingerprint") or f"host:{(inv.get('hostname') or '').lower()}"
@@ -208,6 +237,8 @@ def upsert_node(db: Session, inv: dict[str, Any], source: str, *, site: str | No
     for attr in ("gpus", "disks", "software", "htcondor"):
         if inv.get(attr):
             setattr(node, attr, inv[attr])
+    if isinstance(inv.get("tailscale"), dict):
+        node.network = {**(node.network or {}), "tailscale": inv["tailscale"]}
     if inv.get("utilization"):
         node.utilization = inv["utilization"]
     return node
@@ -332,9 +363,13 @@ def discover_tailscale() -> dict[str, Any]:
     devs = []
     for peer in list((data.get("Peer") or {}).values()) + ([data["Self"]] if data.get("Self") else []):
         os_name = {"linux": "Linux", "macOS": "macOS", "windows": "Windows"}.get(peer.get("OS"), peer.get("OS"))
-        devs.append({"hostname": (peer.get("HostName") or "").lower(), "os": os_name,
-                     "addresses": peer.get("TailscaleIPs") or [], "online": peer.get("Online"),
-                     "fingerprint": f"host:{(peer.get('HostName') or '').lower()}"})
+        ips = peer.get("TailscaleIPs") or []
+        dns = (peer.get("DNSName") or "").rstrip(".")
+        host = short_hostname(peer.get("HostName") or dns or (ips[0] if ips else ""))
+        devs.append({"hostname": host, "os": os_name, "addresses": ips, "fingerprint": f"host:{host}",
+                     "tailscale": {"online": bool(peer.get("Online")) or peer is data.get("Self"), "dns_name": dns or None,
+                                   "ips": ips, "os": peer.get("OS"), "self": peer is data.get("Self"),
+                                   "seen_at": now().isoformat()}})
     return {"available": True, "devices": devs}
 
 

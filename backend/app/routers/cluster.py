@@ -24,6 +24,7 @@ agent_router = APIRouter(prefix="/api/agent", tags=["agent"])
 def node_out(n: Node) -> NodeOut:
     o = NodeOut.model_validate(n)
     o.eligibility = cluster.eligibility(n)
+    o.tailnet = cluster.tailnet_info(n)
     return o
 
 
@@ -35,13 +36,22 @@ def get_node(db: Session, nid: str) -> Node:
 
 
 @nodes_router.get("", response_model=list[NodeOut])
-def list_nodes(state: str | None = None, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+def list_nodes(state: str | None = None, tailnet: bool | None = None, source: str | None = None,
+               _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    """Filters: state (comma list), tailnet (true = part of your tailnet), source (comma list of
+    discovery sources such as tailscale, neighbors, mdns, htcondor, agent, manual, agent-report)."""
     cluster.refresh_states(db)
     db.commit()
     q = db.query(Node)
     if state:
         q = q.filter(Node.state.in_(state.split(",")))
-    return [node_out(n) for n in q.order_by(Node.is_controller.desc(), Node.hostname).all()]
+    out = [node_out(n) for n in q.order_by(Node.is_controller.desc(), Node.hostname).all()]
+    if tailnet is not None:
+        out = [n for n in out if n.tailnet["member"] == tailnet]
+    if source:
+        wanted = set(source.split(","))
+        out = [n for n in out if any(s.split(":")[0] in wanted for s in n.discovery_sources)]
+    return out
 
 
 @nodes_router.get("/{nid}", response_model=NodeOut)

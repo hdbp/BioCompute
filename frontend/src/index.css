@@ -22,6 +22,15 @@
   --bad: 240 106 123;       /* red   - failed */
   --wait: 232 176 75;       /* amber - queued / warning */
   --well-off: 31 45 66;
+  /* discovery sources */
+  --src-controller: 138 164 255;
+  --src-agent: 92 201 138;
+  --src-tailscale: 90 176 255;
+  --src-neighbors: 160 174 196;
+  --src-mdns: 190 148 245;
+  --src-htcondor: 232 176 75;
+  --src-manual: 214 220 230;
+  --src-report: 242 140 192;
   color-scheme: dark;
 }
 /* Brightfield */
@@ -39,6 +48,14 @@
   --bad: 200 50 70;
   --wait: 176 120 20;
   --well-off: 224 230 238;
+  --src-controller: 64 92 214;
+  --src-agent: 30 130 76;
+  --src-tailscale: 22 110 200;
+  --src-neighbors: 84 98 120;
+  --src-mdns: 128 70 200;
+  --src-htcondor: 160 105 10;
+  --src-manual: 60 70 86;
+  --src-report: 190 50 120;
   color-scheme: light;
 }
 

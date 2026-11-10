@@ -318,7 +318,9 @@ class NodeOut(ORM):
     last_seen: datetime | None
     notes: str
     allocation: AllocationOut | None
+    network: dict[str, Any] = {}
     eligibility: dict[str, Any] = {}
+    tailnet: dict[str, Any] = {}
     created_at: datetime
 
 

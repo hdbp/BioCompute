@@ -81,6 +81,8 @@ export interface ClusterNode {
   software: Record<string, string>; htcondor: Record<string, unknown>; agent_installed: boolean; agent_version: string | null;
   utilization: { cpu_percent?: number; mem_percent?: number; load?: number[]; power?: { has_battery?: boolean; on_ac?: boolean; percent?: number }; user_idle_seconds?: number };
   last_seen: string | null; notes: string; allocation: Allocation | null; eligibility: { eligible: boolean; reasons: string[] }; created_at: string;
+  network: { tailscale?: { online?: boolean; dns_name?: string | null; ips?: string[]; os?: string; seen_at?: string } };
+  tailnet: { member: boolean; via: string | null; online: boolean | null; dns_name: string | null; ips: string[] };
 }
 export type NodeState = "discovered" | "candidate" | "enrolled" | "active" | "draining" | "disabled" | "offline";
 

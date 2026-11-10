@@ -246,6 +246,8 @@ class Node(TimestampMixin, Base):
     discovery_sources: Mapped[list[str]] = mapped_column(JSON, default=list)
     software: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # nextflow/java/docker/apptainer/condor/R/python
     htcondor: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # network facts from discovery, e.g. {"tailscale": {"online": true, "dns_name": "...", "ips": [...]}}
+    network: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
     agent_installed: Mapped[bool] = mapped_column(Boolean, default=False)
     agent_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     agent_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)

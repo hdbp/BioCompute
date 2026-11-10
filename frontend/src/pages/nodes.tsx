@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, Sheet } from "@/components/ui/dialog";
 import { CoreLattice, LatticeLegend } from "@/components/lattice";
+import { SOURCES, SourceTag, TailnetTag, sourceKey } from "@/components/source-tag";
 import { NodeStateBadge, nodeStateHelp } from "@/components/status";
 
 const FILTERS = [
@@ -35,13 +36,31 @@ export default function NodesPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
-  const [tokenOpen, setTokenOpen] = useState(false);
+  const [tokenOpen, setTokenOpen] = useState<false | { label: string; site: string }>(false);
+  const net = sp.get("net") ?? "all";                     // all | in | out (tailnet)
+  const srcs = (sp.get("src") ?? "").split(",").filter(Boolean);
+  const setParam = (k: string, v: string | null) => {
+    const next = new URLSearchParams(sp);
+    if (v) next.set(k, v); else next.delete(k);
+    setSp(next, { replace: true });
+  };
 
+  // network + source filters apply first; the lifecycle tabs then count within them
+  const scoped = useMemo(() => (nodes.data ?? []).filter((n) =>
+    (net === "all" || (net === "in") === n.tailnet.member) &&
+    (!srcs.length || n.discovery_sources.some((s) => srcs.includes(sourceKey(s))))), [nodes.data, net, srcs]);
   const list = useMemo(() => {
     const f = FILTERS.find((x) => x.id === filter);
-    return (nodes.data ?? []).filter((n) => !f?.states || f.states.includes(n.state) || (f.id === "participating" && n.is_controller));
-  }, [nodes.data, filter]);
-  const counts = (states: string[] | null) => (nodes.data ?? []).filter((n) => !states || states.includes(n.state) || (states.includes("active") && n.is_controller)).length;
+    return scoped.filter((n) => !f?.states || f.states.includes(n.state) || (f.id === "participating" && n.is_controller));
+  }, [scoped, filter]);
+  const counts = (states: string[] | null) => scoped.filter((n) => !states || states.includes(n.state) || (states.includes("active") && n.is_controller)).length;
+  const sourceCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const n of nodes.data ?? []) for (const k of new Set(n.discovery_sources.map(sourceKey))) c[k] = (c[k] ?? 0) + 1;
+    return c;
+  }, [nodes.data]);
+  const tailnetCount = (nodes.data ?? []).filter((n) => n.tailnet.member).length;
+  const controllerTailnet = nodes.data?.find((n) => n.is_controller)?.tailnet;
   const node = nodes.data?.find((n) => n.id === selected) ?? null;
 
   const applyPreset = useMutation({
@@ -56,7 +75,7 @@ export default function NodesPage() {
       <PageHeader title="Nodes"
         description="Computers BioCompute knows about. Being discovered never grants permission to run work: an administrator authorizes a device, its owner installs the agent, and participation is switched on explicitly."
         actions={admin && <>
-          <Button variant="secondary" onClick={() => setTokenOpen(true)}><KeyRound />Enrollment tokens</Button>
+          <Button variant="secondary" onClick={() => setTokenOpen({ label: "", site: "home" })}><KeyRound />Enrollment tokens</Button>
           <Button variant="secondary" onClick={() => setManualOpen(true)}><Plus />Add manually</Button>
           <Button variant="primary" onClick={() => setScanOpen(true)}><Radar />Discover</Button>
         </>} />
@@ -82,7 +101,30 @@ export default function NodesPage() {
         </div>
       </Panel>
 
-      <Tabs value={filter} onValueChange={(v) => setSp(v === "all" ? {} : { filter: v })}>
+      <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[13px] text-muted">Network</span>
+          <div className="inline-flex rounded-md border border-line p-0.5" role="radiogroup" aria-label="Tailnet filter">
+            {[["all", "All networks"], ["in", `In my tailnet (${tailnetCount})`], ["out", "Outside tailnet"]].map(([id, label]) => (
+              <button key={id} role="radio" aria-checked={net === id} onClick={() => setParam("net", id === "all" ? null : id)}
+                className={cn("rounded px-2.5 py-1 text-[13px]", net === id ? "bg-raised text-text" : "text-muted hover:text-text")}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-0.5 text-[13px] text-muted">Found by</span>
+          {Object.keys(SOURCES).filter((k) => sourceCounts[k]).map((k) => (
+            <SourceTag key={k} source={k} count={sourceCounts[k]} active={srcs.length ? srcs.includes(k) : undefined}
+              onClick={() => setParam("src", (srcs.includes(k) ? srcs.filter((x) => x !== k) : [...srcs, k]).join(",") || null)} />
+          ))}
+          {(srcs.length > 0 || net !== "all") && (
+            <button className="ml-1 text-xs text-muted hover:text-text underline-offset-2 hover:underline"
+              onClick={() => { const next = new URLSearchParams(sp); next.delete("src"); next.delete("net"); setSp(next, { replace: true }); }}>Clear filters</button>
+          )}
+        </div>
+      </div>
+
+      <Tabs value={filter} onValueChange={(v) => setParam("filter", v === "all" ? null : v)}>
         <TabsList className="mb-4">
           {FILTERS.map((f) => <TabsTrigger key={f.id} value={f.id}>{f.label} <span className="ml-1 text-xs text-muted tabular-nums">{counts(f.states)}</span></TabsTrigger>)}
         </TabsList>
@@ -90,8 +132,8 @@ export default function NodesPage() {
 
       {nodes.isLoading && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-48" />)}</div>}
       {nodes.data && list.length === 0 && (
-        <Panel><Empty icon={<Radar />} title={filter === "all" ? "No computers known yet" : "Nothing in this category"}
-          action={admin && filter === "all" ? <Button variant="primary" onClick={() => setScanOpen(true)}>Discover computers</Button> : undefined}>
+        <Panel><Empty icon={<Radar />} title={!nodes.data.length ? "No computers known yet" : "No computers match these filters"}
+          action={admin && !nodes.data.length ? <Button variant="primary" onClick={() => setScanOpen(true)}>Discover computers</Button> : undefined}>
           {filter === "discovered" ? "Devices found by mDNS, Tailscale, HTCondor, the neighbour table or discovery agents appear here." : "Run discovery or add a machine manually."}
         </Empty></Panel>
       )}
@@ -100,10 +142,11 @@ export default function NodesPage() {
       </div>
       {list.length > 0 && <div className="mt-4"><LatticeLegend /></div>}
 
-      {node && <NodeSheet node={node} admin={admin} onClose={() => setSelected(null)} />}
+      {node && <NodeSheet node={node} admin={admin} onClose={() => setSelected(null)}
+        onEnroll={() => setTokenOpen({ label: node.display_name || node.hostname, site: node.site || (node.tailnet.member ? "home" : "lab") })} />}
       <ScanDialog open={scanOpen} onOpenChange={setScanOpen} />
       <ManualDialog open={manualOpen} onOpenChange={setManualOpen} />
-      <TokenDialog open={tokenOpen} onOpenChange={setTokenOpen} />
+      <TokenDialog open={!!tokenOpen} initial={tokenOpen || undefined} controllerTailnet={controllerTailnet} onOpenChange={(o) => !o && setTokenOpen(false)} />
     </>
   );
 }
@@ -141,14 +184,15 @@ function NodeCard({ n, onOpen }: { n: ClusterNode; onOpen: () => void }) {
         {participating && (n.eligibility.eligible
           ? <Badge tone="ok">Accepting work</Badge>
           : <Tip content={n.eligibility.reasons.join("; ")}><span><Badge tone="wait">Not eligible: {n.eligibility.reasons[0]}</Badge></span></Tip>)}
-        {n.discovery_sources.slice(0, 3).map((s) => <Badge key={s}>{s}</Badge>)}
+        <TailnetTag tailnet={n.tailnet} />
+        {n.discovery_sources.map((s) => <SourceTag key={s} source={s} />)}
         {n.last_seen && !n.is_controller && <span className="text-muted ml-auto">seen {ago(n.last_seen)}</span>}
       </div>
     </button>
   );
 }
 
-function NodeSheet({ node: n, admin, onClose }: { node: ClusterNode; admin: boolean; onClose: () => void }) {
+function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; admin: boolean; onClose: () => void; onEnroll: () => void }) {
   const qc = useQueryClient();
   const refresh = () => { qc.invalidateQueries({ queryKey: ["nodes"] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); };
   const transition = useMutation({
@@ -180,6 +224,7 @@ function NodeSheet({ node: n, admin, onClose }: { node: ClusterNode; admin: bool
           </TabsContent>
         )}
         <TabsContent value="details" className="py-4">
+          {!participating && !n.is_controller && <EnrollSteps node={n} admin={admin} onEnroll={onEnroll} />}
           {n.cpu_logical && <div className="mb-4"><CoreLattice total={n.cpu_logical} allocated={n.allocation?.enabled ? n.allocation.max_cpus : 0} busyPercent={n.utilization.cpu_percent} size="md" /></div>}
           <dl>
             <KV k="Hostname" v={n.hostname} />
@@ -190,7 +235,10 @@ function NodeSheet({ node: n, admin, onClose }: { node: ClusterNode; admin: bool
             <KV k="GPUs" v={n.gpus.length ? n.gpus.map((g) => `${g.name ?? g.vendor}${g.memory_mb ? ` (${Math.round(g.memory_mb / 1024)} GB)` : ""}`).join(", ") : "None detected"} />
             <KV k="Disks" v={n.disks.length ? n.disks.map((d) => `${d.path}: ${bytes(d.free)} free of ${bytes(d.total)}`).join("; ") : null} />
             <KV k="Addresses" v={n.addresses.join(", ")} mono />
-            <KV k="Discovered via" v={n.discovery_sources.join(", ")} />
+            <KV k="Discovered via" v={<span className="flex flex-wrap gap-1">{n.discovery_sources.map((s) => <SourceTag key={s} source={s} />)}</span>} />
+            <KV k="Tailnet" v={n.tailnet.member
+              ? `Member (from ${n.tailnet.via})${n.tailnet.online === true ? ", online" : n.tailnet.online === false ? ", offline" : ""}${n.tailnet.dns_name ? `, ${n.tailnet.dns_name}` : ""}${n.tailnet.ips.length ? `, ${n.tailnet.ips.join(", ")}` : ""}`
+              : "Not seen in your tailnet"} />
             <KV k="Site" v={n.site} />
             <KV k="Agent" v={n.agent_installed ? `installed (${n.agent_version ?? "unknown version"})` : "not installed"} />
             <KV k="HTCondor" v={Object.keys(n.htcondor).length ? JSON.stringify(n.htcondor) : n.software.htcondor ? `installed ${n.software.htcondor}` : "not detected"} />
@@ -213,7 +261,7 @@ function NodeSheet({ node: n, admin, onClose }: { node: ClusterNode; admin: bool
       {admin && !n.is_controller && (
         <div className="sticky bottom-0 flex flex-wrap gap-2 border-t border-line bg-surface px-5 py-3">
           {n.state === "discovered" && <Button variant="primary" onClick={() => transition.mutate("authorize")}><ShieldCheck />Authorize for enrollment</Button>}
-          {n.state === "candidate" && <p className="text-[13px] text-muted flex-1">Authorized. Create an enrollment token and have the machine's owner install the agent.</p>}
+          {n.state === "candidate" && <Button variant="primary" onClick={onEnroll}><KeyRound />Create enrollment token</Button>}
           {participating && n.state !== "disabled" && (n.allocation?.draining
             ? <Button onClick={() => transition.mutate("undrain")}>Resume accepting work</Button>
             : <Button onClick={() => transition.mutate("drain")}>Drain for maintenance</Button>)}
@@ -223,6 +271,40 @@ function NodeSheet({ node: n, admin, onClose }: { node: ClusterNode; admin: bool
         </div>
       )}
     </Sheet>
+  );
+}
+
+function EnrollSteps({ node: n, admin, onEnroll }: { node: ClusterNode; admin: boolean; onEnroll: () => void }) {
+  const qc = useQueryClient();
+  const authorize = useMutation({
+    mutationFn: () => api.post(`/api/nodes/${n.id}/transition`, { action: "authorize" }),
+    onSuccess: () => { toast.success("Authorized for enrollment"); qc.invalidateQueries({ queryKey: ["nodes"] }); },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+  const step = n.state === "discovered" ? 1 : 2;
+  const steps: [string, React.ReactNode][] = [
+    ["Authorize this machine", step === 1
+      ? (admin ? <Button size="sm" variant="primary" loading={authorize.isPending} onClick={() => authorize.mutate()}><ShieldCheck />Authorize for enrollment</Button>
+               : "An administrator authorizes it.")
+      : "Done."],
+    ["Create a one-time enrollment token", step === 2 && admin ? <Button size="sm" variant="primary" onClick={onEnroll}><KeyRound />Create enrollment token</Button> : "Single use; it expires after the time you choose."],
+    ["On that machine, enroll and install the agent", <>The token dialog shows the exact command (needs Python 3.9+), then <code className="font-mono text-[12px]">./install.sh</code> for systemd or launchd. Nothing is installed remotely.</>],
+    ["Set its resource allocation and switch participation on", "The node then appears as Online with participation off until you enable it."],
+  ];
+  return (
+    <div className="mb-5 rounded-md border border-accent/30 bg-accent/5 p-4">
+      <p className="text-[13.5px] font-medium">Enroll this machine</p>
+      <ol className="mt-3 space-y-3">
+        {steps.map(([title, body], i) => (
+          <li key={title} className="flex gap-3">
+            <span className={cn("grid size-6 shrink-0 place-items-center rounded-full border text-xs font-semibold",
+              i + 1 < step ? "border-ok/50 bg-ok/15 text-ok" : i + 1 === step ? "border-accent text-accent" : "border-line text-muted")}>{i + 1}</span>
+            <div className="min-w-0 text-[13px]"><p className="font-medium">{title}</p><div className="mt-1 text-muted">{body}</div></div>
+          </li>
+        ))}
+      </ol>
+      {n.tailnet.member && <p className="mt-3 text-xs text-muted">This machine is in your tailnet, so its agent can reach the controller through Tailscale even from another network.</p>}
+    </div>
   );
 }
 
@@ -390,18 +472,26 @@ function ManualDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   );
 }
 
-function TokenDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function TokenDialog({ open, onOpenChange, initial, controllerTailnet }: {
+  open: boolean; onOpenChange: (o: boolean) => void; initial?: { label: string; site: string };
+  controllerTailnet?: ClusterNode["tailnet"];
+}) {
   const qc = useQueryClient();
   const tokens = useQuery({ queryKey: ["tokens"], queryFn: () => api.get<{ id: string; label: string; site: string | null; expires_at: string; used_by_node: string | null; allow_discovery_reports: boolean }[]>("/api/discovery/tokens"), enabled: open });
   const [f, setF] = useState({ label: "", site: "home", ttl_hours: 24, allow_discovery_reports: false });
   const [issued, setIssued] = useState<string | null>(null);
+  useEffect(() => {
+    if (open && initial) { setF((x) => ({ ...x, label: initial.label, site: initial.site })); setIssued(null); }
+  }, [open, initial]);
   const create = useMutation({
     mutationFn: () => api.post<{ token: string }>("/api/discovery/tokens", f),
     onSuccess: (r) => { setIssued(r.token); qc.invalidateQueries({ queryKey: ["tokens"] }); },
     onError: (e) => toast.error(errMsg(e)),
   });
   const revoke = useMutation({ mutationFn: (id: string) => api.del(`/api/discovery/tokens/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens"] }) });
-  const origin = window.location.origin;
+  const local = /^(localhost|127\.|\[::1\])/.test(window.location.hostname);
+  const tsHost = controllerTailnet?.member ? controllerTailnet.dns_name || controllerTailnet.ips[0] : null;
+  const origin = local && tsHost ? `${window.location.protocol}//${tsHost}${window.location.port ? `:${window.location.port}` : ""}` : window.location.origin;
   const cmd = issued ? `python3 biocompute_agent.py enroll --controller ${origin} --token ${issued}${f.allow_discovery_reports ? " --discovery" : ""}` : "";
   return (
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) setIssued(null); }}>
@@ -411,6 +501,11 @@ function TokenDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: 
             <p className="text-[13px]">Token created. It is shown only once. On the worker, from the <code className="font-mono text-[12px]">agent/</code> folder of this repository:</p>
             <pre className="whitespace-pre-wrap break-all rounded-md border border-line bg-ink p-3 font-mono text-[12px]">{cmd}</pre>
             <Button size="sm" onClick={() => { navigator.clipboard.writeText(cmd); toast.success("Copied"); }}><Copy />Copy command</Button>
+            <p className="text-xs text-muted">
+              The <code className="font-mono">--controller</code> address must be reachable from that machine{local ? " (this browser is using a local address)" : ""}.
+              {tsHost ? <> Over Tailscale use <code className="font-mono">{tsHost}</code>.</> : " Use the controller's LAN name, tailnet name or public TLS address."}
+              {" "}The API itself listens on 127.0.0.1, so point agents at the nginx/TLS front end (port 8080 or 443), not port 8000.
+            </p>
             <p className="text-xs text-muted">Then install the background service with <code className="font-mono">install.sh</code> (systemd on Linux, launchd on macOS). See docs/worker-agent.md. The node joins with participation switched off.</p>
           </div>
         ) : (

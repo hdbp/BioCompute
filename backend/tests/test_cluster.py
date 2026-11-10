@@ -168,3 +168,36 @@ def test_neighbor_table_parsing(monkeypatch):
     assert res["available"] and len(res["devices"]) == 3  # link-local and FAILED skipped
     assert fps.count("mac:3c:a6:2f:00:00:01") == 2      # same router twice -> merged at upsert
     assert res["devices"][0]["hostname"] == "fritz-box" and res["devices"][1]["hostname"] == "2a02:810d:1:2::1"
+
+
+def test_tailnet_membership_and_filters(client, auth, monkeypatch):
+    from app.services import cluster
+
+    ts = {"available": True, "devices": [
+        {"hostname": "mbp-m3", "os": "macOS", "addresses": ["100.80.1.5", "fd7a:115c:a1e0::5"], "fingerprint": "host:mbp-m3",
+         "tailscale": {"online": False, "dns_name": "mbp-m3.tail1234.ts.net", "ips": ["100.80.1.5"], "os": "macOS"}},
+    ]}
+    neigh = {"available": True, "devices": [{"hostname": "printer", "addresses": ["192.168.1.40"], "fingerprint": "mac:11:22:33:44:55:66"}]}
+    monkeypatch.setattr(cluster, "discover_tailscale", lambda: ts)
+    monkeypatch.setattr(cluster, "discover_neighbors", lambda: neigh)
+    assert client.post("/api/discovery/scan", headers=auth, params={"methods": "tailscale,neighbors"}).status_code == 200
+    # an enrolled machine whose own agent reports a tailnet address (no tailscale CLI on the controller)
+    tok = client.post("/api/discovery/tokens", headers=auth, json={"label": "ts-agent", "site": "home"}).json()["token"]
+    inv = {"fingerprint": "mid:tsagent", "hostname": "ts-worker", "os": "Linux", "arch": "x86_64", "cpu": {"logical": 8},
+           "memory": {"total": 32 * 2**30}, "addresses": ["192.168.1.9", "100.99.2.3"], "utilization": {}}
+    assert client.post("/api/agent/enroll", json={"token": tok, "inventory": inv}).status_code == 200
+
+    nodes = {n["hostname"]: n for n in client.get("/api/nodes", headers=auth).json()}
+    mbp = nodes["mbp-m3"]
+    assert mbp["tailnet"]["member"] and mbp["tailnet"]["via"] == "tailscale status"
+    assert mbp["tailnet"]["online"] is False and mbp["tailnet"]["dns_name"] == "mbp-m3.tail1234.ts.net"
+    assert nodes["ts-worker"]["tailnet"] == {"member": True, "via": "tailnet address", "online": None, "dns_name": None, "ips": ["100.99.2.3"]}
+    assert nodes["printer"]["tailnet"]["member"] is False
+
+    inside = {n["hostname"] for n in client.get("/api/nodes", headers=auth, params={"tailnet": "true"}).json()}
+    outside = {n["hostname"] for n in client.get("/api/nodes", headers=auth, params={"tailnet": "false"}).json()}
+    assert {"mbp-m3", "ts-worker"} <= inside and "printer" in outside and not inside & outside
+    by_src = {n["hostname"] for n in client.get("/api/nodes", headers=auth, params={"source": "neighbors"}).json()}
+    assert "printer" in by_src and "mbp-m3" not in by_src
+    reported = client.get("/api/nodes", headers=auth, params={"source": "agent-report"}).json()
+    assert all(any(s.startswith("agent-report:") for s in n["discovery_sources"]) for n in reported)
