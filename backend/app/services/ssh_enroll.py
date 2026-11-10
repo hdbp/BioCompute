@@ -115,6 +115,17 @@ def default_controller_url(node_controller: Node | None) -> str | None:
     s = get_settings()
     if s.public_url:
         return s.public_url.rstrip("/")
+    from .. import agent_listener
+
+    listen = agent_listener.url()
+    if listen:
+        # prefer the controller's MagicDNS name over its raw tailnet IP when we know it
+        if node_controller is not None:
+            t = cluster.tailnet_info(node_controller)
+            host = listen.split("//", 1)[1].rsplit(":", 1)[0]
+            if t["dns_name"] and host in t["ips"]:
+                return listen.replace(host, t["dns_name"], 1)
+        return listen
     if node_controller is not None:
         t = cluster.tailnet_info(node_controller)
         if t["member"] and (t["dns_name"] or t["ips"]):
@@ -245,8 +256,19 @@ def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor
             "import sys, urllib.request; urllib.request.urlopen(sys.argv[1] + '/api/health', timeout=10).read(); print('controller reachable')")
             + " " + shlex.quote(url))
         if rc != 0:
-            return fail("reach", f"The machine cannot reach the controller at {url}. Use an address it can reach "
-                                 "(tailnet name of the controller and the nginx/TLS port), not 127.0.0.1.", out)
+            from .. import agent_listener
+
+            if re.search(r"Connection refused|Errno 111|Errno 61", out):
+                msg = (f"Nothing on the controller accepts connections from other machines at {url}. "
+                       + (f"Use the agent listener address {agent_listener.url()}." if agent_listener.url() else
+                          "Start BioCompute with BIOCOMPUTE_AGENT_LISTEN=tailscale (scripts/dev.sh does this automatically when "
+                          "Tailscale is running) and use the address it prints, e.g. http://<controller>.<tailnet>.ts.net:8765."))
+            elif "127.0.0.1" in url or "localhost" in url:
+                msg = f"{url} points at the worker itself. Use the controller's tailnet name or IP instead."
+            else:
+                msg = (f"The machine cannot reach the controller at {url} (timeout or name not resolved). "
+                       "Check the address and that both machines are online in your tailnet.")
+            return fail("reach", msg, out)
         _set(job, "reach", "done", out)
 
         _set(job, "copy", "running")

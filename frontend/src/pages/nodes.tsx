@@ -277,7 +277,7 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
 
 interface SshStep { id: string; title: string; state: "pending" | "running" | "done" | "failed" | "skipped"; output: string }
 interface SshStatus { state: "running" | "done" | "warning" | "failed"; steps: SshStep[]; error: string | null; hint: string | null; host: string; user: string; port?: number; started_at: string }
-interface SshInfo { available: boolean; reasons: string[]; targets: string[]; controller_url: string | null; site: string; ssh_bin: string; status: SshStatus | null }
+interface SshInfo { available: boolean; reasons: string[]; targets: string[]; controller_url: string | null; site: string; ssh_bin: string; status: SshStatus | null; agent_listener: string | null; agent_listener_error: string | null }
 
 const SSH_USER_KEY = "biocompute.sshUser";
 const SSH_PORTS_KEY = "biocompute.sshPorts"; // { [nodeId]: port }
@@ -367,7 +367,10 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
               </Field>
             </div>
             <Field label="Controller address, as seen from that machine" required className="sm:col-span-2"
-              hint="Use the controller's tailnet name and the nginx/TLS port (8080 or 443). The API port 8000 only listens locally unless you bound it to the tailnet.">
+              hint={info.data.agent_listener
+                ? <>BioCompute accepts workers at <button type="button" className="font-mono underline" onClick={() => setF({ ...f, controller_url: info.data!.controller_url ?? info.data!.agent_listener! })}>{info.data.controller_url ?? info.data.agent_listener}</button> (agent listener on the tailnet).</>
+                : <span className="text-wait">BioCompute is not listening for workers: the API only accepts connections from this computer.
+                    Restart it with <code className="font-mono">BIOCOMPUTE_AGENT_LISTEN=tailscale</code> (scripts/dev.sh does this when Tailscale is running){info.data.agent_listener_error ? ` (${info.data.agent_listener_error})` : ""}, or use your nginx/TLS address.</span>}>
               <Input value={f.controller_url} onChange={(e) => setF({ ...f, controller_url: e.target.value.trim() })} placeholder="http://lab-ws.tail1234.ts.net:8080" className="font-mono text-[12px]" />
             </Field>
             <Field label="Site"><Input value={f.site} onChange={(e) => setF({ ...f, site: e.target.value })} /></Field>

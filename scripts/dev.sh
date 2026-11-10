@@ -21,6 +21,11 @@ if [ -z "${BIOCOMPUTE_DATA_ROOTS:-}" ]; then
 fi
 export BIOCOMPUTE_DATA_ROOTS
 port="${BIOCOMPUTE_API_PORT:-8000}"
+# Workers on other machines enroll and report through a small agent-only listener on the tailnet address
+# (UI and API stay on 127.0.0.1). Enabled automatically when Tailscale is up; BIOCOMPUTE_AGENT_LISTEN=off disables it.
+if [ -z "${BIOCOMPUTE_AGENT_LISTEN:-}" ] && command -v tailscale >/dev/null 2>&1 && tailscale ip -4 >/dev/null 2>&1; then
+  export BIOCOMPUTE_AGENT_LISTEN=tailscale
+fi
 cd "$root/backend"
 [ -d .venv ] || { python3 -m venv .venv && .venv/bin/pip install -q -r requirements-dev.txt; }
 if [ "${1:-}" = "admin" ]; then
@@ -42,6 +47,11 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 echo "API ready on http://127.0.0.1:$port  -  log in as admin / ${BIOCOMPUTE_ADMIN_PASSWORD} (set only when the demo database is first created)"
+if [ "${BIOCOMPUTE_AGENT_LISTEN:-off}" != "off" ]; then
+  echo "Workers enroll via the agent listener on ${BIOCOMPUTE_AGENT_LISTEN} (port ${BIOCOMPUTE_AGENT_PORT:-8765}); see the API log line above for the address"
+else
+  echo "Agent listener off: other machines cannot enroll (start Tailscale, or set BIOCOMPUTE_AGENT_LISTEN=<ip>:8765)"
+fi
 cd "$root/frontend"
 [ -d node_modules ] || npm ci
 BIOCOMPUTE_API="http://127.0.0.1:$port" npm run dev -- --host 127.0.0.1

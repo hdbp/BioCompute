@@ -24,6 +24,7 @@ from .services import cluster as cluster_svc
 from .services import hostinfo
 from .services import pipelines as pipeline_svc
 from .services import runner
+from . import agent_listener
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -108,7 +109,9 @@ async def lifespan(app: FastAPI):
         print(f"[biocompute] run reconciliation: {stats}", file=sys.stderr)
         runner.start_monitor()
         threading.Thread(target=_controller_sampler, daemon=True, name="sampler").start()
+        agent_listener.start()
     yield
+    agent_listener.stop()
 
 
 app = FastAPI(

@@ -26,6 +26,8 @@ Edit at least these settings:
   Make the output area writable and add it to `ReadWritePaths=` in `/etc/systemd/system/biocompute.service`;
 * `BIOCOMPUTE_SITE_NAME`, the data-locality domain of this controller (e.g. `lab`);
 * `BIOCOMPUTE_DISCOVERY_AUTHORIZED_CIDRS`, the networks where active probing is permitted.
+* `BIOCOMPUTE_AGENT_LISTEN=tailscale`, so workers can enroll and send heartbeats over the tailnet.
+  It serves only the agent endpoints, on the tailnet IP and port 8765.
 
 The `biocompute` user must be able to read raw data (for example via group membership) and write the output roots.
 

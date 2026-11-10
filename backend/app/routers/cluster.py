@@ -154,8 +154,11 @@ def ssh_enroll_info(nid: str, _: User = Depends(require_admin), db: Session = De
         reasons.append("already enrolled")
     if n.state == "disabled":
         reasons.append("machine is disabled")
+    from .. import agent_listener
+
     return {"available": not reasons, "reasons": reasons, "targets": ssh_enroll.targets(n),
             "controller_url": ssh_enroll.default_controller_url(ctl), "site": n.site or "home",
+            "agent_listener": agent_listener.url(), "agent_listener_error": agent_listener.error(),
             "ssh_bin": s.ssh_bin, "status": ssh_enroll.status(n.id)}
 
 

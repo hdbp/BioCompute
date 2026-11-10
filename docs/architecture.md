@@ -120,6 +120,8 @@ replacement: it has no containers, no remote executors and no retries.
   * The commands are fixed and quoted, and the token goes over stdin.
   * It runs in BatchMode with `StrictHostKeyChecking=accept-new` and a known-hosts file in the state directory.
   * It is audit-logged, and it can be disabled with `BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false`.
+* **Agent listener (optional):** a second listener, on the tailnet IP for example, serves only the
+  token-protected agent endpoints and `/api/health`. The UI and the main API never leave 127.0.0.1.
 * **Agents:** they have no inbound port and no command channel. Their identity is bound to a token,
   so a self-reported machine ID cannot override it. Discovery reports need a token flagged for them.
 * **HTML reports** are served with `Content-Security-Policy: sandbox`.

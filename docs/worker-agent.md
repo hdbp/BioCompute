@@ -73,10 +73,17 @@ Set `BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false` to turn the feature off.
        the Mac user's password once, or paste the shown `echo '…' >> ~/.ssh/authorized_keys` command into a
        terminal on the Mac. The key lives in `<state dir>/ssh/biocompute_ed25519` and is readable only by the
        account running BioCompute.
-* **A reachable controller address.** The controller must be reachable from the worker at the URL you enter.
-  Use the nginx front end (`http://<controller>.<tailnet>.ts.net:8080`) or TLS.
-  For a quick test, start the API on the tailnet address:
-  `uvicorn app.main:app --host $(tailscale ip -4) --port 8000`.
+* **A reachable controller address: the agent listener.** The main API listens only on `127.0.0.1`.
+  With `BIOCOMPUTE_AGENT_LISTEN=tailscale`, BioCompute *also* listens on the controller's tailnet IP,
+  port `BIOCOMPUTE_AGENT_PORT` (8765).
+  * That listener serves only what workers need: `/api/agent/enroll`, `/api/agent/heartbeat`,
+    `/api/agent/discovery-report` and `/api/health`, each protected by its own tokens. The UI and the rest of
+    the API stay local.
+  * `scripts/dev.sh` turns it on automatically when Tailscale is running. Set it in the environment file for the
+    systemd install. `BIOCOMPUTE_AGENT_LISTEN=<ip>:<port>` binds a specific address.
+  * The enrollment form pre-fills the right address, e.g. `http://<controller>.<tailnet>.ts.net:8765`.
+  * `Connection refused` in the "reach the controller" step means the address you entered has no BioCompute
+    listening for other machines. Typical causes: port 8000, or the listener isn't enabled.
 * **macOS background service:** to install the launchd service over SSH, someone must be logged in to the Mac's
   desktop. Otherwise the agent is still enrolled; run `install.sh` once when logged in.
 
