@@ -51,7 +51,9 @@ These limits apply to everything below.
 | Controller inventory: CPU topology, RAM, GPU, disks, software, power | Demonstrated | psutil plus OS probes; macOS paths (sysctl, ioreg, pmset) not run here |
 | Node lifecycle: discovered, authorized, enrolled, active, draining or disabled | Demonstrated | `test_cluster.py` |
 | Worker agent: enroll with a single-use token, then heartbeat | Demonstrated | Real agent enrolled against the running controller |
-| Agent services (systemd user unit, launchd agent) | Implemented | Not installed here |
+| Agent services (systemd user unit, launchd agent) | Implemented | `install.sh` tested with stubbed systemctl/loginctl; launchd path not run here |
+| One-click enrollment of tailnet machines over SSH | Demonstrated | End-to-end test and browser run with a stand-in `ssh` that executes locally; not yet run against a real Tailscale SSH host |
+| Tailnet membership filter and discovery-source tags | Demonstrated | Tests + browser |
 | Discovery: Tailscale, HTCondor, mDNS, neighbour table, agent reports, manual entry | Implemented | Agent reports and manual entry tested; the others degrade cleanly when absent |
 | De-duplication by machine ID, hostname, and address within a site | Demonstrated | Tests, including the "same private IP on two networks" case |
 | Per-node allocation (cores, RAM, GPUs, scratch, jobs, priority, idle-only, hours, AC power, data policy, drain) | Demonstrated | UI + tests |

@@ -286,11 +286,17 @@ def refresh_states(db: Session) -> None:
 
 # --------------------------------------------------------------------------- enrollment
 def issue_token(db: Session, label: str, site: str | None, ttl_hours: int, user: str,
-                allow_discovery_reports: bool = False) -> str:
+                allow_discovery_reports: bool = False, for_node: str | None = None) -> str:
+    if for_node:
+        n = db.get(Node, for_node)
+        if n is None:
+            raise HTTPException(404, "Node not found")
+        if n.state in ("discovered", "disabled"):
+            raise HTTPException(409, f"Authorize the machine before issuing a token (it is {n.state})")
     token = "bce_" + secrets.token_urlsafe(32)
     db.add(EnrollmentToken(token_hash=token_digest(token), label=label, site=site,
                            expires_at=now() + timedelta(hours=ttl_hours), created_by=user,
-                           allow_discovery_reports=allow_discovery_reports))
+                           allow_discovery_reports=allow_discovery_reports, for_node=for_node))
     return token
 
 
@@ -300,7 +306,21 @@ def enroll(db: Session, token: str, inv: dict[str, Any]) -> tuple[Node, str]:
         raise HTTPException(401, "Invalid or expired enrollment token")
     if et.used_by_node:
         raise HTTPException(401, "Enrollment token already used")
-    node = upsert_node(db, inv, "agent", site=et.site)
+    if et.for_node:
+        node = db.get(Node, et.for_node)
+        if node is None:
+            raise HTTPException(401, "The machine this token was issued for no longer exists")
+        fp = inv.get("fingerprint")
+        if fp and fp != node.fingerprint:
+            other = db.query(Node).filter(Node.fingerprint == fp).one_or_none()
+            if other is not None and other.id != node.id:
+                raise HTTPException(409, f"This machine is already known as node '{other.hostname}'; "
+                                         "remove one of the two entries first")
+            if fp.startswith("mid:") or not node.fingerprint.startswith("mid:"):
+                node.fingerprint = fp  # bind the discovered entry to the machine's real identity
+        upsert_node(db, {**inv, "fingerprint": node.fingerprint, "hostname": node.hostname}, "agent", site=et.site)
+    else:
+        node = upsert_node(db, inv, "agent", site=et.site)
     if node.state in ("disabled",):
         raise HTTPException(403, "This machine has been disabled by an administrator")
     agent_token = "bca_" + secrets.token_urlsafe(32)

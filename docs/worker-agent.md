@@ -27,7 +27,58 @@ Filters are kept in the URL (`?net=in&src=tailscale`). The API offers the same f
 Tailnet members are the natural workers for the home machines. Their agents can reach the controller
 through Tailscale from any network. Tailscale itself remains optional.
 
-## Enrollment steps
+## Automatic enrollment for tailnet machines (one click)
+
+For a machine in your tailnet, its panel on the *Nodes* page offers **Enroll automatically over Tailscale SSH**.
+You enter the SSH user on that machine and the controller address as that machine sees it, then confirm.
+BioCompute then runs this fixed sequence and shows each step live:
+
+1. `ssh -o BatchMode=yes <user>@<its tailnet name or IP>`, then check for Python 3.9+. There are never password prompts.
+2. Check that the machine can reach the controller URL (`/api/health`). This catches a wrong address before any token is used.
+3. Copy the agent into `~/.local/share/biocompute-agent`.
+4. Enroll with a one-time token. The token is bound to this node, valid for 1 hour, and sent over the SSH connection's
+   stdin, so it never appears on a command line or in any log.
+5. Optionally install the per-user background service (systemd user unit or launchd agent), then wait for its first heartbeat.
+
+What is enforced:
+
+* Only admins can start it, and only for machines that are members of your tailnet.
+* The SSH target can only be that machine's own tailnet IPs or MagicDNS name.
+* No free-form commands. Nothing runs as root, no ports are opened, no other software is installed.
+* Participation stays **off** until you enable it.
+* Every attempt is in the audit log.
+
+Set `BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false` to turn the feature off.
+
+### What has to be in place
+
+* **On the controller:** the `ssh` client. Connections run as the controller's service account; the demo runs as you.
+  New host keys are remembered in `<state dir>/ssh_known_hosts`.
+* **On the worker:** Python 3.9+, plus one of the following.
+  * **Tailscale SSH**, on Linux: `sudo tailscale set --ssh`. Your tailnet policy must *accept* SSH from the controller, for example:
+    ```json
+    "ssh": [
+      { "action": "accept", "src": ["tag:biocompute-controller"], "dst": ["tag:biocompute-worker"], "users": ["hugo"] }
+    ]
+    ```
+    Tailscale's default policy uses a **check** rule, which needs a browser re-authentication. BioCompute cannot
+    answer that prompt, so use an `accept` rule as above.
+  * **Regular SSH over the tailnet.** This is required for Macs: the Tailscale app from the Mac App Store or
+    the standalone download cannot act as a Tailscale SSH *server*.
+    1. Enable *System Settings → General → Sharing → Remote Login*.
+    2. Add the controller account's public key to `~/.ssh/authorized_keys` on the Mac. Create the key once on the
+       controller with `ssh-keygen -t ed25519`, run as the account that runs BioCompute.
+* **A reachable controller address.** The controller must be reachable from the worker at the URL you enter.
+  Use the nginx front end (`http://<controller>.<tailnet>.ts.net:8080`) or TLS.
+  For a quick test, start the API on the tailnet address:
+  `uvicorn app.main:app --host $(tailscale ip -4) --port 8000`.
+* **macOS background service:** to install the launchd service over SSH, someone must be logged in to the Mac's
+  desktop. Otherwise the agent is still enrolled; run `install.sh` once when logged in.
+
+If a step fails, the panel shows the output and a hint for common problems: refused key, check-mode policy,
+no route, or a changed host key. *Try again* reruns the whole sequence; it is safe to repeat.
+
+## Enrollment steps (manual)
 
 Enrolling a computer always takes deliberate steps. Discovery alone never makes a machine a worker.
 

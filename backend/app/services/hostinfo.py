@@ -49,7 +49,12 @@ def _run(argv: list[str], timeout: float = 10) -> str | None:
 
 
 def machine_id() -> str:
-    """Stable per-machine identifier used for de-duplication across interfaces."""
+    """Stable per-machine identifier used for de-duplication across interfaces.
+
+    BIOCOMPUTE_MACHINE_ID overrides it (cloned VMs/containers can share /etc/machine-id).
+    """
+    if os.environ.get("BIOCOMPUTE_MACHINE_ID"):
+        return "mid:" + os.environ["BIOCOMPUTE_MACHINE_ID"].strip()
     for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
         try:
             with open(path) as fh:

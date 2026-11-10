@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, KeyRound, Laptop, Plus, Radar, Server, ShieldCheck, Trash2 } from "lucide-react";
+import { CheckCircle2, CircleAlert, CircleDashed, Copy, KeyRound, Laptop, Loader2, MinusCircle, Plus, Radar, Server, ShieldCheck, Terminal, Trash2 } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Allocation, ClusterNode } from "@/lib/types";
@@ -224,7 +224,8 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
           </TabsContent>
         )}
         <TabsContent value="details" className="py-4">
-          {!participating && !n.is_controller && <EnrollSteps node={n} admin={admin} onEnroll={onEnroll} />}
+          {!participating && !n.is_controller && admin && n.tailnet.member && <SshEnroll node={n} />}
+          {!participating && !n.is_controller && <EnrollSteps node={n} admin={admin} onEnroll={onEnroll} manualOnly={admin && n.tailnet.member} />}
           {n.cpu_logical && <div className="mb-4"><CoreLattice total={n.cpu_logical} allocated={n.allocation?.enabled ? n.allocation.max_cpus : 0} busyPercent={n.utilization.cpu_percent} size="md" /></div>}
           <dl>
             <KV k="Hostname" v={n.hostname} />
@@ -274,7 +275,142 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
   );
 }
 
-function EnrollSteps({ node: n, admin, onEnroll }: { node: ClusterNode; admin: boolean; onEnroll: () => void }) {
+interface SshStep { id: string; title: string; state: "pending" | "running" | "done" | "failed" | "skipped"; output: string }
+interface SshStatus { state: "running" | "done" | "warning" | "failed"; steps: SshStep[]; error: string | null; hint: string | null; host: string; user: string; started_at: string }
+interface SshInfo { available: boolean; reasons: string[]; targets: string[]; controller_url: string | null; site: string; ssh_bin: string; status: SshStatus | null }
+
+const SSH_USER_KEY = "biocompute.sshUser";
+
+function SshEnroll({ node: n }: { node: ClusterNode }) {
+  const qc = useQueryClient();
+  const [running, setRunning] = useState(false);
+  const info = useQuery({
+    queryKey: ["ssh-enroll", n.id],
+    queryFn: () => api.get<SshInfo>(`/api/nodes/${n.id}/ssh-enroll`),
+    refetchInterval: running ? 1500 : false,
+  });
+  const st = info.data?.status ?? null;
+  useEffect(() => {
+    const isRunning = st?.state === "running";
+    if (running && !isRunning && st) {
+      if (st.state === "done") toast.success(`${n.hostname} enrolled. Participation is off until you enable it.`);
+      else if (st.state === "warning") toast.warning(`${n.hostname} enrolled, but no heartbeat from the service yet`);
+      else toast.error(`Enrollment of ${n.hostname} failed`);
+      qc.invalidateQueries({ queryKey: ["nodes"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    }
+    setRunning(isRunning);
+  }, [st, running, n.hostname, qc]);
+
+  const [f, setF] = useState({ ssh_user: "", host: "", controller_url: "", site: "", install_service: true, allow_discovery_reports: false });
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!info.data) return;
+    let saved = "";
+    try { saved = localStorage.getItem(SSH_USER_KEY) ?? ""; } catch { /* storage unavailable */ }
+    setF((x) => ({ ...x, ssh_user: x.ssh_user || saved, host: x.host || info.data!.targets[0] || "",
+      controller_url: x.controller_url || info.data!.controller_url || "", site: x.site || info.data!.site }));
+  }, [info.data]);
+  const start = useMutation({
+    mutationFn: () => api.post<SshStatus>(`/api/nodes/${n.id}/ssh-enroll`, { ...f, site: f.site || null }),
+    onSuccess: () => {
+      try { localStorage.setItem(SSH_USER_KEY, f.ssh_user); } catch { /* ignore */ }
+      setConfirming(false); setRunning(true); qc.invalidateQueries({ queryKey: ["ssh-enroll", n.id] });
+    },
+    onError: (e) => { setConfirming(false); toast.error(errMsg(e)); },
+  });
+  if (!info.data || (!info.data.available && !st)) return null;
+  const busy = st?.state === "running" || start.isPending;
+  const valid = /^[A-Za-z_][A-Za-z0-9._-]*$/.test(f.ssh_user) && !!f.host && /^https?:\/\//.test(f.controller_url);
+
+  return (
+    <div className="mb-5 rounded-md border p-4" style={{ borderColor: "rgb(var(--src-tailscale) / 0.45)", backgroundColor: "rgb(var(--src-tailscale) / 0.06)" }}>
+      <div className="flex items-start gap-2">
+        <Terminal className="mt-0.5 size-4" style={{ color: "rgb(var(--src-tailscale))" }} />
+        <div className="min-w-0">
+          <p className="text-[13.5px] font-medium">Enroll automatically over Tailscale SSH</p>
+          <p className="text-xs text-muted mt-0.5">
+            The controller connects to this machine through your tailnet, installs the agent in your home folder and enrolls it.
+            It needs Tailscale SSH (or an SSH key for the controller's account) and Python 3.9+ on the machine. Nothing needs root.
+          </p>
+        </div>
+      </div>
+
+      {!st || st.state !== "running" ? (
+        info.data.available && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <Field label="SSH user on that machine" required>
+              <Input value={f.ssh_user} onChange={(e) => setF({ ...f, ssh_user: e.target.value.trim() })} placeholder="hugo" autoComplete="off" />
+            </Field>
+            <Field label="Connect to">
+              <Select value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })}>
+                {info.data.targets.map((t) => <option key={t}>{t}</option>)}
+              </Select>
+            </Field>
+            <Field label="Controller address, as seen from that machine" required className="sm:col-span-2"
+              hint="Use the controller's tailnet name and the nginx/TLS port (8080 or 443). The API port 8000 only listens locally unless you bound it to the tailnet.">
+              <Input value={f.controller_url} onChange={(e) => setF({ ...f, controller_url: e.target.value.trim() })} placeholder="http://lab-ws.tail1234.ts.net:8080" className="font-mono text-[12px]" />
+            </Field>
+            <Field label="Site"><Input value={f.site} onChange={(e) => setF({ ...f, site: e.target.value })} /></Field>
+            <div className="space-y-2 self-end pb-1 text-[13px]">
+              <label className="flex items-center gap-2"><Checkbox checked={f.install_service} onCheckedChange={(v) => setF({ ...f, install_service: !!v })} />Install as a background service</label>
+              <label className="flex items-center gap-2"><Checkbox checked={f.allow_discovery_reports} onCheckedChange={(v) => setF({ ...f, allow_discovery_reports: !!v })} />Report devices on its network</label>
+            </div>
+            <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
+              <Button variant="primary" disabled={!valid || busy} onClick={() => setConfirming(true)}><Terminal />{st?.state === "failed" ? "Try again" : "Enroll automatically"}</Button>
+              {st && st.state !== "running" && <span className="text-xs text-muted">Last attempt: {st.state} ({ago(st.started_at)})</span>}
+            </div>
+          </div>
+        )
+      ) : null}
+
+      {st && <SshProgress st={st} />}
+
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogContent title={`Enroll ${n.hostname} automatically?`} description="BioCompute will run exactly these steps on that machine, as the SSH user you entered.">
+          <ol className="list-decimal space-y-1.5 pl-5 text-[13px]">
+            <li>Connect with <code className="font-mono text-[12px]">{info.data.ssh_bin} {f.ssh_user}@{f.host}</code> (no password prompts) and check for Python 3.9+.</li>
+            <li>Check the machine can reach <code className="font-mono text-[12px]">{f.controller_url}</code>.</li>
+            <li>Copy the agent to <code className="font-mono text-[12px]">~/.local/share/biocompute-agent</code>.</li>
+            <li>Enroll with a one-time token sent over the encrypted connection (never on a command line).</li>
+            {f.install_service && <li>Install a per-user background service (systemd user unit or launchd agent).</li>}
+          </ol>
+          <p className="mt-3 text-xs text-muted">No root access, no other software and no open ports. The node joins with participation switched off. This is recorded in the audit log.</p>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
+            <Button variant="primary" loading={start.isPending} onClick={() => start.mutate()}>Enroll {n.hostname}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function SshProgress({ st }: { st: SshStatus }) {
+  const icon = (s: SshStep["state"]) => ({
+    done: <CheckCircle2 className="size-4 text-ok" />, failed: <CircleAlert className="size-4 text-bad" />,
+    running: <Loader2 className="size-4 animate-spin text-accent" />, skipped: <MinusCircle className="size-4 text-muted" />,
+    pending: <CircleDashed className="size-4 text-muted" />,
+  })[s];
+  return (
+    <div className="mt-4 rounded-md border border-line bg-surface p-3">
+      <ul className="space-y-2">
+        {st.steps.map((s) => (
+          <li key={s.id} className="text-[13px]">
+            <div className="flex items-center gap-2">{icon(s.state)}<span className={cn(s.state === "skipped" && "text-muted")}>{s.title}</span></div>
+            {s.output && (s.state === "failed" || s.state === "done") && (
+              <pre className="ml-6 mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded bg-ink/60 px-2 py-1 font-mono text-[11.5px] text-muted">{s.output}</pre>
+            )}
+          </li>
+        ))}
+      </ul>
+      {st.error && <p className="mt-3 text-[13px] text-bad">{st.error}</p>}
+      {st.hint && <p className="mt-1 text-[13px] text-muted">{st.hint}</p>}
+    </div>
+  );
+}
+
+function EnrollSteps({ node: n, admin, onEnroll, manualOnly }: { node: ClusterNode; admin: boolean; onEnroll: () => void; manualOnly?: boolean }) {
   const qc = useQueryClient();
   const authorize = useMutation({
     mutationFn: () => api.post(`/api/nodes/${n.id}/transition`, { action: "authorize" }),
@@ -293,7 +429,7 @@ function EnrollSteps({ node: n, admin, onEnroll }: { node: ClusterNode; admin: b
   ];
   return (
     <div className="mb-5 rounded-md border border-accent/30 bg-accent/5 p-4">
-      <p className="text-[13.5px] font-medium">Enroll this machine</p>
+      <p className="text-[13.5px] font-medium">{manualOnly ? "Or enroll manually" : "Enroll this machine"}</p>
       <ol className="mt-3 space-y-3">
         {steps.map(([title, body], i) => (
           <li key={title} className="flex gap-3">
@@ -303,7 +439,7 @@ function EnrollSteps({ node: n, admin, onEnroll }: { node: ClusterNode; admin: b
           </li>
         ))}
       </ol>
-      {n.tailnet.member && <p className="mt-3 text-xs text-muted">This machine is in your tailnet, so its agent can reach the controller through Tailscale even from another network.</p>}
+      {n.tailnet.member && !manualOnly && <p className="mt-3 text-xs text-muted">This machine is in your tailnet, so its agent can reach the controller through Tailscale even from another network.</p>}
     </div>
   );
 }

@@ -307,3 +307,5 @@ class EnrollmentToken(TimestampMixin, Base):
     used_by_node: Mapped[str | None] = mapped_column(String(32), nullable=True)
     allow_discovery_reports: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # when issued for a specific discovered machine, enrollment updates exactly that node
+    for_node: Mapped[str | None] = mapped_column(String(32), nullable=True)

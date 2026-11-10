@@ -103,7 +103,10 @@ def advertise(port: int):
 
 def cmd_enroll(a) -> None:
     cfg = {"controller": a.controller, "ca_file": a.ca_file}
-    r = post(cfg, "/api/agent/enroll", {"token": a.token, "inventory": inventory(True)})
+    token = sys.stdin.readline().strip() if a.token == "-" else a.token  # "-": read from stdin (not visible in ps)
+    if not token:
+        sys.exit("No enrollment token given")
+    r = post(cfg, "/api/agent/enroll", {"token": token, "inventory": inventory(True)})
     cfg.update({"agent_token": r["agent_token"], "node_id": r["node_id"], "discovery": a.discovery,
                 "heartbeat_seconds": r.get("heartbeat_seconds", 30)})
     save(cfg)
@@ -150,7 +153,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("enroll", help="enroll this machine with a one-time token")
     e.add_argument("--controller", required=True, help="e.g. https://lab-ws.example.org")
-    e.add_argument("--token", required=True)
+    e.add_argument("--token", required=True, help="one-time enrollment token, or '-' to read it from stdin")
     e.add_argument("--ca-file", help="CA bundle for a private TLS certificate")
     e.add_argument("--discovery", action="store_true", help="report neighbour devices (token must allow it)")
     r = sub.add_parser("run", help="send heartbeats (used by the systemd/launchd service)")

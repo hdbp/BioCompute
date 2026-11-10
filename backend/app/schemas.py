@@ -348,6 +348,16 @@ class TokenCreate(BaseModel):
     site: str | None = Field(default=None, pattern=r"^[\w.-]{1,80}$")
     ttl_hours: int = Field(default=24, ge=1, le=24 * 30)
     allow_discovery_reports: bool = False
+    node_id: str | None = None  # bind the token to one discovered machine
+
+
+class SshEnrollIn(BaseModel):
+    ssh_user: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9._-]{0,63}$")
+    host: str
+    controller_url: str
+    site: str | None = None
+    install_service: bool = True
+    allow_discovery_reports: bool = False
 
 
 class AgentEnroll(BaseModel):

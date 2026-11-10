@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # CIDRs within which active probing (TCP connect to agent/SSH port) is permitted.
     discovery_authorized_cidrs: Annotated[list[str], NoDecode] = []
     agent_port: int = 8765
+    # One-click enrollment of tailnet machines over SSH (admin-initiated, tailnet members only)
+    allow_ssh_enrollment: bool = True
+    ssh_bin: str = "ssh"
+    # Address agents should use to reach this controller, e.g. https://lab-ws.tail1234.ts.net
+    public_url: str | None = None
     condor_status_bin: str = "condor_status"
     tailscale_bin: str = "tailscale"
 

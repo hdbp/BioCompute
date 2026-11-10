@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..db import get_db
 from ..models import EnrollmentToken, Node, NodeAllocation, NodeMetric, User
-from ..schemas import (AgentEnroll, AgentHeartbeat, AllocationIn, DiscoveryReport, ManualNodeIn, NodeOut, NodeTransition,
+from ..schemas import (AgentEnroll, AgentHeartbeat, SshEnrollIn, AllocationIn, DiscoveryReport, ManualNodeIn, NodeOut, NodeTransition,
                        NodeUpdate, PlacementIn, TokenCreate)
 from ..security import audit, require_admin, require_viewer, token_digest
-from ..services import cluster, events, fs
+from ..services import cluster, events, fs, ssh_enroll
 
 nodes_router = APIRouter(prefix="/api/nodes", tags=["cluster"])
 discovery_router = APIRouter(prefix="/api/discovery", tags=["cluster"])
@@ -136,6 +136,39 @@ def add_manual(body: ManualNodeIn, admin: User = Depends(require_admin), db: Ses
     return node_out(n)
 
 
+@nodes_router.get("/{nid}/ssh-enroll")
+def ssh_enroll_info(nid: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Defaults and current status for one-click enrollment of a tailnet machine."""
+    n = get_node(db, nid)
+    ctl = db.query(Node).filter(Node.is_controller.is_(True)).first()
+    from ..config import get_settings
+
+    s = get_settings()
+    t = cluster.tailnet_info(n)
+    reasons = []
+    if not s.allow_ssh_enrollment:
+        reasons.append("disabled by the administrator (BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false)")
+    if not t["member"]:
+        reasons.append("only machines in your tailnet can be enrolled automatically")
+    if n.is_controller or (n.agent_installed and n.state in ("active", "enrolled", "draining")):
+        reasons.append("already enrolled")
+    if n.state == "disabled":
+        reasons.append("machine is disabled")
+    return {"available": not reasons, "reasons": reasons, "targets": ssh_enroll.targets(n),
+            "controller_url": ssh_enroll.default_controller_url(ctl), "site": n.site or "home",
+            "ssh_bin": s.ssh_bin, "status": ssh_enroll.status(n.id)}
+
+
+@nodes_router.post("/{nid}/ssh-enroll")
+def ssh_enroll_start(nid: str, body: SshEnrollIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    n = get_node(db, nid)
+    st = ssh_enroll.start(db, n, user=body.ssh_user, host=body.host, controller_url=body.controller_url.rstrip("/"),
+                          site=body.site, install_service=body.install_service,
+                          allow_discovery_reports=body.allow_discovery_reports, actor=admin.username)
+    events.publish("nodes", {"kind": "ssh_enroll", "node_id": nid})
+    return st
+
+
 @nodes_router.get("/{nid}/condor-config", response_class=PlainTextResponse)
 def condor_config(nid: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
     return cluster.condor_config(get_node(db, nid))
@@ -229,7 +262,8 @@ def discovery_config(_: User = Depends(require_viewer)):
 
 @discovery_router.post("/tokens")
 def create_token(body: TokenCreate, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    tok = cluster.issue_token(db, body.label, body.site, body.ttl_hours, admin.username, body.allow_discovery_reports)
+    tok = cluster.issue_token(db, body.label, body.site, body.ttl_hours, admin.username, body.allow_discovery_reports,
+                              for_node=body.node_id)
     audit(db, admin.username, "enrollment.token_issued", body.label, site=body.site, ttl_hours=body.ttl_hours)
     db.commit()
     return {"token": tok, "expires_in_hours": body.ttl_hours,

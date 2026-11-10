@@ -114,6 +114,12 @@ replacement: it has no containers, no remote executors and no retries.
 * **Arbitrary code:** pipelines and Studio custom modules are code. They run with the controller
   service account's permissions and nothing more. The systemd unit sets `NoNewPrivileges` and
   `ProtectSystem`, and limits writable paths. Admins can disable custom code modules.
+* **SSH enrollment:** this is the only case where BioCompute changes another machine, and it is deliberately narrow.
+  * An admin starts it and confirms, for one tailnet member at a time.
+  * The target must be that machine's own tailnet address.
+  * The commands are fixed and quoted, and the token goes over stdin.
+  * It runs in BatchMode with `StrictHostKeyChecking=accept-new` and a known-hosts file in the state directory.
+  * It is audit-logged, and it can be disabled with `BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false`.
 * **Agents:** they have no inbound port and no command channel. Their identity is bound to a token,
   so a self-reported machine ID cannot override it. Discovery reports need a token flagged for them.
 * **HTML reports** are served with `Content-Security-Policy: sandbox`.
