@@ -68,7 +68,6 @@ python3 --version && node --version && git --version && java -version && nextflo
 ```bash
 git clone https://github.com/hdbp/BioCompute.git
 cd BioCompute
-git checkout claude/biocompute-platform-ugwao1   # until it is merged into main
 ```
 
 ---
