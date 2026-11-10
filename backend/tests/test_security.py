@@ -46,3 +46,14 @@ def test_readonly_root(client, auth):
 def test_audit_log(client, auth):
     rows = client.get("/api/auth/audit", headers=auth).json()
     assert any(r["action"] == "auth.login" for r in rows)
+
+
+def test_cli_reset_password(client, auth, capsys):
+    from app import cli
+
+    assert cli.main(["reset-password", "viewer2", "--password", "short"]) == 1
+    assert cli.main(["reset-password", "viewer2", "--password", "new-password-123", "--create", "--role", "viewer"]) == 0
+    r = client.post("/api/auth/login", json={"username": "viewer2", "password": "new-password-123"})
+    assert r.status_code == 200 and r.json()["user"]["role"] == "viewer"
+    assert cli.main(["info"]) == 0
+    assert "viewer2 (viewer)" in capsys.readouterr().out

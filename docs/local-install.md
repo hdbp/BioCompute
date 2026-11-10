@@ -285,9 +285,9 @@ This leaves your data roots and analysis outputs untouched.
 |---|---|
 | `python3 -m venv` fails with "ensurepip is not available" | `sudo apt install python3-venv` |
 | `Settings` validation error about `BIOCOMPUTE_DATA_ROOTS` at start-up | The value must be one line of valid JSON with double quotes. Check it with `python3 -c 'import json,sys; json.loads(sys.argv[1])' '<value>'` |
-| Login page loads but login fails with 401 | Wrong password. If you left `BIOCOMPUTE_ADMIN_PASSWORD` empty, read `STATE_DIR/initial_admin_password.txt`. The admin password is only set on the very first start. |
+| Login fails with 401 | The admin password is only set when the database is first created; changing `.env` later has no effect. If it was generated, read `STATE_DIR/initial_admin_password.txt`. Check which database you are using with `cd backend && .venv/bin/python -m app.cli info`, and reset with `.venv/bin/python -m app.cli reset-password` (demo: `scripts/dev.sh admin reset-password`). Also make sure no *other* BioCompute is answering on the same port. |
 | "Data root ... is read-only" when launching | Choose an output folder in a root with `"writable": true` |
 | Nextflow found in a terminal but not by BioCompute | The service has a different PATH. Set `BIOCOMPUTE_NEXTFLOW_BIN` to the full path, or extend `Environment=PATH=` in the unit |
-| Port 8000 already in use | Start with `--port 8010` (and use that port in the browser) |
+| Port 8000 already in use | Find the owner with `sudo ss -ltnp 'sport = :8000'`. If it's an earlier BioCompute (dev.sh, manual uvicorn or the systemd service) stop it or use it. Otherwise start with `--port 8010` (demo: `BIOCOMPUTE_API_PORT=8010 scripts/dev.sh`). |
 
 More: [`troubleshooting.md`](troubleshooting.md). To add other computers as workers, see [`worker-agent.md`](worker-agent.md).

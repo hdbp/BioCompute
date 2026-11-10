@@ -37,9 +37,15 @@ def migrate() -> None:
     from alembic import command
     from alembic.config import Config
 
+    from sqlalchemy import inspect
+
     cfg = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
     cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
     cfg.set_main_option("sqlalchemy.url", s.database_url)
+    tables = set(inspect(get_engine()).get_table_names())
+    if "users" in tables and "alembic_version" not in tables:
+        # schema created without Alembic (older tooling): record it as the initial revision
+        command.stamp(cfg, "0001")
     command.upgrade(cfg, "head")
 
 
