@@ -68,14 +68,21 @@ Set `BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false` to turn the feature off.
   * **Regular SSH over the tailnet.** This is required for Macs: the Tailscale app from the Mac App Store or
     the standalone download cannot act as a Tailscale SSH *server*.
     1. Enable *System Settings → General → Sharing → Remote Login*.
-    2. Add the controller account's public key to `~/.ssh/authorized_keys` on the Mac. Create the key once on the
-       controller with `ssh-keygen -t ed25519`, run as the account that runs BioCompute.
+    2. Authorize BioCompute's SSH key on the Mac. In the enrollment panel, open **Controller SSH key** and click
+       *Create SSH key* (once). Then either run the shown `ssh-copy-id …` command on the controller, which asks for
+       the Mac user's password once, or paste the shown `echo '…' >> ~/.ssh/authorized_keys` command into a
+       terminal on the Mac. The key lives in `<state dir>/ssh/biocompute_ed25519` and is readable only by the
+       account running BioCompute.
 * **A reachable controller address.** The controller must be reachable from the worker at the URL you enter.
   Use the nginx front end (`http://<controller>.<tailnet>.ts.net:8080`) or TLS.
   For a quick test, start the API on the tailnet address:
   `uvicorn app.main:app --host $(tailscale ip -4) --port 8000`.
 * **macOS background service:** to install the launchd service over SSH, someone must be logged in to the Mac's
   desktop. Otherwise the agent is still enrolled; run `install.sh` once when logged in.
+
+`Permission denied (publickey,password)` means the machine's own sshd answered, so the port is right, but no key
+from the controller is authorized. Password login is not possible for automatic enrollment. Authorize the key as
+described above, then click *Try again*.
 
 If a step fails, the panel shows the output and a hint for common problems: refused key, check-mode policy,
 no route, or a changed host key. *Try again* reruns the whole sequence; it is safe to repeat.

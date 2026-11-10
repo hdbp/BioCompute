@@ -250,6 +250,20 @@ def scan(methods: str | None = None, admin: User = Depends(require_admin), db: S
     return summary
 
 
+@discovery_router.get("/ssh-key")
+def get_ssh_key(_: User = Depends(require_admin)):
+    """BioCompute's SSH public key, to authorize on machines that use their own sshd."""
+    return ssh_enroll.key_info()
+
+
+@discovery_router.post("/ssh-key")
+def create_ssh_key(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    info = ssh_enroll.create_key()
+    audit(db, admin.username, "ssh_key.created", info["fingerprint"])
+    db.commit()
+    return info
+
+
 @discovery_router.get("/config")
 def discovery_config(_: User = Depends(require_viewer)):
     s = get_settings()

@@ -385,6 +385,9 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
 
       {st && <SshProgress st={st} />}
 
+      <ControllerKey user={f.ssh_user} host={f.host} port={f.ssh_port || "22"}
+        open={!!st?.hint && /SSH key/.test(st.hint)} />
+
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent title={`Enroll ${n.hostname} automatically?`} description="BioCompute will run exactly these steps on that machine, as the SSH user you entered.">
           <ol className="list-decimal space-y-1.5 pl-5 text-[13px]">
@@ -401,6 +404,73 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+interface KeyInfo { exists: boolean; public_key: string | null; path: string; fingerprint: string | null }
+
+function ControllerKey({ user, host, port, open }: { user: string; host: string; port: string; open: boolean }) {
+  const qc = useQueryClient();
+  const [show, setShow] = useState(open);
+  useEffect(() => { if (open) setShow(true); }, [open]);
+  const key = useQuery({ queryKey: ["ssh-key"], queryFn: () => api.get<KeyInfo>("/api/discovery/ssh-key"), enabled: show });
+  const create = useMutation({
+    mutationFn: () => api.post<KeyInfo>("/api/discovery/ssh-key"),
+    onSuccess: (k) => { qc.setQueryData(["ssh-key"], k); toast.success("SSH key created"); },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+  const k = key.data;
+  const who = `${user || "USER"}@${host || "MACHINE"}`;
+  const onMachine = k?.public_key
+    ? `mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${k.public_key}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
+    : "";
+  const fromController = k?.public_key ? `ssh-copy-id -i ${k.path}.pub -p ${port} ${who}` : "";
+  const copy = (t: string) => { navigator.clipboard.writeText(t); toast.success("Copied"); };
+
+  return (
+    <div className="mt-4 border-t border-line pt-3">
+      <button type="button" className="flex items-center gap-2 text-[13px] font-medium hover:underline" onClick={() => setShow(!show)} aria-expanded={show}>
+        <KeyRound className="size-4 text-muted" />Controller SSH key
+        <span className="font-normal text-xs text-muted">for machines using their own sshd (e.g. Macs with Remote Login)</span>
+      </button>
+      {show && (
+        <div className="mt-3 space-y-3 text-[13px]">
+          {key.isLoading && <Skeleton className="h-10" />}
+          {k && !k.exists && (
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-muted">BioCompute has no SSH key yet. It creates one for itself on the controller (no passphrase, readable only by the account running BioCompute).</p>
+              <Button size="sm" variant="primary" loading={create.isPending} onClick={() => create.mutate()}><KeyRound />Create SSH key</Button>
+            </div>
+          )}
+          {k?.exists && (
+            <>
+              <p className="text-muted">Authorize this key once on the machine, then click <span className="text-text">Try again</span>. Fingerprint <code className="font-mono text-[12px]">{k.fingerprint}</code>.</p>
+              <div>
+                <p className="mb-1 font-medium">Option 1: on the controller (asks for {user || "the user"}'s password on that machine once)</p>
+                <CopyBlock text={fromController} onCopy={copy} />
+              </div>
+              <div>
+                <p className="mb-1 font-medium">Option 2: on the machine itself, in a terminal as {user || "that user"}</p>
+                <CopyBlock text={onMachine} onCopy={copy} />
+              </div>
+              <p className="text-xs text-muted">
+                Option 1 must run as the account that runs BioCompute (for the systemd install: <code className="font-mono">sudo -u biocompute …</code>).
+                On a Mac, Remote Login must be on: System Settings, General, Sharing.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CopyBlock({ text, onCopy }: { text: string; onCopy: (t: string) => void }) {
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-line bg-ink/60 p-2">
+      <code className="min-w-0 flex-1 break-all font-mono text-[11.5px]">{text}</code>
+      <button type="button" className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-text" onClick={() => onCopy(text)} aria-label="Copy command"><Copy className="size-3.5" /></button>
     </div>
   );
 }

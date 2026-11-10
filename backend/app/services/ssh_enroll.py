@@ -17,6 +17,8 @@ from __future__ import annotations
 import io
 import re
 import shlex
+import shutil
+import socket
 import subprocess
 import tarfile
 import threading
@@ -50,9 +52,12 @@ STEPS = [
 ]
 
 HINTS = [
+    (r"Permission denied \(publickey,password|Permission denied \(publickey,keyboard", "The machine's own SSH server "
+     "answered, so the port is right, but it did not accept any key from the controller (password login cannot be "
+     "used here). Authorize BioCompute's SSH key on that machine (see 'Controller SSH key' in this panel), then try again."),
     (r"Permission denied|publickey", "SSH refused the login. Allow SSH from the controller in your tailnet policy "
-     "(Tailscale SSH: an 'ssh' rule for this user) or add the controller service account's public key to "
-     "~/.ssh/authorized_keys on the machine."),
+     "(Tailscale SSH: an 'accept' rule for this user) or authorize BioCompute's SSH key on the machine "
+     "(see 'Controller SSH key' in this panel)."),
     (r"tailscale.*(check|re-?auth|authenticate)|visit.*login\.tailscale", "Tailscale SSH is in 'check' mode and wants a "
      "browser re-authentication; use an 'accept' rule for the controller, or connect once interactively."),
     (r"Connection timed out|No route to host|Could not resolve", "The machine did not answer over the tailnet. Is it online "
@@ -62,6 +67,41 @@ HINTS = [
     (r"Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED", "The machine's SSH host key changed. "
      "Remove its line from the controller's ssh_known_hosts in the state directory if this is expected."),
 ]
+
+
+def key_path() -> Path:
+    return Path(get_settings().state_dir).resolve() / "ssh" / "biocompute_ed25519"
+
+
+def key_info() -> dict[str, Any]:
+    """BioCompute's own SSH key (no passphrase, readable only by the service account)."""
+    k = key_path()
+    pub = k.with_suffix(".pub")
+    if not (k.is_file() and pub.is_file()):
+        return {"exists": False, "public_key": None, "path": str(k), "fingerprint": None}
+    fp = None
+    keygen = shutil.which("ssh-keygen")
+    if keygen:
+        r = subprocess.run([keygen, "-lf", str(pub)], capture_output=True, text=True)
+        fp = r.stdout.split()[1] if r.returncode == 0 and len(r.stdout.split()) > 1 else None
+    return {"exists": True, "public_key": pub.read_text().strip(), "path": str(k), "fingerprint": fp}
+
+
+def create_key() -> dict[str, Any]:
+    k = key_path()
+    if k.is_file():
+        return key_info()
+    keygen = shutil.which("ssh-keygen")
+    if not keygen:
+        raise HTTPException(500, "ssh-keygen is not installed on the controller (package openssh-client)")
+    k.parent.mkdir(parents=True, exist_ok=True)
+    k.parent.chmod(0o700)
+    comment = f"biocompute@{socket.gethostname().split('.')[0]}"
+    r = subprocess.run([keygen, "-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", str(k)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise HTTPException(500, f"ssh-keygen failed: {r.stderr.strip()[:300]}")
+    k.chmod(0o600)
+    return key_info()
 
 
 def _hint(text: str) -> str | None:
@@ -106,7 +146,9 @@ def _ssh(user: str, host: str, script: str, stdin: bytes | None = None, timeout:
     s = get_settings()
     known = Path(s.state_dir).resolve() / "ssh_known_hosts"
     argv = [s.ssh_bin, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new",
-            "-o", f"UserKnownHostsFile={known}", "-o", "LogLevel=ERROR", "-p", str(int(port)), "-l", user, "--", host,
+            "-o", f"UserKnownHostsFile={known}", "-o", "LogLevel=ERROR", "-p", str(int(port)), "-l", user,
+            *(["-i", str(key_path())] if key_path().is_file() else []),  # plus any agent/default keys
+            "--", host,
             "sh -c " + shlex.quote(script)]  # remote login shell may be zsh/fish: always run POSIX sh
     try:
         p = subprocess.run(argv, input=stdin or b"", capture_output=True, timeout=timeout)

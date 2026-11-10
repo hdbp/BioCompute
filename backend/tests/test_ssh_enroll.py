@@ -45,7 +45,7 @@ def fake_ssh(tmp_path: Path, behaviour: str = "ok") -> Path:
     log = tmp_path / "ssh.log"
     script = tmp_path / "ssh"
     if behaviour == "denied":
-        body = 'echo "user@host: Permission denied (publickey)." >&2; exit 255'
+        body = 'echo "hugo@100.110.224.52: Permission denied (publickey,password)." >&2; exit 255'
     else:
         body = (f'cmd="${{@: -1}}"\n'
                 f'HOME="{home}" BIOCOMPUTE_MACHINE_ID=remote-imac-1234 sh -c "$cmd"')
@@ -111,7 +111,7 @@ def test_ssh_enrollment_failures(client, auth, live_url, tmp_path, monkeypatch):
     r = client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={"ssh_user": "hugo", "host": "100.101.0.10", "controller_url": live_url})
     assert r.status_code == 200
     st = _wait(client, auth, nid)
-    assert st["state"] == "failed" and "Tailscale SSH" in st["hint"] and st["steps"][0]["state"] == "failed"
+    assert st["state"] == "failed" and "port is right" in st["hint"] and st["steps"][0]["state"] == "failed"
     # unreachable controller URL is caught before the token is used
     monkeypatch.setattr(get_settings(), "ssh_bin", str(fake_ssh(tmp_path)))
     r = client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={"ssh_user": "hugo", "host": "100.101.0.10", "controller_url": "http://127.0.0.1:9"})
@@ -148,3 +148,24 @@ def test_install_sh_from_its_own_folder(tmp_path):
     assert f"{dest}/biocompute_agent.py run" in unit and "@PYTHON@" not in unit
     log = calls.read_text()
     assert "systemctl --user enable biocompute-agent.service" in log and "loginctl enable-linger tester" in log
+
+
+def test_controller_ssh_key(client, auth, live_url, tmp_path, monkeypatch):
+    import shutil as _sh
+
+    if not _sh.which("ssh-keygen"):
+        pytest.skip("ssh-keygen not installed")
+    assert client.get("/api/discovery/ssh-key", headers=auth).json()["exists"] in (False, True)
+    r = client.post("/api/discovery/ssh-key", headers=auth)
+    assert r.status_code == 200
+    k = r.json()
+    assert k["exists"] and k["public_key"].startswith("ssh-ed25519 ") and k["fingerprint"].startswith("SHA256:")
+    assert oct(os.stat(k["path"]).st_mode & 0o777) == "0o600"
+    assert client.post("/api/discovery/ssh-key", headers=auth).json()["public_key"] == k["public_key"]  # idempotent
+    # enrollment now offers this key
+    monkeypatch.setattr(get_settings(), "ssh_bin", str(fake_ssh(tmp_path, "denied")))
+    nid = _tailnet_node("keyed", "100.101.0.11")
+    client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={"ssh_user": "hugo", "host": "100.101.0.11", "controller_url": live_url})
+    st = _wait(client, auth, nid)
+    assert f"-i {k['path']}" in (tmp_path / "ssh.log").read_text()
+    assert "Controller SSH key" in st["hint"]
