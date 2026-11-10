@@ -276,10 +276,15 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
 }
 
 interface SshStep { id: string; title: string; state: "pending" | "running" | "done" | "failed" | "skipped"; output: string }
-interface SshStatus { state: "running" | "done" | "warning" | "failed"; steps: SshStep[]; error: string | null; hint: string | null; host: string; user: string; started_at: string }
+interface SshStatus { state: "running" | "done" | "warning" | "failed"; steps: SshStep[]; error: string | null; hint: string | null; host: string; user: string; port?: number; started_at: string }
 interface SshInfo { available: boolean; reasons: string[]; targets: string[]; controller_url: string | null; site: string; ssh_bin: string; status: SshStatus | null }
 
 const SSH_USER_KEY = "biocompute.sshUser";
+const SSH_PORTS_KEY = "biocompute.sshPorts"; // { [nodeId]: port }
+
+function loadPorts(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(SSH_PORTS_KEY) ?? "{}"); } catch { return {}; }
+}
 
 function SshEnroll({ node: n }: { node: ClusterNode }) {
   const qc = useQueryClient();
@@ -302,26 +307,33 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
     setRunning(isRunning);
   }, [st, running, n.hostname, qc]);
 
-  const [f, setF] = useState({ ssh_user: "", host: "", controller_url: "", site: "", install_service: true, allow_discovery_reports: false });
+  const [f, setF] = useState({ ssh_user: "", host: "", ssh_port: "", controller_url: "", site: "", install_service: true, allow_discovery_reports: false });
   const [confirming, setConfirming] = useState(false);
   useEffect(() => {
     if (!info.data) return;
     let saved = "";
     try { saved = localStorage.getItem(SSH_USER_KEY) ?? ""; } catch { /* storage unavailable */ }
+    const lastPort = info.data.status?.port ?? loadPorts()[n.id];
     setF((x) => ({ ...x, ssh_user: x.ssh_user || saved, host: x.host || info.data!.targets[0] || "",
+      ssh_port: x.ssh_port || (lastPort ? String(lastPort) : "22"),
       controller_url: x.controller_url || info.data!.controller_url || "", site: x.site || info.data!.site }));
   }, [info.data]);
   const start = useMutation({
-    mutationFn: () => api.post<SshStatus>(`/api/nodes/${n.id}/ssh-enroll`, { ...f, site: f.site || null }),
+    mutationFn: () => api.post<SshStatus>(`/api/nodes/${n.id}/ssh-enroll`, { ...f, ssh_port: Number(f.ssh_port), site: f.site || null }),
     onSuccess: () => {
-      try { localStorage.setItem(SSH_USER_KEY, f.ssh_user); } catch { /* ignore */ }
+      try {
+        localStorage.setItem(SSH_USER_KEY, f.ssh_user);
+        localStorage.setItem(SSH_PORTS_KEY, JSON.stringify({ ...loadPorts(), [n.id]: Number(f.ssh_port) }));
+      } catch { /* ignore */ }
       setConfirming(false); setRunning(true); qc.invalidateQueries({ queryKey: ["ssh-enroll", n.id] });
     },
     onError: (e) => { setConfirming(false); toast.error(errMsg(e)); },
   });
   if (!info.data || (!info.data.available && !st)) return null;
   const busy = st?.state === "running" || start.isPending;
-  const valid = /^[A-Za-z_][A-Za-z0-9._-]*$/.test(f.ssh_user) && !!f.host && /^https?:\/\//.test(f.controller_url);
+  const portNum = Number(f.ssh_port);
+  const portOk = Number.isInteger(portNum) && portNum >= 1 && portNum <= 65535;
+  const valid = /^[A-Za-z_][A-Za-z0-9._-]*$/.test(f.ssh_user) && !!f.host && portOk && /^https?:\/\//.test(f.controller_url);
 
   return (
     <div className="mb-5 rounded-md border p-4" style={{ borderColor: "rgb(var(--src-tailscale) / 0.45)", backgroundColor: "rgb(var(--src-tailscale) / 0.06)" }}>
@@ -331,7 +343,8 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
           <p className="text-[13.5px] font-medium">Enroll automatically over Tailscale SSH</p>
           <p className="text-xs text-muted mt-0.5">
             The controller connects to this machine through your tailnet, installs the agent in your home folder and enrolls it.
-            It needs Tailscale SSH (or an SSH key for the controller's account) and Python 3.9+ on the machine. Nothing needs root.
+            It needs Tailscale SSH (always port 22 on the tailnet address) or your own sshd with the controller's key, on whatever
+            port it listens on, and Python 3.9+ on the machine. Nothing needs root.
           </p>
         </div>
       </div>
@@ -342,11 +355,17 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
             <Field label="SSH user on that machine" required>
               <Input value={f.ssh_user} onChange={(e) => setF({ ...f, ssh_user: e.target.value.trim() })} placeholder="hugo" autoComplete="off" />
             </Field>
-            <Field label="Connect to">
-              <Select value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })}>
-                {info.data.targets.map((t) => <option key={t}>{t}</option>)}
-              </Select>
-            </Field>
+            <div className="grid grid-cols-[1fr_96px] gap-3">
+              <Field label="Connect to">
+                <Select value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })}>
+                  {info.data.targets.map((t) => <option key={t}>{t}</option>)}
+                </Select>
+              </Field>
+              <Field label="SSH port" error={f.ssh_port && !portOk ? "1 to 65535" : null}>
+                <Input type="number" min={1} max={65535} value={f.ssh_port} aria-invalid={!portOk}
+                  onChange={(e) => setF({ ...f, ssh_port: e.target.value.replace(/\D/g, "") })} />
+              </Field>
+            </div>
             <Field label="Controller address, as seen from that machine" required className="sm:col-span-2"
               hint="Use the controller's tailnet name and the nginx/TLS port (8080 or 443). The API port 8000 only listens locally unless you bound it to the tailnet.">
               <Input value={f.controller_url} onChange={(e) => setF({ ...f, controller_url: e.target.value.trim() })} placeholder="http://lab-ws.tail1234.ts.net:8080" className="font-mono text-[12px]" />
@@ -369,7 +388,7 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent title={`Enroll ${n.hostname} automatically?`} description="BioCompute will run exactly these steps on that machine, as the SSH user you entered.">
           <ol className="list-decimal space-y-1.5 pl-5 text-[13px]">
-            <li>Connect with <code className="font-mono text-[12px]">{info.data.ssh_bin} {f.ssh_user}@{f.host}</code> (no password prompts) and check for Python 3.9+.</li>
+            <li>Connect with <code className="font-mono text-[12px]">{info.data.ssh_bin} -p {f.ssh_port} {f.ssh_user}@{f.host}</code> (no password prompts) and check for Python 3.9+.</li>
             <li>Check the machine can reach <code className="font-mono text-[12px]">{f.controller_url}</code>.</li>
             <li>Copy the agent to <code className="font-mono text-[12px]">~/.local/share/biocompute-agent</code>.</li>
             <li>Enroll with a one-time token sent over the encrypted connection (never on a command line).</li>

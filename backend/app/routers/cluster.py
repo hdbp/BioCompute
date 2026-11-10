@@ -162,7 +162,7 @@ def ssh_enroll_info(nid: str, _: User = Depends(require_admin), db: Session = De
 @nodes_router.post("/{nid}/ssh-enroll")
 def ssh_enroll_start(nid: str, body: SshEnrollIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     n = get_node(db, nid)
-    st = ssh_enroll.start(db, n, user=body.ssh_user, host=body.host, controller_url=body.controller_url.rstrip("/"),
+    st = ssh_enroll.start(db, n, user=body.ssh_user, host=body.host, port=body.ssh_port, controller_url=body.controller_url.rstrip("/"),
                           site=body.site, install_service=body.install_service,
                           allow_discovery_reports=body.allow_discovery_reports, actor=admin.username)
     events.publish("nodes", {"kind": "ssh_enroll", "node_id": nid})

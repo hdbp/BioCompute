@@ -354,6 +354,7 @@ class TokenCreate(BaseModel):
 class SshEnrollIn(BaseModel):
     ssh_user: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9._-]{0,63}$")
     host: str
+    ssh_port: int = Field(default=22, ge=1, le=65535)
     controller_url: str
     site: str | None = None
     install_service: bool = True

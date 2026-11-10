@@ -81,8 +81,10 @@ def test_ssh_enrollment_end_to_end(client, auth, live_url, tmp_path, monkeypatch
     # target must be one of this node's tailnet addresses
     bad = client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={"ssh_user": "hugo", "host": "evil.example.org", "controller_url": live_url})
     assert bad.status_code == 400
+    bad_port = client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={"ssh_user": "hugo", "host": "100.101.0.9", "ssh_port": 70000, "controller_url": live_url})
+    assert bad_port.status_code == 422
     r = client.post(f"/api/nodes/{nid}/ssh-enroll", headers=auth, json={
-        "ssh_user": "hugo", "host": "100.101.0.9", "controller_url": live_url, "site": "home", "install_service": False})
+        "ssh_user": "hugo", "host": "100.101.0.9", "ssh_port": 2222, "controller_url": live_url, "site": "home", "install_service": False})
     assert r.status_code == 200, r.text
     st = _wait(client, auth, nid)
     assert st["state"] == "done", json.dumps(st, indent=1)
@@ -94,6 +96,7 @@ def test_ssh_enrollment_end_to_end(client, auth, live_url, tmp_path, monkeypatch
     # the token never appears on an ssh command line; options are non-interactive
     log = (tmp_path / "ssh.log").read_text()
     assert "bce_" not in log and "BatchMode=yes" in log and "-l hugo" in log
+    assert all("-p 2222" in line for line in log.splitlines())  # chosen port used for every step
     assert (tmp_path / "remote-home/.config/biocompute/agent.json").exists()
     assert (tmp_path / "remote-home/.local/share/biocompute-agent/hostinfo.py").is_file()
     audit = client.get("/api/auth/audit", headers=auth).json()

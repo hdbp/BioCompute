@@ -56,8 +56,9 @@ HINTS = [
     (r"tailscale.*(check|re-?auth|authenticate)|visit.*login\.tailscale", "Tailscale SSH is in 'check' mode and wants a "
      "browser re-authentication; use an 'accept' rule for the controller, or connect once interactively."),
     (r"Connection timed out|No route to host|Could not resolve", "The machine did not answer over the tailnet. Is it online "
-     "and logged in to Tailscale, with Tailscale SSH or sshd enabled?"),
-    (r"Connection refused", "Nothing listens on SSH. Enable Tailscale SSH (`tailscale set --ssh`) or Remote Login/sshd."),
+     "and logged in to Tailscale, with Tailscale SSH or sshd enabled on the chosen port (a firewall may also block that port)?"),
+    (r"Connection refused", "Nothing listens for SSH on that port. Check the SSH port (Tailscale SSH always uses 22 on the "
+     "tailnet address; your own sshd may use another), or enable Tailscale SSH (`tailscale set --ssh`) / Remote Login."),
     (r"Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED", "The machine's SSH host key changed. "
      "Remove its line from the controller's ssh_known_hosts in the state directory if this is expected."),
 ]
@@ -101,11 +102,11 @@ def _agent_tarball() -> bytes:
     return buf.getvalue()
 
 
-def _ssh(user: str, host: str, script: str, stdin: bytes | None = None, timeout: int = 120) -> tuple[int, str]:
+def _ssh(user: str, host: str, script: str, stdin: bytes | None = None, timeout: int = 120, port: int = 22) -> tuple[int, str]:
     s = get_settings()
     known = Path(s.state_dir).resolve() / "ssh_known_hosts"
     argv = [s.ssh_bin, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new",
-            "-o", f"UserKnownHostsFile={known}", "-o", "LogLevel=ERROR", "-l", user, "--", host,
+            "-o", f"UserKnownHostsFile={known}", "-o", "LogLevel=ERROR", "-p", str(int(port)), "-l", user, "--", host,
             "sh -c " + shlex.quote(script)]  # remote login shell may be zsh/fish: always run POSIX sh
     try:
         p = subprocess.run(argv, input=stdin or b"", capture_output=True, timeout=timeout)
@@ -127,7 +128,7 @@ def status(node_id: str) -> dict[str, Any] | None:
         return (n.network or {}).get("ssh_enroll") if n else None
 
 
-def start(db, node: Node, *, user: str, host: str, controller_url: str, site: str | None,
+def start(db, node: Node, *, user: str, host: str, controller_url: str, site: str | None, port: int = 22,
           install_service: bool, allow_discovery_reports: bool, actor: str) -> dict[str, Any]:
     s = get_settings()
     if not s.allow_ssh_enrollment:
@@ -140,6 +141,8 @@ def start(db, node: Node, *, user: str, host: str, controller_url: str, site: st
         raise HTTPException(400, "Automatic enrollment is only available for machines in your tailnet")
     if host not in targets(node):
         raise HTTPException(400, f"SSH target must be one of this machine's tailnet addresses: {', '.join(targets(node))}")
+    if not 1 <= int(port) <= 65535:
+        raise HTTPException(400, "SSH port must be between 1 and 65535")
     if not USER_RE.match(user):
         raise HTTPException(400, "Invalid SSH user name")
     if not URL_RE.match(controller_url):
@@ -149,7 +152,7 @@ def start(db, node: Node, *, user: str, host: str, controller_url: str, site: st
     with _lock:
         if _jobs.get(node.id, {}).get("state") == "running":
             raise HTTPException(409, "An enrollment for this machine is already running")
-        job = {"node_id": node.id, "state": "running", "user": user, "host": host, "controller_url": controller_url,
+        job = {"node_id": node.id, "state": "running", "user": user, "host": host, "port": int(port), "controller_url": controller_url,
                "started_at": datetime.now(timezone.utc).isoformat(), "finished_at": None, "error": None, "hint": None,
                "steps": [{"id": i, "title": t, "state": "skipped" if (i == "service" and not install_service) else "pending",
                           "output": ""} for i, t in STEPS]}
@@ -158,7 +161,7 @@ def start(db, node: Node, *, user: str, host: str, controller_url: str, site: st
         node.state = "candidate"
     token = cluster.issue_token(db, f"ssh enrollment: {node.hostname}", site or node.site, 1, actor,
                                 allow_discovery_reports, for_node=node.id)
-    audit(db, actor, "node.ssh_enroll_started", node.hostname, ssh_user=user, host=host, controller=controller_url,
+    audit(db, actor, "node.ssh_enroll_started", node.hostname, ssh_user=user, host=host, port=int(port), controller=controller_url,
           install_service=install_service)
     db.commit()
     threading.Thread(target=_run, args=(node.id, token, install_service, allow_discovery_reports, actor),
@@ -177,7 +180,10 @@ def _set(job, step_id, state, output=""):
 
 def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor: str) -> None:
     job = _jobs[node_id]
-    user, host, url = job["user"], job["host"], job["controller_url"]
+    user, host, url, port = job["user"], job["host"], job["controller_url"], job["port"]
+
+    def ssh(script: str, **kw):
+        return _ssh(user, host, script, port=port, **kw)
 
     def fail(step_id, msg, out=""):
         _set(job, step_id, "failed", out or msg)
@@ -186,14 +192,14 @@ def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor
 
     try:
         _set(job, "connect", "running")
-        rc, out = _ssh(user, host, 'uname -s; command -v python3 >/dev/null 2>&1 || { echo "python3 not found"; exit 3; }; '
+        rc, out = ssh('uname -s; command -v python3 >/dev/null 2>&1 || { echo "python3 not found"; exit 3; }; '
                                    'python3 -c "import sys; print(\'python %d.%d\' % sys.version_info[:2]); sys.exit(0 if sys.version_info >= (3, 9) else 4)"')
         if rc != 0:
             return fail("connect", "Python 3.9+ is required on the machine" if rc in (3, 4) else "SSH connection failed", out)
         _set(job, "connect", "done", out)
 
         _set(job, "reach", "running")
-        rc, out = _ssh(user, host, "python3 -c " + shlex.quote(
+        rc, out = ssh("python3 -c " + shlex.quote(
             "import sys, urllib.request; urllib.request.urlopen(sys.argv[1] + '/api/health', timeout=10).read(); print('controller reachable')")
             + " " + shlex.quote(url))
         if rc != 0:
@@ -202,7 +208,7 @@ def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor
         _set(job, "reach", "done", out)
 
         _set(job, "copy", "running")
-        rc, out = _ssh(user, host, f'mkdir -p "{REMOTE_DIR}" && tar -xf - -C "{REMOTE_DIR}" && echo copied to "{REMOTE_DIR}"',
+        rc, out = ssh(f'mkdir -p "{REMOTE_DIR}" && tar -xf - -C "{REMOTE_DIR}" && echo copied to "{REMOTE_DIR}"',
                        stdin=_agent_tarball())
         if rc != 0:
             return fail("copy", "Copying the agent failed", out)
@@ -212,14 +218,14 @@ def _run(node_id: str, token: str, install_service: bool, discovery: bool, actor
         cmd = f'python3 "{REMOTE_DIR}/biocompute_agent.py" enroll --controller {shlex.quote(url)} --token -'
         if discovery:
             cmd += " --discovery"
-        rc, out = _ssh(user, host, cmd, stdin=(token + "\n").encode())
+        rc, out = ssh(cmd, stdin=(token + "\n").encode())
         if rc != 0:
             return fail("enroll", "Enrollment was rejected", out)
         _set(job, "enroll", "done", out)
 
         if install_service:
             _set(job, "service", "running")
-            rc, out = _ssh(user, host, f'sh "{REMOTE_DIR}/install.sh"', timeout=180)
+            rc, out = ssh(f'sh "{REMOTE_DIR}/install.sh"', timeout=180)
             if rc != 0:
                 return fail("service", "The agent is enrolled, but installing the background service failed. "
                                        "Run install.sh on the machine, or retry.", out)

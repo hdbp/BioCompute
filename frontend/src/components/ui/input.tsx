@@ -29,14 +29,25 @@ export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLab
   return <label className={cn("text-[13px] font-medium text-text", className)} {...props} />;
 }
 
+/** Label + control + hint/error. A single input/select/textarea child is linked to the label automatically. */
 export function Field({ label, hint, error, children, required, className }: {
   label: React.ReactNode; hint?: React.ReactNode; error?: string | null; children: React.ReactNode; required?: boolean; className?: string;
 }) {
+  const auto = React.useId();
+  const msgId = `${auto}-msg`;
+  type CtlProps = { id?: string; "aria-describedby"?: string; "aria-required"?: boolean };
+  const el = React.isValidElement<CtlProps>(children) ? children : null;
+  // forwardRef controls (Input, Select, Textarea, Switch...), native controls, or anything given an explicit id
+  const linkable = !!el && (typeof el.type === "object" || ["input", "select", "textarea"].includes(el.type as string) || !!el.props.id);
+  const id = linkable ? el!.props.id ?? auto : undefined;
+  const control = linkable
+    ? React.cloneElement(el!, { id, ...(error || hint ? { "aria-describedby": msgId } : {}), ...(required ? { "aria-required": true } : {}) })
+    : children;
   return (
     <div className={cn("space-y-1.5", className)}>
-      <Label>{label}{required && <span className="text-bad ml-0.5" aria-hidden>*</span>}</Label>
-      {children}
-      {error ? <p className="text-xs text-bad">{error}</p> : hint ? <p className="text-xs text-muted">{hint}</p> : null}
+      <Label htmlFor={id}>{label}{required && <span className="text-bad ml-0.5" aria-hidden>*</span>}</Label>
+      {control}
+      {error ? <p id={msgId} className="text-xs text-bad">{error}</p> : hint ? <p id={msgId} className="text-xs text-muted">{hint}</p> : null}
     </div>
   );
 }

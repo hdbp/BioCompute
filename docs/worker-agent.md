@@ -30,10 +30,12 @@ through Tailscale from any network. Tailscale itself remains optional.
 ## Automatic enrollment for tailnet machines (one click)
 
 For a machine in your tailnet, its panel on the *Nodes* page offers **Enroll automatically over Tailscale SSH**.
-You enter the SSH user on that machine and the controller address as that machine sees it, then confirm.
+You enter the SSH user and SSH port on that machine (22 by default) and the controller address as that machine sees it,
+then confirm. Tailscale SSH always answers on port 22 of the tailnet address. If the machine runs its own sshd on another
+port, enter that port; it is remembered per machine in your browser.
 BioCompute then runs this fixed sequence and shows each step live:
 
-1. `ssh -o BatchMode=yes <user>@<its tailnet name or IP>`, then check for Python 3.9+. There are never password prompts.
+1. `ssh -o BatchMode=yes -p <port> <user>@<its tailnet name or IP>`, then check for Python 3.9+. There are never password prompts.
 2. Check that the machine can reach the controller URL (`/api/health`). This catches a wrong address before any token is used.
 3. Copy the agent into `~/.local/share/biocompute-agent`.
 4. Enroll with a one-time token. The token is bound to this node, valid for 1 hour, and sent over the SSH connection's
