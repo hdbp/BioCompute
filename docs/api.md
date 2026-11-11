@@ -11,9 +11,11 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `DELETE /api/auth/users/{user_id}`
 - `GET    /api/auth/audit`
 - `GET    /api/auth/me`
+- `GET    /api/auth/setup`
 - `GET    /api/auth/users`
 - `POST   /api/auth/login`
 - `POST   /api/auth/password`
+- `POST   /api/auth/setup`
 - `POST   /api/auth/users`
 
 ### pipelines

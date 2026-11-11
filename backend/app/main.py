@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import secrets
 import sys
 import threading
 import time
@@ -22,6 +21,7 @@ from .routers import assistant, auth, cluster, data, experiments, explore, pipel
 from .security import hash_secret
 from .services import cluster as cluster_svc
 from .services import data_roots
+from .services import setup as setup_svc
 from .services import hostinfo
 from .services import pipelines as pipeline_svc
 from .services import runner
@@ -56,15 +56,12 @@ def bootstrap() -> None:
     s = get_settings()
     db = SessionLocal()
     try:
-        if not db.query(User).first():
-            pw = s.admin_password or secrets.token_urlsafe(12)
-            db.add(User(username=s.admin_username, password_hash=hash_secret(pw), role="admin"))
-            if not s.admin_password:
-                cred = Path(s.state_dir) / "initial_admin_password.txt"
-                fd = os.open(cred, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(fd, "w") as fh:
-                    fh.write(f"username: {s.admin_username}\npassword: {pw}\n")
-                print(f"[biocompute] created admin user '{s.admin_username}'; initial password written to {cred}", file=sys.stderr)
+        if not db.query(User).first() and s.admin_password:
+            # unattended installs: the administrator comes from the environment
+            db.add(User(username=s.admin_username, password_hash=hash_secret(s.admin_password), role="admin"))
+            setup_svc.mark_completed(db, "environment")
+        if setup_svc.needed(db):  # otherwise the first visitor creates the administrator in the browser
+            setup_svc.announce(setup_svc.ensure_code())
         pipeline_svc.seed_catalog(db)
         example = ROOT / "examples" / "pipelines" / "fastq-qc"
         if os.environ.get("BIOCOMPUTE_REGISTER_EXAMPLES", "true").lower() == "true" and example.is_dir():

@@ -10,9 +10,32 @@ from ..db import get_db
 from ..models import AuditEvent, User
 from ..schemas import LoginIn, PasswordChange, TokenOut, UserCreate, UserOut
 from ..security import audit, create_access_token, get_current_user, hash_secret, require_admin, verify_secret
+from ..services import setup as setup_svc
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 _failures: dict[str, list[float]] = defaultdict(list)
+
+
+class SetupIn(BaseModel):
+    username: str
+    password: str
+    code: str | None = None
+
+
+@router.get("/setup")
+def setup_status(request: Request, db: Session = Depends(get_db)):
+    """Whether the first administrator account still has to be created (no authentication needed)."""
+    return setup_svc.status(db, request)
+
+
+@router.post("/setup", response_model=TokenOut)
+def setup(body: SetupIn, request: Request, db: Session = Depends(get_db)):
+    user = setup_svc.complete(db, request, body.username, body.password, body.code)
+    audit(db, user.username, "auth.setup", from_this_computer=setup_svc.is_local(request),
+          ip=request.client.host if request.client else None)
+    db.commit()
+    return TokenOut(access_token=create_access_token(user), user=UserOut.model_validate(user))
 
 
 @router.post("/login", response_model=TokenOut)
@@ -23,12 +46,16 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     if len(window) >= 8:
         raise HTTPException(429, "Too many failed attempts; try again in a few minutes")
     user = db.query(User).filter(User.username == body.username).one_or_none()
+    if not user and not db.query(User).first():
+        raise HTTPException(409, "No account exists yet. Create the administrator account first.")
     if not user or not user.is_active or not verify_secret(body.password, user.password_hash):
         _failures[key].append(time.time())
         audit(db, body.username, "auth.login_failed", detail_ip=request.client.host if request.client else None)
         db.commit()
         raise HTTPException(401, "Invalid username or password")
     audit(db, user.username, "auth.login")
+    if setup_svc.needed(db):  # an older install's generated password was found and used: setup is done
+        setup_svc.mark_completed(db, "login")
     db.commit()
     return TokenOut(access_token=create_access_token(user), user=UserOut.model_validate(user))
 

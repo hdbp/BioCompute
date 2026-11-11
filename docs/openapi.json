@@ -6,6 +6,65 @@
         "version": "0.1.0"
     },
     "paths": {
+        "/api/auth/setup": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Setup Status",
+                "description": "Whether the first administrator account still has to be created (no authentication needed).",
+                "operationId": "setup_status_api_auth_setup_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Setup",
+                "operationId": "setup_api_auth_setup_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SetupIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TokenOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/auth/login": {
             "post": {
                 "tags": [
@@ -6477,6 +6536,11 @@
                             }
                         ],
                         "title": "Graph"
+                    },
+                    "create_modules": {
+                        "type": "boolean",
+                        "title": "Create Modules",
+                        "default": false
                     }
                 },
                 "type": "object",
@@ -9033,6 +9097,35 @@
                 ],
                 "title": "SchemaAuthorIn",
                 "description": "Generic schema wizard: list of parameters for pipelines lacking nextflow_schema.json."
+            },
+            "SetupIn": {
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "title": "Username"
+                    },
+                    "password": {
+                        "type": "string",
+                        "title": "Password"
+                    },
+                    "code": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Code"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "username",
+                    "password"
+                ],
+                "title": "SetupIn"
             },
             "SshEnrollIn": {
                 "properties": {

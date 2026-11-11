@@ -42,7 +42,7 @@ pipelines that ship a `bcflow.json` can run, using the native engine.
 ```bash
 scripts/dev.sh
 # API  http://127.0.0.1:8000  (OpenAPI docs at /docs)
-# UI   http://127.0.0.1:5173  user: admin  password: biocompute-dev
+# UI   http://127.0.0.1:5173  (first start: create your administrator account there)
 ```
 
 `dev.sh` generates a **synthetic** FASTQ dataset under `var/demo/raw` (random reads, labelled as
@@ -67,7 +67,7 @@ sudo deploy/install-controller.sh          # service user, venv, systemd unit, U
 sudoedit /etc/biocompute/biocompute.env    # data roots, DB password, site name (see .env.example)
 docker compose up -d db web                # PostgreSQL on 127.0.0.1:5432, UI on :8080
 sudo systemctl enable --now biocompute     # API on 127.0.0.1:8000 (migrations run automatically)
-sudo cat /var/lib/biocompute/initial_admin_password.txt
+sudo cat /var/lib/biocompute/setup_code.txt  # one-time code for the first-run account screen
 ```
 
 Single-machine install with your own data: [`docs/local-install.md`](docs/local-install.md).

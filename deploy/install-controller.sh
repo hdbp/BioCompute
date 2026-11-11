@@ -20,4 +20,5 @@ install -m 0644 "$src/deploy/biocompute.service" /etc/systemd/system/biocompute.
 systemctl daemon-reload
 echo "Next: docker compose up -d db web   (from $prefix)"
 echo "      systemctl enable --now biocompute"
-echo "      cat /var/lib/biocompute/initial_admin_password.txt"
+echo "      open http://<this-machine>:8080 and create the administrator account"
+echo "      (setup code: sudo cat /var/lib/biocompute/setup_code.txt, or journalctl -u biocompute)"

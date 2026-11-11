@@ -85,7 +85,8 @@ The first run takes a few minutes:
 
 Once it is running:
 
-* Open **http://127.0.0.1:5173** and log in as `admin` with password `biocompute-dev`.
+* Open **http://127.0.0.1:5173**. The first time, BioCompute asks you to **create the administrator account**
+  (username and password; no code is needed in a browser on the same computer). A *Getting started* checklist follows.
 * API documentation is at http://127.0.0.1:8000/docs.
 * Press `Ctrl+C` to stop.
 
@@ -137,7 +138,7 @@ BIOCOMPUTE_DATABASE_URL=sqlite:////home/YOU/biocompute/biocompute.db
 # BioCompute's own state: pipeline store, run folders, secret key
 BIOCOMPUTE_STATE_DIR=/home/YOU/biocompute/state
 
-# Your admin password (leave empty to have one generated into STATE_DIR/initial_admin_password.txt)
+# Optional: creates an "admin" account with this password. Leave it empty to create your own account in the browser on first start.
 BIOCOMPUTE_ADMIN_PASSWORD=choose-a-long-password
 
 # The ONLY folders BioCompute may browse. One line of JSON.
@@ -293,7 +294,7 @@ This leaves your data roots and analysis outputs untouched.
 |---|---|
 | `python3 -m venv` fails with "ensurepip is not available" | `sudo apt install python3-venv` |
 | `Settings` validation error about `BIOCOMPUTE_DATA_ROOTS` at start-up | The value must be one line of valid JSON with double quotes. Check it with `python3 -c 'import json,sys; json.loads(sys.argv[1])' '<value>'` |
-| Login fails with 401 | The admin password is only set when the database is first created; changing `.env` later has no effect. If it was generated, read `STATE_DIR/initial_admin_password.txt`. Check which database you are using with `cd backend && .venv/bin/python -m app.cli info`, and reset with `.venv/bin/python -m app.cli reset-password` (demo: `scripts/dev.sh admin reset-password`). Also make sure no *other* BioCompute is answering on the same port. |
+| Login fails with 401 | The admin password is only set when the database is first created; changing `.env` later has no effect. Check which database you are using with `cd backend && .venv/bin/python -m app.cli info`, and reset with `.venv/bin/python -m app.cli reset-password` (demo: `scripts/dev.sh admin reset-password`). Also make sure no *other* BioCompute is answering on the same port. |
 | "Data root ... is read-only" when launching | Choose an output folder in a root with `"writable": true` |
 | Nextflow found in a terminal but not by BioCompute | The service has a different PATH. Set `BIOCOMPUTE_NEXTFLOW_BIN` to the full path, or extend `Environment=PATH=` in the unit |
 | Port 8000 already in use | Find the owner with `sudo ss -ltnp 'sport = :8000'`. If it's an earlier BioCompute (dev.sh, manual uvicorn or the systemd service) stop it or use it. Otherwise start with `--port 8010` (demo: `BIOCOMPUTE_API_PORT=8010 scripts/dev.sh`). |

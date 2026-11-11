@@ -37,10 +37,15 @@ sudo cp /etc/biocompute/biocompute.env .env    # compose reads POSTGRES_PASSWORD
 sudo docker compose up -d db web
 sudo systemctl enable --now biocompute
 journalctl -u biocompute -f                    # first start runs Alembic migrations and seeds the catalog
-sudo cat /var/lib/biocompute/initial_admin_password.txt
+sudo cat /var/lib/biocompute/setup_code.txt  # one-time setup code (also in the journal)
 ```
 
-Open `http://<workstation>:8080`. Change the admin password under Settings, Preferences.
+Open `http://<workstation>:8080`. The first visit shows **Welcome to BioCompute**, where you create the
+administrator account. A browser on the workstation itself does not need the code. Any other computer, or any
+request through nginx, must enter the one-time setup code printed at start-up. This stops another machine on the
+network from claiming a fresh installation. The screen disappears once an administrator exists. Without a browser,
+use `python -m app.cli reset-password <name> --create --role admin`. Set `BIOCOMPUTE_ADMIN_PASSWORD` for unattended
+installs: it creates an `admin` account and skips the screen.
 
 ## 3. TLS
 

@@ -10,6 +10,7 @@ import { Badge, Empty, Meter, Panel, PanelHeader, Skeleton } from "@/components/
 import { Button } from "@/components/ui/button";
 import { CoreLattice, LatticeLegend } from "@/components/lattice";
 import { RunStatusBadge } from "@/components/status";
+import { GettingStarted } from "@/components/getting-started";
 
 interface TopoNode {
   id: string; hostname: string; state: string; site: string | null; is_controller: boolean; os: string | null; arch: string | null;
@@ -44,6 +45,7 @@ export default function DashboardPage() {
           <Button asChild variant="secondary"><Link to="/experiments"><FlaskConical />New experiment</Link></Button>
           <Button asChild variant="primary"><Link to="/jobs/new"><Plus />Launch analysis</Link></Button>
         </>} />
+      <GettingStarted />
 
       {q.isLoading && <Skeleton className="h-72" />}
       {d && (

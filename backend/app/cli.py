@@ -72,12 +72,16 @@ def cmd_info(_a) -> int:
     print(f"database       {_mask(s.database_url)}")
     print(f"state dir      {s.state_dir.resolve()}")
     print(f"data roots     {', '.join(r['name'] + '=' + str(r['path']) for r in s.data_roots) or '(none)'}")
-    print(f"admin password from env: {'yes' if s.admin_password else 'no (generated on first start)'}")
+    print(f"admin password from env: {'yes' if s.admin_password else 'no (the administrator is created at first-run setup)'}")
+    from .services import setup as setup_svc
+
     with _db() as db:
         users = db.query(User).order_by(User.username).all()
-        if not users:
-            _check_config()
-        print(f"users          {', '.join(f'{u.username} ({u.role}{'' if u.is_active else ', inactive'})' for u in users) or '(none yet - start the API once)'}")
+        print(f"users          {', '.join(f'{u.username} ({u.role}{'' if u.is_active else ', inactive'})' for u in users) or '(none yet)'}")
+        if setup_svc.needed(db):
+            print("first-run setup: open BioCompute in a browser to create the administrator account.")
+            print(f"                from another computer, use setup code {setup_svc.ensure_code()}")
+            print("                or here:  python -m app.cli reset-password <name> --create --role admin")
     return 0
 
 
@@ -114,6 +118,10 @@ def cmd_reset(a) -> int:
         from .security import audit
 
         audit(db, "cli", "user.password_reset", a.username)
+        from .services import setup as setup_svc
+
+        if u.role == "admin" and not setup_svc.completed(db):  # an admin exists now: no browser setup needed
+            setup_svc.mark_completed(db, "cli")
         db.commit()
     print(f"Password for '{a.username}' updated in {_mask(get_settings().database_url)}.")
     print("If logins were blocked after repeated failures, restart the API (or wait 5 minutes).")

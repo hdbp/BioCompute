@@ -6,7 +6,7 @@
 #
 #   scripts/dev.sh                          start the demo
 #   scripts/dev.sh admin info               show the demo's database, state folder and users
-#   scripts/dev.sh admin reset-password     reset the demo admin password
+#   scripts/dev.sh admin reset-password <name>   reset a password (add --create --role admin for a new admin)
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 demo="$root/var/demo"
@@ -14,7 +14,8 @@ mkdir -p "$demo/raw" "$demo/analyses"
 [ -d "$demo/raw/synthetic_chip_run" ] || python3 "$root/examples/data/generate_test_data.py" "$demo/raw/synthetic_chip_run" --reads 4000
 export BIOCOMPUTE_STATE_DIR="${BIOCOMPUTE_STATE_DIR:-$root/var/state}"
 export BIOCOMPUTE_DATABASE_URL="${BIOCOMPUTE_DATABASE_URL:-sqlite:///$root/var/biocompute.db}"
-export BIOCOMPUTE_ADMIN_PASSWORD="${BIOCOMPUTE_ADMIN_PASSWORD:-biocompute-dev}"
+# No default password: on a new database the browser asks you to create the administrator account.
+# (Set BIOCOMPUTE_ADMIN_PASSWORD to create an "admin" account without that step.)
 if [ -z "${BIOCOMPUTE_DATA_ROOTS:-}" ]; then
   # (built separately: a "}" inside ${VAR:-default} would end the expansion early)
   BIOCOMPUTE_DATA_ROOTS=$(printf '[{"name":"raw","path":"%s","restricted":true,"writable":false,"description":"Demo raw data (synthetic)"},{"name":"analyses","path":"%s","restricted":false,"writable":true,"description":"Demo outputs"},{"name":"pipelines","path":"%s","restricted":false,"writable":false,"description":"Bundled example pipelines"}]' "$demo/raw" "$demo/analyses" "$root/examples/pipelines")
@@ -46,7 +47,8 @@ for _ in $(seq 1 60); do
   curl -fs "http://127.0.0.1:$port/api/health" >/dev/null 2>&1 && break
   sleep 0.5
 done
-echo "API ready on http://127.0.0.1:$port  -  log in as admin / ${BIOCOMPUTE_ADMIN_PASSWORD} (set only when the demo database is first created)"
+echo "API ready on http://127.0.0.1:$port"
+echo "Open http://127.0.0.1:5173 - on first start it asks you to create the administrator account."
 if [ "${BIOCOMPUTE_AGENT_LISTEN:-off}" != "off" ]; then
   echo "Workers enroll via the agent listener on ${BIOCOMPUTE_AGENT_LISTEN} (port ${BIOCOMPUTE_AGENT_PORT:-8765}); see the API log line above for the address"
 else
