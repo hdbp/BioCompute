@@ -63,14 +63,23 @@ def mark_completed(db: Session, how: str) -> None:
             pass
 
 
+# Passwords anyone can look up: the demo default older scripts/dev.sh versions set.
+WELL_KNOWN = ("biocompute-dev",)
+
+
 def _legacy_admin(db: Session) -> User | None:
-    """An older install's generated admin whose random password (in initial_admin_password.txt) is still the password."""
+    """An older install's only account: an admin still using a generated password (initial_admin_password.txt)
+    or the publicly known demo password. Such an install is offered the create-account screen."""
     users = db.query(User).all()
-    if len(users) != 1 or not legacy_file().is_file():
+    if len(users) != 1 or users[0].role != "admin":
         return None
-    m = re.search(r"^password:\s*(\S+)", legacy_file().read_text(), re.M)
     u = users[0]
-    return u if m and u.role == "admin" and verify_secret(m.group(1), u.password_hash) else None
+    candidates = list(WELL_KNOWN)
+    if legacy_file().is_file():
+        m = re.search(r"^password:\s*(\S+)", legacy_file().read_text(), re.M)
+        if m:
+            candidates.insert(0, m.group(1))
+    return u if any(verify_secret(pw, u.password_hash) for pw in candidates) else None
 
 
 def needed(db: Session) -> bool:

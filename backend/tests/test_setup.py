@@ -125,3 +125,26 @@ def test_older_install_with_generated_password_is_offered_setup(fresh):
     assert st == 200 and d["user"]["username"] == "hugo"
     assert s.call("POST", "/api/auth/login", {"username": "admin", "password": "generated-xyz-1"})[0] == 401
     assert not (s.tmp / "state" / "initial_admin_password.txt").exists()
+
+
+def test_demo_database_with_the_well_known_password_is_offered_setup(fresh):
+    prepare = (
+        "from app.main import migrate\nfrom app.db import SessionLocal\nfrom app.models import User\n"
+        "from app.security import hash_secret\n"
+        "migrate(); db = SessionLocal(); db.add(User(username='admin', password_hash=hash_secret('biocompute-dev'), role='admin'))\n"
+        "db.commit()\n")
+    s = fresh(prepare)
+    d = s.call("GET", "/api/auth/setup")[1]
+    assert d["needed"] and d["existing_admin"] == "admin"
+    assert s.call("POST", "/api/auth/setup", {"username": "hugo", "password": "long-enough-pw"})[0] == 200
+    assert s.call("POST", "/api/auth/login", {"username": "admin", "password": "biocompute-dev"})[0] == 401
+
+
+def test_admin_with_own_password_is_not_offered_setup(fresh):
+    prepare = (
+        "from app.main import migrate\nfrom app.db import SessionLocal\nfrom app.models import User\n"
+        "from app.security import hash_secret\n"
+        "migrate(); db = SessionLocal(); db.add(User(username='admin', password_hash=hash_secret('my-own-secret-9'), role='admin'))\n"
+        "db.commit()\n")
+    s = fresh(prepare)
+    assert s.call("GET", "/api/auth/setup")[1] == {"needed": False}

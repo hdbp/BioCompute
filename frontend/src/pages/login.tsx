@@ -53,7 +53,7 @@ function SignIn() {
       <form onSubmit={submit} className="space-y-4">
         <Field label="Username"><Input value={username} onChange={(e) => setU(e.target.value)} autoComplete="username" required autoFocus /></Field>
         <Field label="Password" error={error}
-          hint={<>Forgotten it? On the controller run <code className="font-mono">python -m app.cli reset-password &lt;name&gt;</code> in <code className="font-mono">backend/</code> (demo: <code className="font-mono">scripts/dev.sh admin reset-password</code>). No account? Ask your BioCompute administrator.</>}>
+          hint={<>Forgotten it? On the controller run <code className="font-mono">python -m app.cli reset-password &lt;name&gt;</code> in <code className="font-mono">backend/</code> (demo: <code className="font-mono">scripts/dev.sh admin reset-password</code>). No account? Ask your BioCompute administrator, or create one on the controller with <code className="font-mono">python -m app.cli reset-password &lt;name&gt; --create</code>.</>}>
           <Input type="password" value={password} onChange={(e) => setP(e.target.value)} autoComplete="current-password" required />
         </Field>
         <Button type="submit" variant="primary" size="lg" className="w-full" loading={busy}>Sign in</Button>
@@ -99,7 +99,7 @@ function SetupForm({ s, onDone }: { s: SetupStatus; onDone: () => void }) {
         <h1 className="text-2xl font-semibold">Welcome to BioCompute</h1>
         <p className="mt-1 text-[13.5px] text-muted">
           {s.existing_admin
-            ? `Create your administrator account. It replaces the generated “${s.existing_admin}” account, whose password was never changed.`
+            ? `Create your administrator account. It replaces the “${s.existing_admin}” account, which still has its default password.`
             : "No account exists yet. Create the administrator account: you will manage data folders, computers and users with it."}
         </p>
       </div>
