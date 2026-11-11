@@ -16,14 +16,21 @@ export class ApiError extends Error {
 
 async function request<T>(method: string, path: string, body?: unknown, opts: { raw?: boolean } = {}): Promise<T> {
   const token = useAuth.getState().token;
-  const res = await fetch(path, {
-    method,
-    headers: {
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: {
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // the browser got no HTTP response at all ("Failed to fetch" / "Load failed" / NetworkError)
+    throw new ApiError(0, `No response from the BioCompute server at ${window.location.host} (${method} ${path.split("?")[0]}). `
+      + "The server stopped or restarted, or the connection was cut. Check the terminal or service log where BioCompute runs, then try again.");
+  }
   if (res.status === 401 && !path.endsWith("/login")) {
     useAuth.getState().logout();
   }
@@ -33,7 +40,10 @@ async function request<T>(method: string, path: string, body?: unknown, opts: { 
       const j = await res.json();
       detail = j.detail ?? j;
       if (Array.isArray(detail)) detail = detail.map((d: { msg?: string; loc?: string[] }) => `${(d.loc ?? []).slice(1).join(".")}: ${d.msg}`).join("; ");
-    } catch { /* not json */ }
+    } catch {
+      // not JSON: a proxy (Vite dev server, nginx) answered because the backend did not
+      if (res.status >= 500) detail = `The BioCompute backend did not answer (HTTP ${res.status} from the proxy in front of it). Is it still running?`;
+    }
     throw new ApiError(res.status, detail);
   }
   if (opts.raw) return res as unknown as T;

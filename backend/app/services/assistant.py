@@ -269,6 +269,11 @@ def _run_anthropic(model: str, effort: str, system: str, prompt: str, schema: di
         raise AssistantError(f"Anthropic API error {exc.status_code}: {exc.message}") from exc
     except anthropic.APIConnectionError as exc:
         raise AssistantError("Could not reach the Anthropic API from the controller (network or proxy).") from exc
+    except (TypeError, anthropic.AnthropicError) as exc:  # e.g. no credentials at all
+        if "authentication" in str(exc).lower() or "api_key" in str(exc):
+            raise AssistantError("No Anthropic API key: enter one in Settings, AI assistant "
+                                 "(or set ANTHROPIC_API_KEY for the BioCompute service).") from exc
+        raise AssistantError(f"Anthropic SDK error: {exc}") from exc
     if resp.stop_reason == "refusal":
         cat = getattr(getattr(resp, "stop_details", None), "category", None)
         raise AssistantError(f"The model declined this request{f' ({cat})' if cat else ''}.")
@@ -285,7 +290,11 @@ def _run_anthropic(model: str, effort: str, system: str, prompt: str, schema: di
 def _run_openai(model: str, system: str, prompt: str, schema: dict, name: str, key: str | None) -> tuple[dict, dict]:
     import openai
 
-    client = openai.OpenAI(api_key=key, timeout=600.0) if key else openai.OpenAI(timeout=600.0)
+    try:
+        client = openai.OpenAI(api_key=key, timeout=600.0) if key else openai.OpenAI(timeout=600.0)
+    except openai.OpenAIError as exc:  # raised when no key is configured anywhere
+        raise AssistantError("No OpenAI API key: enter one in Settings, AI assistant "
+                             "(or set OPENAI_API_KEY for the BioCompute service).") from exc
     try:
         resp = client.chat.completions.create(
             model=model,
