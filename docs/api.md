@@ -65,6 +65,15 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `POST   /api/datasets`
 - `POST   /api/datasets/mkdir`
 
+### explore
+
+- `GET    /api/explore/columns`
+- `GET    /api/explore/hubs`
+- `GET    /api/explore/info`
+- `GET    /api/explore/raw`
+- `GET    /api/explore/table`
+- `HEAD   /api/explore/raw`
+
 ### runs
 
 - `GET    /api/jobs`

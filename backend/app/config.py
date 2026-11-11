@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     nextflow_home: Path | None = None
     max_concurrent_runs: int = 4
     allow_custom_code_modules: bool = True  # Python/R code blocks in Pipeline Studio
+    # Data Explorer: where the list of public UCSC track hubs comes from (empty = no outbound request)
+    explorer_public_hubs_url: str = "https://api.genome.ucsc.edu/list/publicHubs"
     enable_demo_engine: bool = True  # BioCompute native engine for bcflow manifests
 
     # --- cluster / discovery ---------------------------------------------

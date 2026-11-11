@@ -78,6 +78,15 @@ These limits apply to everything below.
 | Assistant via Anthropic API (`claude-opus-5-5`, structured outputs, server-side fallback) | Implemented; request accepted by the API up to authentication (no key here), so **no real completion tested** |
 | Assistant via OpenAI API (structured outputs) | Implemented, **untested** (API not reachable from the dev sandbox) |
 
+## Data Explorer
+
+| Feature | Status |
+|---|---|
+| File viewer: tables (sort/filter/page, gz, headerless genomic formats, `NA` as missing), PDF, images, sandboxed HTML, text | Demonstrated (`test_explore.py`, browser) |
+| Density-coloured scatter (viridis, log density, hover), histogram, log10/−log10 axes, volcano/MA suggestions, trim outliers | Demonstrated (browser, 20,000-row table, dark and light) |
+| Genome browser (igv.js 3.8.10): local FASTA genome + indexed BAM, bigWig and narrowPeak over HTTP range requests | Demonstrated (browser, real pysam/pyBigWig files) |
+| Built-in genomes (igv.org), GenArk accessions, UCSC public hub list, opening hubs, URL tracks | Implemented, **untested**: igv.org, UCSC and hub hosts are not reachable from the dev sandbox. The list API response is parsed defensively and the hub list UI was checked with a canned list |
+
 ## Milestone 4: advanced distributed execution
 
 | Feature | Status |

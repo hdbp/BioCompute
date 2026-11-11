@@ -10,5 +10,6 @@ export default defineConfig({
     port: 5173,
     proxy: { "/api": { target: process.env.BIOCOMPUTE_API ?? "http://127.0.0.1:8000", changeOrigin: false } },
   },
-  build: { chunkSizeWarningLimit: 1500 },
+  // igv.js (genome browser) is one ~1.5 MB chunk, loaded only when the Genome browser tab opens
+  build: { chunkSizeWarningLimit: 1700 },
 });

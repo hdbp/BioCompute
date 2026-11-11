@@ -16,6 +16,7 @@ const Jobs = lazy(() => import("@/pages/jobs"));
 const RunPage = lazy(() => import("@/pages/run"));
 const Launch = lazy(() => import("@/pages/launch"));
 const Results = lazy(() => import("@/pages/results"));
+const Explore = lazy(() => import("@/pages/explore"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 
 export default function App() {
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="runs/:id" element={<RunPage />} />
           <Route path="results" element={<Results />} />
           <Route path="results/:id" element={<Results />} />
+          <Route path="explore" element={<Explore />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

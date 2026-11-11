@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity, Boxes, FlaskConical, FolderOutput, LayoutDashboard, LogOut, Menu, Moon, Network, Settings, Sun, Workflow, ListChecks,
+  Activity, Boxes, FlaskConical, FolderOutput, LayoutDashboard, LogOut, Menu, Moon, Network, Settings, Sun, Telescope, Workflow, ListChecks,
 } from "lucide-react";
 import { api, authed } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -18,6 +18,7 @@ const NAV = [
   { to: "/experiments", label: "Experiments", icon: FlaskConical },
   { to: "/jobs", label: "Jobs", icon: ListChecks },
   { to: "/results", label: "Results", icon: FolderOutput },
+  { to: "/explore", label: "Data Explorer", icon: Telescope },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -56,7 +57,7 @@ export function Layout() {
   useLiveUpdates();
   useEffect(() => setMobileOpen(false), [loc.pathname]);
   const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api.get<Dash>("/api/dashboard"), refetchInterval: 15000 });
-  const fullBleed = loc.pathname.startsWith("/studio");
+  const fullBleed = loc.pathname.startsWith("/studio") || loc.pathname.startsWith("/explore");
 
   const nav = (
     <nav className="flex flex-col gap-0.5 px-2" aria-label="Main">
