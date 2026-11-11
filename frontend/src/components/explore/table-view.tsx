@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { applyTransform, DensityScatter, fmt, Histogram, TRANSFORM_LABEL, type Transform } from "./plots";
+import { DEView, looksLikeDE } from "./de-view";
+import type { Project } from "@/lib/types";
 
 interface Column { name: string; type: "number" | "string"; missing: number; min?: number; max?: number; mean?: number; distinct?: number }
 interface TablePage {
@@ -15,13 +17,14 @@ interface TablePage {
 
 const PAGE = 100;
 
-export function TableView({ path }: { path: string }) {
+export function TableView({ path, projects = [], project }: { path: string; projects?: Project[]; project?: string | null }) {
+  const [mode, setMode] = useState<"de" | "table" | null>(null);
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<{ col: string; desc: boolean } | null>(null);
   const [q, setQ] = useState("");
   const [qDebounced, setQd] = useState("");
   useEffect(() => { const t = setTimeout(() => { setQd(q); setOffset(0); }, 300); return () => clearTimeout(t); }, [q]);
-  useEffect(() => { setOffset(0); setSort(null); setQ(""); }, [path]);
+  useEffect(() => { setOffset(0); setSort(null); setQ(""); setMode(null); }, [path]);
 
   const t = useQuery({
     queryKey: ["explore-table", path, offset, sort, qDebounced],
@@ -32,9 +35,21 @@ export function TableView({ path }: { path: string }) {
   if (t.isError) return <p className="p-4 text-[13px] text-bad">{errMsg(t.error)}</p>;
   if (!d) return <p className="p-4 text-[13px] text-muted">Reading table…</p>;
 
+  const isDE = looksLikeDE(d.columns);
+  const view = mode ?? (isDE ? "de" : "table");
+  const switcher = isDE && (
+    <div className="flex w-fit rounded-md border border-line p-0.5 text-[13px]" role="group" aria-label="View">
+      {([["de", "Differential expression"], ["table", "Table & plots"]] as const).map(([k, l]) => (
+        <button key={k} onClick={() => setMode(k)} aria-pressed={view === k}
+          className={cn("rounded px-3 py-1", view === k ? "bg-raised text-text" : "text-muted hover:text-text")}>{l}</button>
+      ))}
+    </div>
+  );
+  if (view === "de") return <div className="space-y-4">{switcher}<DEView path={path} projects={projects} defaultProject={project} /></div>;
   const toggleSort = (col: string) => setSort((s) => (s?.col === col ? (s.desc ? null : { col, desc: true }) : { col, desc: false }));
   return (
     <div className="space-y-4">
+      {switcher}
       <PlotPanel path={path} columns={d.columns} />
       <div className="rounded-lg border border-line bg-surface">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">

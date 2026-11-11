@@ -28,6 +28,44 @@ Any numeric column can be plotted as a **scatter** or a **histogram**. Each axis
   both limits are shown when they apply. `NA`, `.`, empty cells and similar values are treated as missing,
   not as text.
 
+## Projects
+
+Projects keep one study's data together. Choose **+ New project…** at the top of the Explorer's left pane.
+
+* **Project folder:** a project can create its own folder in a writable data folder,
+  `<folder>:projects/<name>/`, with `data/`, `results/` and `analyses/`.
+* **Adding items:** add folders (*Add this folder*), files (*Add to project* on any file) and runs. A run
+  launched with a project (Launch → Execution → *Project*) is listed there automatically, and its output folder
+  defaults to the project's `results/`.
+* **The project panel** lists everything, and each entry opens with one click. Removing an item, or deleting the
+  project, never deletes files.
+* **Sharing:** projects are private to you unless you share them with the lab (same rules as pipelines).
+
+## Differential expression (volcano and MA plots)
+
+A table with a log2 fold-change column and a p-value or adjusted p-value column opens in the
+**Differential expression** view. This covers DESeq2 (`log2FoldChange`, `padj`, `baseMean`), edgeR (`logFC`,
+`FDR`, `logCPM`), limma (`logFC`, `adj.P.Val`, `AveExpr`) and Seurat markers. Other column names can be picked
+under *Columns*. *Table & plots* switches back to the generic table.
+
+* **Cut-offs:** adjusted (or raw) p below, |log2 FC| at least, and optionally a minimum mean expression. Counts
+  of up, down and not significant genes update as you type. Rows without a test result (`NA`) are counted
+  separately.
+* **Plots:**
+  * **Volcano** plots log2 FC against −log10 p. **MA** plots log10 baseMean (or logCPM/AveExpr as they are)
+    against log2 FC.
+  * Dashed lines show the cut-offs.
+  * Each group has its own hue (up red, down blue, not significant grey). Its shade shows how many genes overlap
+    there, so dense regions stay readable.
+* **Labels and search:** the top N significant genes are labelled, hovering shows a gene's values, and
+  *Find a gene* rings it on the plot and finds it in the table. *PNG* downloads the plot.
+* **Results table:** Significant / Up / Down / All, sorted by p.
+* **Export:** **CSV/TSV** downloads every original column plus `regulation` for those genes.
+* **Save into…** writes the same file into a project's `analyses/` folder (or any writable folder) with a
+  `.params.json` next to it recording the cut-offs and counts. Saving into a project also lists the file there.
+
+The statistics are the ones in your file. Nothing is recomputed; the cut-offs only select genes.
+
 ## Genome browser
 
 The browser is [igv.js](https://github.com/igvteam/igv.js) 3.8. Tracks and genome are remembered in your

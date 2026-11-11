@@ -176,6 +176,18 @@ class StudioWorkflow(TimestampMixin, Base):
     visibility: Mapped[str] = mapped_column(String(10), default="private")  # private | lab
 
 
+class Project(TimestampMixin, Base):
+    """A named collection of folders, files and runs (Data Explorer), optionally with its own folder on disk."""
+    __tablename__ = "projects"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    owner: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    visibility: Mapped[str] = mapped_column(String(10), default="private")  # private | lab
+    home: Mapped[str | None] = mapped_column(String(500), nullable=True)  # data-root path of the project folder
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{id, kind, ref, label, added_by, added_at}]
+
+
 class DataRoot(TimestampMixin, Base):
     """A data folder on the controller added by an administrator in Settings (in addition to BIOCOMPUTE_DATA_ROOTS)."""
     __tablename__ = "data_roots"

@@ -74,11 +74,24 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 ### explore
 
 - `GET    /api/explore/columns`
+- `GET    /api/explore/de`
+- `GET    /api/explore/de/export`
 - `GET    /api/explore/hubs`
 - `GET    /api/explore/info`
 - `GET    /api/explore/raw`
 - `GET    /api/explore/table`
 - `HEAD   /api/explore/raw`
+- `POST   /api/explore/de/save`
+
+### projects
+
+- `DELETE /api/projects/{pid}`
+- `DELETE /api/projects/{pid}/items/{item_id}`
+- `GET    /api/projects`
+- `GET    /api/projects/{pid}`
+- `PATCH  /api/projects/{pid}`
+- `POST   /api/projects`
+- `POST   /api/projects/{pid}/items`
 
 ### runs
 

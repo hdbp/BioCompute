@@ -6,13 +6,14 @@ import {
   ChevronRight, Database, Dna, Download, File, FileImage, FileSpreadsheet, FileText, Folder, FolderOpen, Lock, Loader2, Telescope,
 } from "lucide-react";
 import { api, authed, errMsg, qs } from "@/lib/api";
-import type { Run } from "@/lib/types";
+import type { Project, Run } from "@/lib/types";
 import { bytes, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { TableView } from "@/components/explore/table-view";
 import { MissingDataHint } from "@/components/missing-data-hint";
+import { AddToProject, ProjectPanel, useProjects } from "@/components/explore/projects";
 import { trackId, useExplorer, type TrackRef } from "@/components/explore/store";
 
 const GenomeBrowser = lazy(() => import("@/components/explore/genome-browser"));
@@ -35,6 +36,8 @@ export default function ExplorePage() {
   const [genomeMounted, setGenomeMounted] = useState(tab === "genome");
   useEffect(() => { if (tab === "genome") setGenomeMounted(true); }, [tab]);
   const nTracks = useExplorer((s) => s.tracks.length);
+  const project = params.get("project");
+  const projects = useProjects();
 
   const go = (patch: Record<string, string | null>) => {
     const n = new URLSearchParams(params);
@@ -45,6 +48,8 @@ export default function ExplorePage() {
   return (
     <div className="flex h-full min-h-0">
       <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface" aria-label="Files">
+        <ProjectPanel projectId={project} onSelect={(id) => go({ project: id })} currentDir={dir}
+          onOpenDir={(d) => go({ dir: d, path: null, tab: null })} onOpenFile={(p) => go({ path: p, dir: parentOf(p), tab: null })} />
         <FileTree roots={roots.data ?? []} dir={dir} selected={path} onDir={(d) => go({ dir: d, tab: null })}
           onFile={(p) => go({ path: p, dir: parentOf(p), tab: null })} />
       </aside>
@@ -60,7 +65,7 @@ export default function ExplorePage() {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
           <div className={tab === "files" ? "" : "hidden"}>
-            {path ? <FileView path={path} onOpenGenome={() => go({ tab: "genome" })} /> : <Intro />}
+            {path ? <FileView path={path} onOpenGenome={() => go({ tab: "genome" })} project={project} projects={projects.data ?? []} /> : <Intro />}
           </div>
           {genomeMounted && (
             <div className={tab === "genome" ? "" : "hidden"}>
@@ -155,7 +160,7 @@ function FileTree({ roots, dir, selected, onDir, onFile }: {
 }
 
 // ---------------------------------------------------------------- file view
-function FileView({ path, onOpenGenome }: { path: string; onOpenGenome: () => void }) {
+function FileView({ path, onOpenGenome, project, projects }: { path: string; onOpenGenome: () => void; project: string | null; projects: Project[] }) {
   const info = useQuery({ queryKey: ["explore-info", path], queryFn: () => api.get<Info>(`/api/explore/info${qs({ path })}`) });
   const { tracks, addTracks, setGenome } = useExplorer();
   if (info.isError) return <p className="text-[13px] text-bad">{errMsg(info.error)}</p>;
@@ -191,13 +196,14 @@ function FileView({ path, onOpenGenome }: { path: string; onOpenGenome: () => vo
               : <Button size="sm" variant="primary" onClick={addTrack}><Dna />Add to genome browser</Button>
           )}
           {tr?.type === "reference" && <Button size="sm" variant="primary" onClick={useAsGenome}><Dna />Use as genome</Button>}
+          <AddToProject path={d.path} current={project} />
           <a href={authed(`/api/datasets/download${qs({ path: d.path })}`)} className="inline-flex"><Button size="sm" variant="secondary" tabIndex={-1}><Download />Download</Button></a>
         </div>
       </div>
       {tr && tr.needs_index && !tr.indexed && tr.type !== "reference" && (
         <p className="rounded-md border border-wait/40 bg-wait/10 px-3 py-2 text-[12.5px]">No index found next to this file. The genome browser needs one: <code>samtools index {d.name}</code>.</p>
       )}
-      {d.viewer === "table" && <TableView path={d.path} />}
+      {d.viewer === "table" && <TableView path={d.path} projects={projects} project={project} />}
       {d.viewer === "pdf" && <iframe title={d.name} src={raw} className="h-[80vh] w-full rounded-lg border border-line bg-white" />}
       {d.viewer === "image" && <div className="overflow-auto rounded-lg border border-line bg-white p-2"><img src={raw} alt={d.name} className="mx-auto max-w-full" /></div>}
       {d.viewer === "html" && (

@@ -119,3 +119,13 @@ export interface AssistantStatus {
   provider: "off" | "anthropic" | "openai" | "claude-cli"; model: string; effort: string; enabled: boolean; ready: boolean; privacy: string;
   providers: Record<string, { label: string; default_model: string; configured: boolean; source: string | null; hint: string | null; note?: string }>;
 }
+
+export interface Project {
+  id: string; name: string; description: string; owner: string | null; visibility: "private" | "lab"; home: string | null;
+  item_count: number; can_edit: boolean; created_at: string; updated_at: string;
+}
+export interface ProjectItem {
+  id: string; kind: "folder" | "file" | "run"; ref: string; label: string; added_by: string; added_at: string; exists: boolean;
+  run_name?: string; status?: string; output?: string | null;
+}
+export interface ProjectDetail extends Project { items: ProjectItem[]; folders: { data: string | null; results: string | null; analyses: string | null } }

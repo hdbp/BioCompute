@@ -9,7 +9,7 @@ You use it from a browser to:
 - discover, enroll and allocate the computers that do the work;
 - build workflows visually and export them as Nextflow DSL2, including modules you create for software you install;
 - give every lab member their own pipelines and Studio workflows (private, or shared with the lab);
-- explore results: tables with density-coloured plots, PDFs and reports, and a genome browser (igv.js) for BAM/bigWig/peaks next to UCSC public track hubs;
+- explore results by project: tables with density-coloured plots, interactive volcano/MA plots with cut-offs and exports, PDFs and reports, and a genome browser (igv.js) for BAM/bigWig/peaks next to UCSC public track hubs;
 - optionally, ask an assistant (Claude, ChatGPT or Claude Code) to build, review or explain pipelines. It only proposes; you decide.
 
 It is built for one primary Linux workstation that holds the raw data and acts as controller.

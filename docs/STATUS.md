@@ -92,6 +92,13 @@ These limits apply to everything below.
 |---|---|
 | First-run screen creates the administrator account (no code from the controller itself; one-time setup code from other computers or through a proxy; legacy generated admin taken over); Getting started checklist | Demonstrated (`test_setup.py` against real server processes, browser) |
 
+## Projects and differential expression
+
+| Feature | Status |
+|---|---|
+| Projects: own folder (data/results/analyses), folders/files/runs as items, launch into a project, private/shared | Demonstrated (`test_projects_de.py`, browser) |
+| DE view: DESeq2/edgeR/limma column detection, volcano and MA plots with live cut-offs, density-shaded groups, labels, gene search, filtered table, CSV/TSV export, save with parameters into a project | Demonstrated (`test_projects_de.py`, browser with a 20,000-gene table, dark and light) |
+
 ## Data folders
 
 | Feature | Status |

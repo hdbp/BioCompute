@@ -133,6 +133,13 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
     run.provenance = runner.provenance(db, run, p, v, exp)
     Path(run.run_dir, "provenance.json").write_text(json.dumps(run.provenance, indent=2, default=str))
     audit(db, user.username, "run.launch", run.id, pipeline=p.slug, engine=engine, output=body.output_dir)
+    if body.project_id:  # list the run in the project; a project the user cannot change is ignored, not an error
+        from ..models import Project
+        from ..services import access
+        from .projects import add_item
+        proj = db.get(Project, body.project_id)
+        if proj and access.can_view(user, proj.owner, proj.visibility) and access.can_edit(user, proj.owner):
+            add_item(db, proj, user, run.id, "run")
     db.commit()
     runner.start(db, run)
     db.commit()

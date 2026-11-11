@@ -229,6 +229,7 @@ class RunCreate(BaseModel):
     resources: dict[str, Any] = {}  # max_cpus, max_memory_gb, profile, executor, nodes
     node_ids: list[str] = []
     dry_run: bool = False
+    project_id: str | None = None  # list the run in this project (Data Explorer)
 
 
 class RunOut(ORM):

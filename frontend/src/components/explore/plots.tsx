@@ -44,12 +44,12 @@ export function fmt(v: number): string {
   return Number(v.toPrecision(4)).toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
-function cssColor(name: string, alpha = 1) {
+export function cssColor(name: string, alpha = 1) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim().split(/\s+/).join(",");
   return `rgba(${v},${alpha})`;
 }
 
-function useSize(ref: React.RefObject<HTMLElement>) {
+export function useSize(ref: React.RefObject<HTMLElement>) {
   const [w, setW] = useState(600);
   useEffect(() => {
     if (!ref.current) return;
@@ -60,9 +60,9 @@ function useSize(ref: React.RefObject<HTMLElement>) {
   return w;
 }
 
-const PAD = { l: 64, r: 16, t: 12, b: 44 };
+export const PAD = { l: 64, r: 16, t: 12, b: 44 };
 
-function setupCanvas(c: HTMLCanvasElement, w: number, h: number) {
+export function setupCanvas(c: HTMLCanvasElement, w: number, h: number) {
   const dpr = window.devicePixelRatio || 1;
   c.width = w * dpr;
   c.height = h * dpr;
@@ -74,7 +74,7 @@ function setupCanvas(c: HTMLCanvasElement, w: number, h: number) {
   return g;
 }
 
-function drawAxes(g: CanvasRenderingContext2D, w: number, h: number, xd: [number, number], yd: [number, number], xl: string, yl: string) {
+export function drawAxes(g: CanvasRenderingContext2D, w: number, h: number, xd: [number, number], yd: [number, number], xl: string, yl: string) {
   const sx = (v: number) => PAD.l + ((v - xd[0]) / (xd[1] - xd[0])) * (w - PAD.l - PAD.r);
   const sy = (v: number) => h - PAD.b - ((v - yd[0]) / (yd[1] - yd[0])) * (h - PAD.t - PAD.b);
   g.font = "11px ui-sans-serif, system-ui, sans-serif";
@@ -108,7 +108,7 @@ function drawAxes(g: CanvasRenderingContext2D, w: number, h: number, xd: [number
   return { sx, sy };
 }
 
-function extent(a: Float64Array, pad = 0.03): [number, number] {
+export function extent(a: Float64Array, pad = 0.03): [number, number] {
   let lo = Infinity, hi = -Infinity;
   for (const v of a) { if (v < lo) lo = v; if (v > hi) hi = v; }
   if (!Number.isFinite(lo)) return [0, 1];

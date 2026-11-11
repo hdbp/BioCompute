@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, Cpu, Lock, Play, Rocket, Server, ShieldCheck } from "lucide-react";
 import { api, ApiError, errMsg, qs } from "@/lib/api";
-import type { ClusterNode, Experiment, FormSchema, Issue, PipelineDetail, Pipeline, Preset, RunDetail } from "@/lib/types";
+import type { ClusterNode, Experiment, FormSchema, Issue, PipelineDetail, Pipeline, Preset, Project, RunDetail } from "@/lib/types";
 import { bytes, cn } from "@/lib/utils";
 import { IssueList, PageHeader } from "@/components/page";
 import { Badge, Checkbox, Empty, Panel, Skeleton, Slider } from "@/components/ui/misc";
@@ -52,6 +52,7 @@ export default function LaunchPage() {
   const [engine, setEngine] = useState("");
   const [params, setParams] = useState<Params>({});
   const [outdir, setOutdir] = useState("");
+  const [projectId, setProjectId] = useState(sp.get("project") ?? "");
   const [name, setName] = useState("");
   const [profile, setProfile] = useState("");
   const [cpus, setCpus] = useState(0);
@@ -67,6 +68,7 @@ export default function LaunchPage() {
   const detail = useQuery({ queryKey: ["pipeline", pipelineId], queryFn: () => api.get<PipelineDetail>(`/api/pipelines/${pipelineId}`), enabled: !!pipelineId });
   const schema = useQuery({ queryKey: ["schema", pipelineId, versionId || undefined], queryFn: () => api.get<FormSchema>(`/api/pipeline-schemas/${pipelineId}${qs({ version_id: versionId || undefined })}`), enabled: !!pipelineId });
   const presets = useQuery({ queryKey: ["presets", pipelineId], queryFn: () => api.get<Preset[]>(`/api/pipelines/${pipelineId}/presets`), enabled: !!pipelineId });
+  const projects = useQuery({ queryKey: ["projects"], queryFn: () => api.get<Project[]>("/api/projects") });
   const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => api.get<ClusterNode[]>("/api/nodes") });
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.get<{ ui: { default_output_dir?: string } ; data_roots: { name: string; writable: boolean }[] }>("/api/settings") });
   const validation = useQuery({
@@ -132,7 +134,7 @@ export default function LaunchPage() {
   const body = (dry: boolean) => ({
     pipeline_id: pipelineId, version_id: versionId || null, engine, name: name || null, output_dir: outdir,
     params: usingExperiment ? params : { ...params, input: inputPath },
-    experiment_id: usingExperiment ? experimentId || null : null, node_ids: nodeIds, dry_run: dry,
+    experiment_id: usingExperiment ? experimentId || null : null, node_ids: nodeIds, dry_run: dry, project_id: projectId || null,
     resources: { max_cpus: cpus, max_memory_gb: mem, profile: profile || undefined,
       ...(Number(needMem) ? { min_memory_gb: Number(needMem) } : {}), ...(needDisk ? { min_disk_gb: Number(needDisk) } : {}),
       ...(needGpu ? { requires_gpu: true } : {}) },
@@ -269,6 +271,18 @@ export default function LaunchPage() {
 
           <Step n={4} title="Execution" done={!!outdir}>
             <div className="grid gap-4 sm:grid-cols-2">
+              {(projects.data ?? []).some((p) => p.can_edit) && (
+                <Field label="Project" hint="The run is listed in the project in Data Explorer; with a project folder, results go to its results/ folder." className="sm:col-span-2">
+                  <Select value={projectId} onChange={(e) => {
+                    setProjectId(e.target.value);
+                    const pr = projects.data?.find((x) => x.id === e.target.value);
+                    if (pr?.home) setOutdir(`${pr.home}/results/${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`);
+                  }}>
+                    <option value="">No project</option>
+                    {projects.data!.filter((p) => p.can_edit).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </Select>
+                </Field>
+              )}
               <Field label="Output folder" required hint="A writable data root. Results and provenance are written here." className="sm:col-span-2">
                 <PathInput id="launch-outdir" mode="dir" value={outdir} onChange={setOutdir} writableOnly />
               </Field>
