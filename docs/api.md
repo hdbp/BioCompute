@@ -88,38 +88,63 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `DELETE /api/discovery/tokens/{tid}`
 - `GET    /api/allocations/presets`
 - `GET    /api/discovery/config`
+- `GET    /api/discovery/ssh-key`
 - `GET    /api/discovery/tokens`
 - `GET    /api/nodes`
 - `GET    /api/nodes/{nid}`
 - `GET    /api/nodes/{nid}/condor-config`
 - `GET    /api/nodes/{nid}/metrics`
+- `GET    /api/nodes/{nid}/ssh-enroll`
 - `PATCH  /api/nodes/{nid}`
 - `POST   /api/allocations/apply-preset`
 - `POST   /api/allocations/placement`
 - `POST   /api/discovery/scan`
+- `POST   /api/discovery/ssh-key`
 - `POST   /api/discovery/tokens`
 - `POST   /api/nodes/manual`
+- `POST   /api/nodes/{nid}/ssh-enroll`
 - `POST   /api/nodes/{nid}/transition`
 - `PUT    /api/allocations/{nid}`
 
 ### agent
 
+- `GET    /api/agent/speedtest`
 - `POST   /api/agent/discovery-report`
 - `POST   /api/agent/enroll`
 - `POST   /api/agent/heartbeat`
+- `POST   /api/agent/speedtest`
 
 ### studio
 
+- `DELETE /api/studio/modules/{mid}`
 - `DELETE /api/studio/workflows/{wid}`
+- `GET    /api/studio/module-skeleton`
+- `GET    /api/studio/module-templates/{key}`
 - `GET    /api/studio/modules`
+- `GET    /api/studio/modules/{mid}/export`
+- `GET    /api/studio/tools/check`
+- `GET    /api/studio/tools/scan`
 - `GET    /api/studio/workflows`
 - `GET    /api/studio/workflows/{wid}`
 - `POST   /api/studio/compile`
 - `POST   /api/studio/export`
+- `POST   /api/studio/modules`
+- `POST   /api/studio/modules/check`
 - `POST   /api/studio/validate`
 - `POST   /api/studio/workflows`
 - `POST   /api/studio/workflows/{wid}/publish`
+- `PUT    /api/studio/modules/{mid}`
 - `PUT    /api/studio/workflows/{wid}`
+
+### assistant
+
+- `GET    /api/assistant/status`
+- `POST   /api/assistant/ask`
+- `POST   /api/assistant/build`
+- `POST   /api/assistant/draft-module`
+- `POST   /api/assistant/review`
+- `POST   /api/assistant/test`
+- `PUT    /api/assistant/config`
 
 ### system
 

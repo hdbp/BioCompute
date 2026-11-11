@@ -44,3 +44,77 @@ Python and R modules use the same contract. Admins can disable custom code with
 
 Bioinformatics modules declare a biocontainers image and a conda package. Run with `-profile apptainer`,
 `docker` or `conda` to get the tools, or have them on PATH. Under the native engine, tools must be on PATH.
+
+## Your own modules (installed software)
+
+When you install new software (another peak caller, aligner or quantifier), make a module for it.
+Click **Add software as a module** at the top of the module library.
+
+* **Scan.** BioCompute looks on the controller's PATH for about 30 common programs. These include MACS2/3, Genrich,
+  SEACR, HOMER, epic2, GoPeaks, BWA/BWA-MEM2, HISAT2, STAR, minimap2, Salmon, Trim Galore, cutadapt and Picard.
+  Programs with a template open as a ready-made module for you to review. Any other program opens as a skeleton.
+* **Find.** Type any command name, such as `LanceOtron` or `chromap`, to check whether it is installed.
+* **Draft.** If the assistant is on, it writes the module from the program's own `--help` text.
+* **Blank module** or **Import JSON** (a file exported from another BioCompute).
+
+The module builder edits:
+
+* the ports (types decide what the module can connect to);
+* the parameters (they appear in the launch form);
+* the programs the module needs;
+* conda and container hints;
+* CPUs and memory;
+* the script (bash, Python or R).
+
+As you type, the builder checks the definition: names, output patterns, `bash -n` / Python compile / R parse,
+unused inputs or parameters, and whether the programs are on the controller's PATH. A missing program
+is only a warning, because a conda or container profile may provide it.
+
+User modules sit in the library with the built-in ones. Hover over one to **edit**, **export** (JSON) or **delete** it.
+The id cannot change after creation, because saved workflows refer to it. A module that a saved workflow
+still uses cannot be deleted. User modules are custom code: `BIOCOMPUTE_ALLOW_CUSTOM_CODE_MODULES=false`
+disables creating and running them.
+
+Modules run on whichever node executes the task. The program must be installed there too, or provided
+by the module's conda package or container. BioCompute never installs software by itself.
+
+## Assistant (Claude, ChatGPT or Claude Code)
+
+Open **Assistant** in the Studio toolbar. An administrator turns it on in **Settings → AI assistant**:
+
+| Provider | What it needs |
+|---|---|
+| Claude (Anthropic API) | An API key saved in Settings, or `ANTHROPIC_API_KEY` in the service environment. Default model `claude-opus-5-5`, effort `high` |
+| ChatGPT (OpenAI API) | An API key saved in Settings, or `OPENAI_API_KEY`. Default model `gpt-5`; any model that supports structured outputs works |
+| Claude Code on the controller | The `claude` command installed and signed in for the account that runs BioCompute. No key is stored |
+
+Keys saved in Settings go to `$STATE_DIR/ai_secrets.json` (mode 0600). The UI never returns them; it shows only
+the last four characters.
+
+What it does:
+
+* **Build.** It turns a description ("CUT&RUN, paired-end, IgG control…") into a graph that uses your module library,
+  including your own modules. BioCompute's validator checks the graph. If the graph is invalid, the errors go back
+  to the model for up to two repair rounds. The answer lists its assumptions (genome, layout, controls) and any
+  software that has no module yet, with a button to draft one. You can also ask it to change the pipeline on the canvas.
+* **Review.** It checks the pipeline on the canvas, with the scripts of the modules it uses and the validator's report.
+  It checks that the pipeline will run and that the analysis makes sense: missing QC or filtering, risky parameters,
+  missing controls, resources and reproducibility. Findings link to the nodes they concern.
+* **Ask.** Free questions, answered with the current pipeline as context.
+* **Draft module.** It writes a module definition from the program's `--help` output. The builder then opens with
+  the draft and its caveats.
+
+Safeguards:
+
+* Every answer is a typed JSON object (structured outputs) and is validated before use.
+* Results only *propose* changes. They load into the editor (undo works), and nothing is saved, published or run
+  without you.
+* Only pipeline structure, module definitions, module scripts and tool help text are sent. Data, sample names and
+  file paths are never sent.
+* Each request is recorded in the audit log with the user, provider and model, plus the cost for Claude Code.
+* For Claude models that support it, the API's server-side fallback is enabled (`fallbacks: "default"`). If a request
+  is declined by the primary model's safety classifier, it is retried on a fallback model. Declines and truncated
+  answers are reported as errors, never shown as results.
+
+Cost: a Build request with Claude Code (Opus 5.5) took about 30 s and cost about $0.33 in testing. API usage is billed
+by the provider.

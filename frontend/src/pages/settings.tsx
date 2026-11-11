@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2, CircleSlash, Lock, RefreshCw, UserPlus } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
+import { AssistantSettings } from "@/components/assistant-settings";
 import { cn, when } from "@/lib/utils";
 import { KV, PageHeader } from "@/components/page";
 import { Badge, Panel, PanelHeader, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/misc";
@@ -30,13 +32,15 @@ export default function SettingsPage() {
   const refreshTools = useMutation({ mutationFn: () => api.post("/api/settings/refresh-tools"), onSuccess: () => { qc.invalidateQueries({ queryKey: ["settings"] }); toast.success("Software re-detected"); } });
   const d = s.data;
   const { theme, toggle } = useTheme();
+  const [params, setParams] = useSearchParams();
   return (
     <>
       <PageHeader title="Settings" description="Controller configuration comes from environment variables (see .env.example); this page shows the effective values." />
-      <Tabs defaultValue="system">
+      <Tabs value={params.get("tab") ?? "system"} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
         <TabsList className="mb-5">
           <TabsTrigger value="system">Controller</TabsTrigger>
           <TabsTrigger value="execution">Execution environment</TabsTrigger>
+          <TabsTrigger value="assistant">AI assistant</TabsTrigger>
           <TabsTrigger value="preferences">Preferences</TabsTrigger>
           {admin && <TabsTrigger value="users">Users</TabsTrigger>}
           {admin && <TabsTrigger value="audit">Audit log</TabsTrigger>}
@@ -101,6 +105,7 @@ export default function SettingsPage() {
             </Panel>
           )}
         </TabsContent>
+        <TabsContent value="assistant"><AssistantSettings admin={admin} /></TabsContent>
         <TabsContent value="preferences">
           <div className="grid gap-5 lg:grid-cols-2">
             <Panel className="p-4 space-y-4">

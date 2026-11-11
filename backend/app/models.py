@@ -171,6 +171,15 @@ class StudioWorkflow(TimestampMixin, Base):
     created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 
+class CustomModule(TimestampMixin, Base):
+    """A Pipeline Studio module defined by a user (e.g. wrapping newly installed software)."""
+
+    __tablename__ = "custom_modules"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # module id used in graphs
+    definition: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
 # --------------------------------------------------------------------------- runs
 class Run(TimestampMixin, Base):
     __tablename__ = "runs"

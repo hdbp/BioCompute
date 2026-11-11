@@ -96,6 +96,24 @@ export interface StudioModule {
   id: string; kind: "source" | "sink" | "module"; name: string; category: string; description: string; scope?: "per_sample" | "aggregate";
   inputs: { name: string; type: string; multiple?: boolean }[]; outputs: { name: string; type: string; pattern?: string }[];
   params: { name: string; type: string; default?: unknown; enum?: unknown[]; minimum?: number; maximum?: number; description?: string }[];
-  tools?: string[]; cpus?: number; memory_gb?: number; language?: string; script?: string; conda?: string; container?: string; custom?: boolean;
+  tools?: string[]; cpus?: number; memory_gb?: number; language?: string; script?: string; conda?: string; container?: string; custom?: boolean; user?: boolean;
 }
 export interface StudioWorkflow { id: string; name: string; description: string; graph: { nodes: unknown[]; edges: unknown[]; meta?: Record<string, unknown> }; created_by: string | null; created_at: string; updated_at: string }
+
+/** A user-defined Pipeline Studio module (same shape the API stores and exports). */
+export interface ModuleDef {
+  id: string; name: string; category: string; description: string; scope: "per_sample" | "aggregate"; language: "bash" | "python" | "r";
+  inputs: { name: string; type: string; multiple: boolean }[];
+  outputs: { name: string; type: string; pattern: string }[];
+  params: { name: string; type: "string" | "integer" | "number" | "boolean"; default: string | number | boolean | null; enum: (string | number)[] | null; description: string }[];
+  tools: string[]; conda: string; container: string; cpus: number; memory_gb: number; script: string;
+}
+export interface ModuleIssue { level: "error" | "warning" | "info"; field?: string; message: string }
+export interface ModuleCheck { valid: boolean; issues: ModuleIssue[]; module: ModuleDef | null }
+export interface InstalledTool { exe: string; name: string; category: string; template: string | null; path: string; version: string | null }
+
+export interface AssistantMeta { provider: string; model: string; cost_usd?: number | null; input_tokens?: number | null; output_tokens?: number | null; task?: string }
+export interface AssistantStatus {
+  provider: "off" | "anthropic" | "openai" | "claude-cli"; model: string; effort: string; enabled: boolean; ready: boolean; privacy: string;
+  providers: Record<string, { label: string; default_model: string; configured: boolean; source: string | null; hint: string | null; note?: string }>;
+}

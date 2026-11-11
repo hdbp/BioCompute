@@ -45,7 +45,7 @@ export function Field({ label, hint, error, children, required, className }: {
     : children;
   return (
     <div className={cn("space-y-1.5", className)}>
-      <Label htmlFor={id}>{label}{required && <span className="text-bad ml-0.5" aria-hidden>*</span>}</Label>
+      <Label htmlFor={id} className="block">{label}{required && <span className="text-bad ml-0.5" aria-hidden>*</span>}</Label>
       {control}
       {error ? <p id={msgId} className="text-xs text-bad">{error}</p> : hint ? <p id={msgId} className="text-xs text-muted">{hint}</p> : null}
     </div>

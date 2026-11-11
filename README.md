@@ -7,7 +7,8 @@ You use it from a browser to:
 - describe experiments (samples, conditions, replicates, controls and files) and generate samplesheets;
 - launch, monitor, cancel and resume runs, then browse their outputs and provenance;
 - discover, enroll and allocate the computers that do the work;
-- build simple workflows visually and export them as Nextflow DSL2.
+- build workflows visually and export them as Nextflow DSL2, including modules you create for software you install;
+- optionally, ask an assistant (Claude, ChatGPT or Claude Code) to build, review or explain pipelines. It only proposes; you decide.
 
 It is built for one primary Linux workstation that holds the raw data and acts as controller.
 Other Linux and macOS machines can take part as workers under explicit, per-node policies.

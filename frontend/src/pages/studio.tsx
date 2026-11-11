@@ -8,10 +8,10 @@ import {
 import { toast } from "sonner";
 import {
   AlertTriangle, CheckCircle2, ChevronDown, Code2, Download, FilePlus2, FolderOpen, Info, Layers, Loader2, Redo2, Rocket, Save,
-  ShieldCheck, Trash2, Undo2, Workflow,
+  ShieldCheck, Sparkles, Trash2, Undo2, Workflow,
 } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
-import type { Issue, StudioModule, StudioWorkflow } from "@/lib/types";
+import type { Issue, ModuleDef, StudioModule, StudioWorkflow } from "@/lib/types";
 import { ago, cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/theme";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,9 @@ import { nodeTypes } from "@/components/studio/module-node";
 import { DND_MODULE, DND_SUBWORKFLOW, Palette } from "@/components/studio/palette";
 import { Inspector } from "@/components/studio/inspector";
 import { CodePreview } from "@/components/studio/code-preview";
+import { emptyModule, ModuleBuilder, normalizeModule } from "@/components/studio/module-builder";
+import { ToolFinder } from "@/components/studio/tool-finder";
+import { AssistantPanel } from "@/components/studio/assistant-panel";
 import { chipseqExample, portableExample } from "@/components/studio/examples";
 import {
   deserialize, effective, makeNode, newId, serialize, StudioContext, type Graph, type ModuleData, type PortTypes, type StudioNode,
@@ -71,6 +74,10 @@ function StudioInner() {
   const [subDlg, setSubDlg] = useState(false);
   const [subName, setSubName] = useState("");
   const loadedRef = useRef<string | null>(null);
+  const [builder, setBuilder] = useState<{ open: boolean; def: ModuleDef; editing: boolean; notes: string | null }>({ open: false, def: emptyModule(), editing: false, notes: null });
+  const [finderOpen, setFinderOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(() => { try { return localStorage.getItem("bc-assistant-open") === "1"; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem("bc-assistant-open", assistantOpen ? "1" : "0"); } catch { /* ignore */ } }, [assistantOpen]);
 
   // ------------------------------------------------------------------ history (undo / redo)
   const graphRef = useRef<Graph>({ nodes: [], edges: [] });
@@ -429,6 +436,54 @@ function StudioInner() {
     }
   };
 
+  // ------------------------------------------------------------------ user modules
+  const openBuilder = useCallback((def: ModuleDef, editing = false, notes: string | null = null) => {
+    setFinderOpen(false);
+    setBuilder({ open: true, def, editing, notes });
+  }, []);
+
+  const editModule = useCallback(async (m: StudioModule) => {
+    try { openBuilder(normalizeModule(await api.get<ModuleDef>(`/api/studio/modules/${m.id}/export`)), true); }
+    catch (e) { toast.error(errMsg(e)); }
+  }, [openBuilder]);
+
+  const exportModule = useCallback(async (m: StudioModule) => {
+    try {
+      const def = await api.get<ModuleDef>(`/api/studio/modules/${m.id}/export`);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(def, null, 2)], { type: "application/json" }));
+      Object.assign(document.createElement("a"), { href: url, download: `${m.id}.biocompute-module.json` }).click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { toast.error(errMsg(e)); }
+  }, []);
+
+  const deleteModule = useCallback(async (m: StudioModule) => {
+    if (graphRef.current.nodes.some((n) => n.data.module === m.id)) { toast.error("Remove this module from the canvas first."); return; }
+    if (!window.confirm(`Delete the module “${m.name}”? Published pipelines keep working; saved workflows that use it must be changed first.`)) return;
+    try {
+      await api.del(`/api/studio/modules/${m.id}`);
+      qc.invalidateQueries({ queryKey: ["studio-modules"] });
+      toast.success(`Deleted “${m.name}”`);
+    } catch (e) { toast.error(errMsg(e)); }
+  }, [qc]);
+
+  const draftModuleFor = useCallback(async (tool: string, reason: string) => {
+    const exe = tool.split(/[\s(,]/)[0];
+    const t = toast.loading(`Drafting a module for ${exe}…`);
+    try {
+      const r = await api.post<{ module: ModuleDef; notes: string; grounded_on_help: boolean }>("/api/assistant/draft-module", { description: `${tool}: ${reason}`, tool: exe });
+      openBuilder(normalizeModule(r.module), false, `Drafted by the assistant${r.grounded_on_help ? " from the program's --help text" : " without the program's help text (it is not installed on the controller)"}. ${r.notes}`);
+      toast.dismiss(t);
+    } catch (e) { toast.error(errMsg(e), { id: t }); }
+  }, [openBuilder]);
+
+  const loadFromAssistant = useCallback((r: { graph: { nodes: unknown[]; edges: unknown[] }; name: string; description: string }) => {
+    if (graphRef.current.nodes.length && !window.confirm("Replace the canvas with the assistant's pipeline? You can undo this.")) return;
+    replaceGraph(deserialize(r.graph), false);
+    if (!wfId) { setName(r.name); setDescription(r.description); }
+    setDirty(true);
+    toast.success("Loaded. Check the parameters, then Save.");
+  }, [replaceGraph, wfId]);
+
   // ------------------------------------------------------------------ keyboard
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -486,6 +541,7 @@ function StudioInner() {
             <Tip content="Save the selected nodes as a reusable subworkflow"><Button size="sm" variant="ghost" onClick={() => { setSubName(""); setSubDlg(true); }}><Layers /><span className="hidden 2xl:inline">Save as subworkflow</span></Button></Tip>
           )}
           <div className="flex-1" />
+          <Button size="sm" variant={assistantOpen ? "primary" : "secondary"} onClick={() => setAssistantOpen((o) => !o)} aria-pressed={assistantOpen}><Sparkles /><span className="hidden xl:inline">Assistant</span></Button>
           <Button size="sm" variant="secondary" onClick={validate} loading={validating} aria-label="Validate"><ShieldCheck /><span className="hidden xl:inline">Validate</span></Button>
           <Button size="sm" variant="secondary" onClick={showCode} loading={busy === "compile"} disabled={!nodes.length} aria-label="Show generated code"><Code2 /><span className="hidden xl:inline">Code</span></Button>
           <Button size="sm" variant="secondary" onClick={exportZip} loading={busy === "export"} disabled={!nodes.length} aria-label="Export Nextflow pipeline"><Download /><span className="hidden xl:inline">Export</span></Button>
@@ -495,7 +551,8 @@ function StudioInner() {
         <div className="flex min-h-0 flex-1">
           {modulesQ.data ? (
             <Palette modules={modulesQ.data.modules} portTypes={portTypes} customAllowed={modulesQ.data.custom_code_allowed}
-              subworkflows={subworkflows} onAdd={(m) => addModule(m)} onInsertSub={(w) => insertSubworkflow(w)} onDeleteSub={deleteWorkflow} />
+              subworkflows={subworkflows} onAdd={(m) => addModule(m)} onInsertSub={(w) => insertSubworkflow(w)} onDeleteSub={deleteWorkflow}
+              onAddSoftware={() => setFinderOpen(true)} onEditModule={editModule} onExportModule={exportModule} onDeleteModule={deleteModule} />
           ) : (
             <aside className="flex w-64 items-center justify-center border-r border-line bg-surface text-muted">
               {modulesQ.isError ? <p className="px-4 text-center text-[13px] text-bad">{errMsg(modulesQ.error)}</p> : <Loader2 className="size-5 animate-spin" />}
@@ -590,8 +647,17 @@ function StudioInner() {
               </div>
             </aside>
           ) : null}
+          {assistantOpen && (
+            <AssistantPanel getGraph={() => serialize(graphRef.current)} hasNodes={nodes.length > 0} onClose={() => setAssistantOpen(false)}
+              onLoad={loadFromAssistant} onSelectNode={selectNode} onDraftModule={draftModuleFor}
+              nodeLabel={(id) => nodes.find((n) => n.id === id)?.data.label ?? null} />
+          )}
         </div>
       </div>
+
+      <ModuleBuilder open={builder.open} onOpenChange={(o) => setBuilder((b) => ({ ...b, open: o }))} initial={builder.def} editing={builder.editing}
+        notes={builder.notes} portTypes={portTypes} />
+      <ToolFinder open={finderOpen} onOpenChange={setFinderOpen} modules={modulesQ.data?.modules ?? []} onCreate={(d, notes) => openBuilder(d, false, notes ?? null)} />
 
       <CodePreview open={codeOpen} onOpenChange={setCodeOpen} files={codeFiles} />
 

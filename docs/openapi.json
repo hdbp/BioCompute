@@ -2934,6 +2934,7 @@
                     "cluster"
                 ],
                 "summary": "List Nodes",
+                "description": "Filters: state (comma list), tailnet (true = part of your tailnet), source (comma list of\ndiscovery sources such as tailscale, neighbors, mdns, htcondor, agent, manual, agent-report).",
                 "operationId": "list_nodes_api_nodes_get",
                 "security": [
                     {
@@ -2955,6 +2956,38 @@
                                 }
                             ],
                             "title": "State"
+                        }
+                    },
+                    {
+                        "name": "tailnet",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "boolean"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Tailnet"
+                        }
+                    },
+                    {
+                        "name": "source",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Source"
                         }
                     }
                 ],
@@ -3247,6 +3280,105 @@
                 ]
             }
         },
+        "/api/nodes/{nid}/ssh-enroll": {
+            "get": {
+                "tags": [
+                    "cluster"
+                ],
+                "summary": "Ssh Enroll Info",
+                "description": "Defaults and current status for one-click enrollment of a tailnet machine.",
+                "operationId": "ssh_enroll_info_api_nodes__nid__ssh_enroll_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "nid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Nid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "cluster"
+                ],
+                "summary": "Ssh Enroll Start",
+                "operationId": "ssh_enroll_start_api_nodes__nid__ssh_enroll_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "nid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Nid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SshEnrollIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/nodes/{nid}/condor-config": {
             "get": {
                 "tags": [
@@ -3344,6 +3476,53 @@
                         }
                     }
                 }
+            }
+        },
+        "/api/discovery/ssh-key": {
+            "get": {
+                "tags": [
+                    "cluster"
+                ],
+                "summary": "Get Ssh Key",
+                "description": "BioCompute's SSH public key, to authorize on machines that use their own sshd.",
+                "operationId": "get_ssh_key_api_discovery_ssh_key_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "cluster"
+                ],
+                "summary": "Create Ssh Key",
+                "operationId": "create_ssh_key_api_discovery_ssh_key_post",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
             }
         },
         "/api/discovery/config": {
@@ -3747,6 +3926,110 @@
                 }
             }
         },
+        "/api/agent/speedtest": {
+            "get": {
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Agent Speedtest Download",
+                "description": "Agents measure controller -> worker throughput (used to estimate data-transfer time).",
+                "operationId": "agent_speedtest_download_api_agent_speedtest_get",
+                "parameters": [
+                    {
+                        "name": "size",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 8388608,
+                            "title": "Size"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Agent Speedtest Upload",
+                "description": "Agents measure worker -> controller throughput.",
+                "operationId": "agent_speedtest_upload_api_agent_speedtest_post",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/agent/discovery-report": {
             "post": {
                 "tags": [
@@ -3827,6 +4110,419 @@
                         "HTTPBearer": []
                     }
                 ]
+            },
+            "post": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Create Module",
+                "operationId": "create_module_api_studio_modules_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "additionalProperties": true,
+                                "type": "object",
+                                "title": "Body"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/studio/tools/scan": {
+            "get": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Scan Tools",
+                "description": "Known bioinformatics programs found on the controller's PATH.",
+                "operationId": "scan_tools_api_studio_tools_scan_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/studio/tools/check": {
+            "get": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Check Tool",
+                "operationId": "check_tool_api_studio_tools_check_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Name"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/studio/module-templates/{key}": {
+            "get": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Module Template",
+                "operationId": "module_template_api_studio_module_templates__key__get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "key",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Key"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/studio/module-skeleton": {
+            "get": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Module Skeleton",
+                "operationId": "module_skeleton_api_studio_module_skeleton_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "exe",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Exe"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/studio/modules/check": {
+            "post": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Check Module",
+                "operationId": "check_module_api_studio_modules_check_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "existing_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Existing Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true,
+                                "title": "Body"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/studio/modules/{mid}": {
+            "put": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Update Module",
+                "operationId": "update_module_api_studio_modules__mid__put",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "mid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Mid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true,
+                                "title": "Body"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Delete Module",
+                "operationId": "delete_module_api_studio_modules__mid__delete",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "mid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Mid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/studio/modules/{mid}/export": {
+            "get": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Export Module",
+                "operationId": "export_module_api_studio_modules__mid__export_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "mid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Mid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/studio/workflows": {
@@ -4224,6 +4920,274 @@
                         }
                     }
                 }
+            }
+        },
+        "/api/assistant/status": {
+            "get": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Status",
+                "operationId": "status_api_assistant_status_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/assistant/config": {
+            "put": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Put Config",
+                "operationId": "put_config_api_assistant_config_put",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ConfigIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/assistant/test": {
+            "post": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Test",
+                "operationId": "test_api_assistant_test_post",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/assistant/build": {
+            "post": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Build",
+                "operationId": "build_api_assistant_build_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BuildIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/assistant/review": {
+            "post": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Review",
+                "operationId": "review_api_assistant_review_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReviewIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/assistant/draft-module": {
+            "post": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Draft Module",
+                "operationId": "draft_module_api_assistant_draft_module_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DraftModuleIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/assistant/ask": {
+            "post": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Ask",
+                "operationId": "ask_api_assistant_ask_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AskIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
             }
         },
         "/api/health": {
@@ -4722,6 +5686,112 @@
                 ],
                 "title": "AllocationOut"
             },
+            "AskIn": {
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "maxLength": 8000,
+                        "minLength": 2,
+                        "title": "Question"
+                    },
+                    "graph": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Graph"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "question"
+                ],
+                "title": "AskIn"
+            },
+            "BuildIn": {
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "maxLength": 8000,
+                        "minLength": 3,
+                        "title": "Description"
+                    },
+                    "graph": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Graph"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "description"
+                ],
+                "title": "BuildIn"
+            },
+            "ConfigIn": {
+                "properties": {
+                    "provider": {
+                        "type": "string",
+                        "title": "Provider"
+                    },
+                    "model": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Model"
+                    },
+                    "effort": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Effort",
+                        "default": "high"
+                    },
+                    "api_key": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Api Key"
+                    },
+                    "clear_key": {
+                        "type": "boolean",
+                        "title": "Clear Key",
+                        "default": false
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "provider"
+                ],
+                "title": "ConfigIn"
+            },
             "DatasetIn": {
                 "properties": {
                     "name": {
@@ -4784,6 +5854,32 @@
                 ],
                 "title": "DiscoveryReport",
                 "description": "A discovery agent on another network segment reporting nearby devices."
+            },
+            "DraftModuleIn": {
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "maxLength": 8000,
+                        "minLength": 3,
+                        "title": "Description"
+                    },
+                    "tool": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Tool"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "description"
+                ],
+                "title": "DraftModuleIn"
             },
             "DuplicateIn": {
                 "properties": {
@@ -5479,10 +6575,28 @@
                             }
                         ]
                     },
+                    "network": {
+                        "additionalProperties": true,
+                        "type": "object",
+                        "title": "Network",
+                        "default": {}
+                    },
                     "eligibility": {
                         "additionalProperties": true,
                         "type": "object",
                         "title": "Eligibility",
+                        "default": {}
+                    },
+                    "tailnet": {
+                        "additionalProperties": true,
+                        "type": "object",
+                        "title": "Tailnet",
+                        "default": {}
+                    },
+                    "capacity": {
+                        "additionalProperties": true,
+                        "type": "object",
+                        "title": "Capacity",
                         "default": {}
                     },
                     "created_at": {
@@ -6153,6 +7267,17 @@
                         "title": "Requested Mem Gb",
                         "default": 0
                     },
+                    "requested_disk_gb": {
+                        "anyOf": [
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Requested Disk Gb"
+                    },
                     "node_ids": {
                         "items": {
                             "type": "string"
@@ -6247,6 +7372,26 @@
                     "created_at"
                 ],
                 "title": "PresetOut"
+            },
+            "ReviewIn": {
+                "properties": {
+                    "graph": {
+                        "additionalProperties": true,
+                        "type": "object",
+                        "title": "Graph"
+                    },
+                    "goal": {
+                        "type": "string",
+                        "maxLength": 4000,
+                        "title": "Goal",
+                        "default": ""
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "graph"
+                ],
+                "title": "ReviewIn"
             },
             "RunCreate": {
                 "properties": {
@@ -7059,6 +8204,81 @@
                 "title": "SchemaAuthorIn",
                 "description": "Generic schema wizard: list of parameters for pipelines lacking nextflow_schema.json."
             },
+            "SshEnrollIn": {
+                "properties": {
+                    "ssh_user": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9._-]{0,63}$",
+                        "title": "Ssh User"
+                    },
+                    "host": {
+                        "type": "string",
+                        "title": "Host"
+                    },
+                    "ssh_port": {
+                        "type": "integer",
+                        "maximum": 65535.0,
+                        "minimum": 1.0,
+                        "title": "Ssh Port",
+                        "default": 22
+                    },
+                    "controller_url": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Controller Url"
+                    },
+                    "password": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 1024
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Password"
+                    },
+                    "enable_participation": {
+                        "type": "boolean",
+                        "title": "Enable Participation",
+                        "default": false
+                    },
+                    "site": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Site"
+                    },
+                    "install_service": {
+                        "type": "boolean",
+                        "title": "Install Service",
+                        "default": true
+                    },
+                    "allow_discovery_reports": {
+                        "type": "boolean",
+                        "title": "Allow Discovery Reports",
+                        "default": false
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "ssh_user",
+                    "host"
+                ],
+                "title": "SshEnrollIn"
+            },
             "StudioCompileIn": {
                 "properties": {
                     "name": {
@@ -7192,6 +8412,17 @@
                         "type": "boolean",
                         "title": "Allow Discovery Reports",
                         "default": false
+                    },
+                    "node_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Node Id"
                     }
                 },
                 "type": "object",

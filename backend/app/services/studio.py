@@ -30,7 +30,8 @@ LANG_RUN = {"bash": "bash", "python": "python3", "r": "Rscript"}
 
 
 class Graph:
-    def __init__(self, graph: dict[str, Any]):
+    def __init__(self, graph: dict[str, Any], index: dict[str, dict[str, Any]] | None = None):
+        self.index = index or MODULE_INDEX
         self.nodes: dict[str, dict[str, Any]] = {n["id"]: n for n in graph.get("nodes", [])}
         self.edges: list[dict[str, Any]] = graph.get("edges", [])
         self.specs: dict[str, dict[str, Any]] = {}
@@ -45,7 +46,7 @@ class Graph:
 
     def _spec(self, n: dict[str, Any]) -> dict[str, Any] | None:
         d = n.get("data") or {}
-        base = MODULE_INDEX.get(d.get("module", ""))
+        base = self.index.get(d.get("module", ""))
         if not base:
             self.issue("error", f"Unknown module '{d.get('module')}'", n["id"])
             return None
@@ -129,8 +130,9 @@ def proc_names(g: Graph, order: list[str]) -> dict[str, str]:
     return names
 
 
-def validate(graph: dict[str, Any]) -> dict[str, Any]:
-    g = Graph(graph)
+def validate(graph: dict[str, Any], index: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """index: module definitions (built-in + the user's own); defaults to the built-in library."""
+    g = Graph(graph, index)
     order = g.topo()
     samplesheets = [n for n, s in g.specs.items() if s["id"] == "input_samplesheet"]
     if len(samplesheets) > 1:
@@ -152,7 +154,7 @@ def validate(graph: dict[str, Any]) -> dict[str, Any]:
             g.issue("info", f"{g.specs[e['source']]['label']} output is broadcast to every sample of {g.specs[e['target']]['label']}", edge=e.get("id"))
     if not get_settings().allow_custom_code_modules:
         for n, s in g.specs.items():
-            if s.get("custom"):
+            if s.get("custom") or s.get("user"):
                 g.issue("error", "Custom code modules are disabled by the administrator", n)
     for nid in modules:
         s = g.specs[nid]
@@ -202,11 +204,12 @@ def _nf_pattern(pattern: str, per_sample: bool, prefix_lit: str) -> str:
     return pattern.replace("{prefix}", "${meta.id}" if per_sample else prefix_lit)
 
 
-def compile_graph(graph: dict[str, Any], name: str, description: str = "") -> dict[str, Any]:
-    v = validate(graph)
+def compile_graph(graph: dict[str, Any], name: str, description: str = "",
+                  index: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    v = validate(graph, index)
     if not v["valid"]:
         return {"files": {}, **v}
-    g = Graph(graph)
+    g = Graph(graph, index)
     order = g.topo()
     names = proc_names(g, order)
     files: dict[str, str] = {}
@@ -282,7 +285,7 @@ def compile_graph(graph: dict[str, Any], name: str, description: str = "") -> di
         for p in s.get("params", []):
             key = _param_key(proc, p["name"])
             params[key] = s["param_values"].get(p["name"])
-            prop = {k: p[k] for k in ("type", "description", "enum", "minimum", "maximum") if k in p}
+            prop = {k: p[k] for k in ("type", "description", "enum", "minimum", "maximum") if p.get(k) is not None}
             prop["default"] = params[key]
             group["properties"][key] = prop
             env_lines.append(f"    export BC_PARAM_{p['name'].upper()}='${{params.{key}}}'")

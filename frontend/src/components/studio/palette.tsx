@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { Layers, Puzzle, Search, Trash2 } from "lucide-react";
+import { Download, Layers, PackagePlus, Pencil, Puzzle, Search, Trash2 } from "lucide-react";
 import type { StudioModule, StudioWorkflow } from "@/lib/types";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 import type { PortTypes } from "./model";
@@ -9,11 +10,12 @@ import type { PortTypes } from "./model";
 export const DND_MODULE = "application/x-biocompute-module";
 export const DND_SUBWORKFLOW = "application/x-biocompute-subworkflow";
 
-const CATEGORY_ORDER = ["Inputs", "Quality control", "Preprocessing", "Alignment", "Peak calling", "Quantification", "Visualization", "Reporting", "Outputs", "Custom code"];
+const CATEGORY_ORDER = ["Inputs", "Quality control", "Preprocessing", "Alignment", "Peak calling", "Quantification", "Visualization", "Reporting", "Outputs", "My modules", "Custom code"];
 
-export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd, onInsertSub, onDeleteSub }: {
+export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd, onInsertSub, onDeleteSub, onAddSoftware, onEditModule, onExportModule, onDeleteModule }: {
   modules: StudioModule[]; portTypes: PortTypes; customAllowed: boolean; subworkflows: StudioWorkflow[];
   onAdd: (m: StudioModule) => void; onInsertSub: (w: StudioWorkflow) => void; onDeleteSub: (w: StudioWorkflow) => void;
+  onAddSoftware: () => void; onEditModule: (m: StudioModule) => void; onExportModule: (m: StudioModule) => void; onDeleteModule: (m: StudioModule) => void;
 }) {
   const [q, setQ] = useState("");
   const groups = useMemo(() => {
@@ -32,6 +34,11 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search modules or tools" className="pl-7 h-8" aria-label="Search modules" />
         </div>
         <p className="mt-2 text-[11.5px] text-muted">Drag onto the canvas, or click to add.</p>
+        {customAllowed && (
+          <Tip content="Create modules for software installed on your computers (another peak caller, aligner, ...)">
+            <Button size="sm" variant="secondary" className="mt-2 w-full" onClick={onAddSoftware}><PackagePlus />Add software as a module</Button>
+          </Tip>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {groups.map(([cat, mods]) => (
@@ -39,11 +46,11 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
             <h4 className="px-1.5 pb-1 text-xs font-medium text-muted">{cat}</h4>
             <ul className="space-y-1">
               {mods.map((m) => {
-                const disabled = !!m.custom && !customAllowed;
+                const disabled = !!(m.custom || m.user) && !customAllowed;
                 const ports = [...m.inputs.map((p) => p.type), ...m.outputs.map((p) => p.type)];
                 return (
-                  <li key={m.id}>
-                    <Tip side="right" content={<div className="space-y-1"><p>{m.description}</p>{m.tools?.length ? <p className="text-muted">Requires: {m.tools.join(", ")}</p> : null}{disabled && <p className="text-wait">Custom code is disabled by the administrator.</p>}</div>}>
+                  <li key={m.id} className={cn(m.user && "group/mod relative")}>
+                    <Tip side="right" content={<div className="space-y-1"><p>{m.description}</p>{m.tools?.length ? <p className="text-muted">Requires: {m.tools.join(", ")}</p> : null}{m.user && <p className="text-muted">Your module ({m.id})</p>}{disabled && <p className="text-wait">Custom code is disabled by the administrator.</p>}</div>}>
                       <button
                         draggable={!disabled}
                         disabled={disabled}
@@ -59,6 +66,13 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
                         </span>
                       </button>
                     </Tip>
+                    {m.user && (
+                      <span className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center rounded-md bg-surface shadow-sm group-hover/mod:flex group-focus-within/mod:flex">
+                        <button onClick={() => onEditModule(m)} className="rounded p-1 text-muted hover:text-text" aria-label={`Edit module ${m.name}`}><Pencil className="size-3.5" /></button>
+                        <button onClick={() => onExportModule(m)} className="rounded p-1 text-muted hover:text-text" aria-label={`Export module ${m.name}`}><Download className="size-3.5" /></button>
+                        <button onClick={() => onDeleteModule(m)} className="rounded p-1 text-muted hover:text-bad" aria-label={`Delete module ${m.name}`}><Trash2 className="size-3.5" /></button>
+                      </span>
+                    )}
                   </li>
                 );
               })}

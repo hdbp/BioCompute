@@ -11,10 +11,11 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..models import Pipeline, StudioWorkflow, User
+from ..models import CustomModule, Pipeline, StudioWorkflow, User
 from ..schemas import StudioCompileIn, StudioIn, StudioOut
 from ..security import audit, require_scientist, require_viewer
 from ..services import pipelines as psvc
+from ..services import custom_modules as cm
 from ..services import studio
 from ..services.studio_modules import MODULES, PORT_TYPES
 
@@ -22,8 +23,94 @@ router = APIRouter(prefix="/api/studio", tags=["studio"])
 
 
 @router.get("/modules")
-def modules(_: User = Depends(require_viewer)):
-    return {"modules": MODULES, "port_types": PORT_TYPES, "custom_code_allowed": get_settings().allow_custom_code_modules}
+def modules(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    user = [v for v in cm.index(db).values() if v.get("user")]
+    return {"modules": MODULES + sorted(user, key=lambda m: m["name"].lower()), "port_types": PORT_TYPES,
+            "custom_code_allowed": get_settings().allow_custom_code_modules}
+
+
+# --------------------------------------------------------------------------- user-defined modules
+@router.get("/tools/scan")
+def scan_tools(_: User = Depends(require_scientist)):
+    """Known bioinformatics programs found on the controller's PATH."""
+    return {"tools": cm.scan_tools(), "templates": sorted(cm.TEMPLATES)}
+
+
+@router.get("/tools/check")
+def check_tool(name: str, _: User = Depends(require_scientist)):
+    return cm.check_tool(name)
+
+
+@router.get("/module-templates/{key}")
+def module_template(key: str, _: User = Depends(require_scientist)):
+    return cm.template(key)
+
+
+@router.get("/module-skeleton")
+def module_skeleton(exe: str, _: User = Depends(require_scientist)):
+    return cm.skeleton(exe)
+
+
+@router.post("/modules/check")
+def check_module(body: dict, existing_id: str | None = None, _: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    return cm.check_module(body, existing_id=existing_id, db=db)
+
+
+def _require_code_allowed():
+    if not get_settings().allow_custom_code_modules:
+        raise HTTPException(403, "Custom modules are disabled by the administrator (BIOCOMPUTE_ALLOW_CUSTOM_CODE_MODULES=false)")
+
+
+@router.post("/modules")
+def create_module(body: dict, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    _require_code_allowed()
+    res = cm.check_module(body, db=db)
+    if not res["valid"]:
+        raise HTTPException(422, {"message": "Module is invalid", "issues": res["issues"]})
+    db.add(CustomModule(id=res["module"]["id"], definition=res["module"], created_by=user.username))
+    audit(db, user.username, "studio.module_create", res["module"]["id"], tools=res["module"]["tools"])
+    db.commit()
+    return res
+
+
+@router.put("/modules/{mid}")
+def update_module(mid: str, body: dict, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    _require_code_allowed()
+    m = db.get(CustomModule, mid)
+    if not m:
+        raise HTTPException(404, "Module not found")
+    res = cm.check_module(body, existing_id=mid, db=db)
+    if not res["valid"]:
+        raise HTTPException(422, {"message": "Module is invalid", "issues": res["issues"]})
+    if res["module"]["id"] != mid:
+        raise HTTPException(400, "The module id cannot be changed (workflows refer to it); duplicate it instead")
+    m.definition = res["module"]
+    audit(db, user.username, "studio.module_update", mid)
+    db.commit()
+    return res
+
+
+@router.delete("/modules/{mid}")
+def delete_module(mid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    m = db.get(CustomModule, mid)
+    if not m:
+        raise HTTPException(404, "Module not found")
+    used = [w.name for w in db.query(StudioWorkflow).all()
+            if any(((n.get("data") or {}).get("module") == mid) for n in (w.graph or {}).get("nodes", []))]
+    if used:
+        raise HTTPException(409, f"Used by workflow(s): {', '.join(used[:5])}. Remove it from them first.")
+    db.delete(m)
+    audit(db, user.username, "studio.module_delete", mid)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/modules/{mid}/export")
+def export_module(mid: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    m = db.get(CustomModule, mid)
+    if not m:
+        raise HTTPException(404, "Module not found")
+    return {"biocompute_module": 1, **m.definition}
 
 
 @router.get("/workflows", response_model=list[StudioOut])
@@ -68,18 +155,18 @@ def delete_workflow(wid: str, user: User = Depends(require_scientist), db: Sessi
 
 
 @router.post("/validate")
-def validate(body: StudioCompileIn, _: User = Depends(require_viewer)):
-    return studio.validate(body.graph)
+def validate(body: StudioCompileIn, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    return studio.validate(body.graph, cm.index(db))
 
 
 @router.post("/compile")
-def compile_graph(body: StudioCompileIn, _: User = Depends(require_viewer)):
-    return studio.compile_graph(body.graph, body.name, body.description)
+def compile_graph(body: StudioCompileIn, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    return studio.compile_graph(body.graph, body.name, body.description, cm.index(db))
 
 
 @router.post("/export")
-def export_zip(body: StudioCompileIn, _: User = Depends(require_viewer)):
-    res = studio.compile_graph(body.graph, body.name, body.description)
+def export_zip(body: StudioCompileIn, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    res = studio.compile_graph(body.graph, body.name, body.description, cm.index(db))
     if not res["valid"]:
         raise HTTPException(422, {"message": "Graph is invalid", "issues": res["issues"]})
     buf = io.BytesIO()
@@ -99,7 +186,7 @@ def publish(wid: str, user: User = Depends(require_scientist), db: Session = Dep
     w = db.get(StudioWorkflow, wid)
     if not w:
         raise HTTPException(404)
-    res = studio.compile_graph(w.graph, w.name, w.description)
+    res = studio.compile_graph(w.graph, w.name, w.description, cm.index(db))
     if not res["valid"]:
         raise HTTPException(422, {"message": "Graph is invalid", "issues": res["issues"]})
     existing = db.query(Pipeline).filter(Pipeline.studio_workflow_id == w.id).first()
