@@ -14,6 +14,7 @@ import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Issue, ModuleDef, Pipeline, StudioModule, StudioWorkflow } from "@/lib/types";
 import { publishState } from "@/components/studio-drafts";
+import { ShareButton, SharingBadge, type Visibility } from "@/components/sharing";
 import { ago, cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/theme";
 import { Button } from "@/components/ui/button";
@@ -78,6 +79,9 @@ function StudioInner() {
   const [subDlg, setSubDlg] = useState(false);
   const [subName, setSubName] = useState("");
   const loadedRef = useRef<string | null>(null);
+  // owner and sharing of the open workflow; someone else's shared workflow opens read-only (Save makes a copy)
+  const [wfMeta, setWfMeta] = useState<{ created_by: string | null; visibility: Visibility; can_edit: boolean; name: string } | null>(null);
+  const me = useAuth((s) => s.user?.username);
   // the assistant answer currently on the canvas, linked to the workflow once saved
   const pendingResult = useRef<string | null>(null);
   // unsaved canvas, kept in this browser so leaving Studio never loses work
@@ -154,6 +158,7 @@ function StudioInner() {
     loadedRef.current = routeId;
     api.get<StudioWorkflow>(`/api/studio/workflows/${routeId}`).then((w) => {
       setWfId(w.id);
+      setWfMeta({ created_by: w.created_by, visibility: w.visibility, can_edit: w.can_edit, name: w.name });
       setName(w.name);
       setDescription(w.description);
       replaceGraph(deserialize(w.graph));
@@ -303,12 +308,15 @@ function StudioInner() {
     if (!name.trim()) { toast.error("Give the workflow a name first"); return null; }
     setBusy("save");
     try {
-      const body = { name: name.trim(), description, graph: serialize(graphRef.current) };
+      const copying = !!wfId && !!wfMeta && !wfMeta.can_edit;
+      const body = { name: copying && name.trim() === wfMeta!.name ? `${name.trim()} (copy)` : name.trim(), description, graph: serialize(graphRef.current) };
       let w: StudioWorkflow;
-      if (wfId) w = await api.put<StudioWorkflow>(`/api/studio/workflows/${wfId}`, body);
+      if (wfId && !copying) w = await api.put<StudioWorkflow>(`/api/studio/workflows/${wfId}`, body);
       else {
+        if (copying) { setName(body.name); toast.message(`“${wfMeta!.name}” belongs to ${wfMeta!.created_by}; saved as your own copy`); }
         w = await api.post<StudioWorkflow>("/api/studio/workflows", body);
         setWfId(w.id);
+        setWfMeta({ created_by: w.created_by, visibility: w.visibility, can_edit: w.can_edit, name: w.name });
         loadedRef.current = w.id;
         navigate(`/studio/${w.id}`, { replace: true });
       }
@@ -333,7 +341,21 @@ function StudioInner() {
     } finally {
       setBusy(null);
     }
-  }, [name, description, wfId, navigate, qc, draftKey, pipelinesQ.data]);
+  }, [name, description, wfId, wfMeta, navigate, qc, draftKey, pipelinesQ.data]);
+
+  const setVisibility = useCallback(async (v: Visibility) => {
+    if (!wfId) return;
+    try {
+      const r = await api.put<{ visibility: Visibility; shared_modules: string[] }>(`/api/studio/workflows/${wfId}/visibility`, { visibility: v });
+      setWfMeta((m) => (m ? { ...m, visibility: r.visibility } : m));
+      qc.invalidateQueries({ queryKey: ["studio-workflows"] });
+      qc.invalidateQueries({ queryKey: ["pipelines"] });
+      qc.invalidateQueries({ queryKey: ["studio-modules"] });
+      toast.success(v === "lab"
+        ? `Shared with the lab${r.shared_modules.length ? `, with the module${r.shared_modules.length === 1 ? "" : "s"} it uses (${r.shared_modules.join(", ")})` : ""}`
+        : "Now private: only you can see it");
+    } catch (e) { toast.error(errMsg(e)); }
+  }, [wfId, qc]);
 
   const validate = useCallback(async () => {
     setValidating(true);
@@ -416,6 +438,7 @@ function StudioInner() {
     pendingResult.current = null;
     loadedRef.current = null;
     setWfId(null);
+    setWfMeta(null);
     setName("Untitled workflow");
     setDescription("");
     replaceGraph({ nodes: [], edges: [] });
@@ -575,13 +598,16 @@ function StudioInner() {
           <input value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} aria-label="Workflow name"
             className="min-w-0 w-48 rounded-md bg-transparent px-1.5 py-1 text-[14px] font-semibold hover:bg-raised focus:bg-raised focus:outline-none" />
           {dirty ? <Badge tone="wait">Unsaved</Badge> : wfId ? <Badge>Saved</Badge> : null}
+          {wfMeta && wfMeta.created_by !== me && <SharingBadge owner={wfMeta.created_by} visibility={wfMeta.visibility} />}
+          {wfMeta && !wfMeta.can_edit && <Tip content="You can change it on the canvas; Save keeps your changes as your own copy."><Badge tone="wait" className="cursor-help">Read-only</Badge></Tip>}
+          {wfMeta?.can_edit && wfMeta.created_by === me && <ShareButton visibility={wfMeta.visibility} onChange={setVisibility} compact />}
           {wfId && (() => {
             const w = workflowsQ.data?.find((x) => x.id === wfId);
             if (!w || !pipelinesQ.data) return null;
             const st = publishState(w, pipelinesQ.data);
-            return !st.published ? <Tip content="Saved workflows stay in Studio. Publish adds them to the Pipelines library so they can be run."><Badge tone="neutral">Not in Pipelines</Badge></Tip>
-              : st.changed || dirty ? <Tip content="The library has an older version. Publish to update it."><Badge tone="wait">Library has {st.version}</Badge></Tip>
-              : <Badge tone="ok">Published {st.version}</Badge>;
+            return !st.published ? <Tip content="Saved workflows stay in Studio. Publish adds them to the Pipelines library so they can be run."><Badge tone="neutral" className="hidden 2xl:inline-flex">Not in Pipelines</Badge></Tip>
+              : st.changed || dirty ? <Tip content="The library has an older version. Publish to update it."><Badge tone="wait" className="hidden 2xl:inline-flex">Library has {st.version}</Badge></Tip>
+              : <Badge tone="ok" className="hidden 2xl:inline-flex">Published {st.version}</Badge>;
           })()}
           <Tip content={<div className="space-y-1"><p>Graphs export to a supported subset of Nextflow DSL2: per-sample and all-sample steps, branches, joins and merges.</p><p className="text-muted">Arbitrary Nextflow scripts cannot be imported back into a graph.</p></div>}>
             <span tabIndex={0} className="hidden 2xl:inline-flex cursor-help rounded border border-line px-1.5 py-px text-[11.5px] text-muted">DSL2 subset</span>
@@ -590,7 +616,7 @@ function StudioInner() {
           <Tip content="New workflow"><Button size="icon" variant="ghost" onClick={newWorkflow} aria-label="New workflow"><FilePlus2 /></Button></Tip>
           <Tip content="Open a saved workflow"><Button size="icon" variant="ghost" onClick={() => setOpenDlg(true)} aria-label="Open workflow"><FolderOpen /></Button></Tip>
           <Tip content="Name and description"><Button size="icon" variant="ghost" onClick={() => setDetailsOpen(true)} aria-label="Workflow details"><Info /></Button></Tip>
-          <Tip content="Save (Ctrl+S)"><Button size="sm" variant="ghost" onClick={() => save()} loading={busy === "save"}><Save />Save</Button></Tip>
+          <Tip content={wfMeta && !wfMeta.can_edit ? "Save your own copy (Ctrl+S)" : "Save (Ctrl+S)"}><Button size="sm" variant="ghost" onClick={() => save()} loading={busy === "save"}><Save />{wfMeta && !wfMeta.can_edit ? "Save a copy" : "Save"}</Button></Tip>
           <div className="mx-1 h-5 w-px bg-line" />
           <Tip content="Undo (Ctrl+Z)"><Button size="icon" variant="ghost" onClick={undo} disabled={!past.current.length} aria-label="Undo"><Undo2 /></Button></Tip>
           <Tip content="Redo (Ctrl+Shift+Z)"><Button size="icon" variant="ghost" onClick={redo} disabled={!future.current.length} aria-label="Redo"><Redo2 /></Button></Tip>
@@ -617,7 +643,14 @@ function StudioInner() {
           {modulesQ.data ? (
             <Palette modules={modulesQ.data.modules} portTypes={portTypes} customAllowed={modulesQ.data.custom_code_allowed}
               subworkflows={subworkflows} onAdd={(m) => addModule(m)} onInsertSub={(w) => insertSubworkflow(w)} onDeleteSub={deleteWorkflow}
-              onAddSoftware={() => setFinderOpen(true)} onEditModule={editModule} onExportModule={exportModule} onDeleteModule={deleteModule} />
+              onAddSoftware={() => setFinderOpen(true)} onEditModule={editModule} onExportModule={exportModule} onDeleteModule={deleteModule}
+              onShareModule={async (m, v) => {
+                try {
+                  await api.put(`/api/studio/modules/${m.id}/visibility`, { visibility: v });
+                  qc.invalidateQueries({ queryKey: ["studio-modules"] });
+                  toast.success(v === "lab" ? `“${m.name}” is shared with the lab` : `“${m.name}” is private`);
+                } catch (e) { toast.error(errMsg(e)); }
+              }} />
           ) : (
             <aside className="flex w-64 items-center justify-center border-r border-line bg-surface text-muted">
               {modulesQ.isError ? <p className="px-4 text-center text-[13px] text-bad">{errMsg(modulesQ.error)}</p> : <Loader2 className="size-5 animate-spin" />}
@@ -741,7 +774,7 @@ function StudioInner() {
             <p className="py-6 text-center text-[13px] text-muted">No saved workflows yet. Build one and choose Save.</p>
           ) : (
             <ul className="divide-y divide-line">
-              {workflows.map((w) => (
+              {[...workflows].sort((x, y) => Number(x.created_by !== me) - Number(y.created_by !== me)).map((w) => (
                 <li key={w.id} className="flex items-center gap-3 py-2">
                   <button className="min-w-0 flex-1 text-left" onClick={() => {
                     setOpenDlg(false);
@@ -749,10 +782,11 @@ function StudioInner() {
                     navigate(`/studio/${w.id}`);
                   }}>
                     <p className="truncate text-[13.5px] font-medium hover:text-accent">{w.name}</p>
-                    <p className="truncate text-xs text-muted">{w.graph.nodes.length} nodes, updated {ago(w.updated_at)}{w.created_by ? ` by ${w.created_by}` : ""}</p>
+                    <p className="truncate text-xs text-muted">{w.graph.nodes.length} nodes, updated {ago(w.updated_at)}{w.created_by ? ` by ${w.created_by === me ? "you" : w.created_by}` : ""}</p>
                   </button>
+                  {w.created_by === me ? (w.visibility === "lab" && <Badge tone="accent">shared</Badge>) : <SharingBadge owner={w.created_by} visibility={w.visibility} />}
                   {w.id === wfId && <Badge tone="accent">Open</Badge>}
-                  <Button size="icon" variant="ghost" onClick={() => deleteWorkflow(w)} aria-label={`Delete ${w.name}`}><Trash2 /></Button>
+                  {w.can_edit && <Button size="icon" variant="ghost" onClick={() => deleteWorkflow(w)} aria-label={`Delete ${w.name}`}><Trash2 /></Button>}
                 </li>
               ))}
             </ul>

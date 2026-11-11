@@ -68,11 +68,14 @@ class PipelineOut(ORM):
     favorite: bool
     tags: list[str]
     studio_workflow_id: str | None
+    owner: str | None = None
+    visibility: str = "lab"
     created_at: datetime
     updated_at: datetime
 
 
 class PipelineSummary(PipelineOut):
+    can_edit: bool = False
     latest_version: PipelineVersionOut | None = None
     has_schema: bool = False
     run_count: int = 0
@@ -92,8 +95,9 @@ class PipelineUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     category: str | None = None
-    favorite: bool | None = None
+    favorite: bool | None = None  # per user
     tags: list[str] | None = None
+    visibility: str | None = None  # private | lab (owner or admin)
 
 
 class ImportLocal(BaseModel):
@@ -101,6 +105,7 @@ class ImportLocal(BaseModel):
     name: str | None = None
     category: str | None = None
     copy_files: bool = False
+    visibility: str = "private"
 
 
 class ImportGit(BaseModel):
@@ -108,10 +113,12 @@ class ImportGit(BaseModel):
     ref: str | None = None
     name: str | None = None
     category: str | None = None
+    visibility: str = "private"
 
 
 class DuplicateIn(BaseModel):
     name: str
+    visibility: str = "private"
 
 
 class PresetIn(BaseModel):
@@ -394,6 +401,7 @@ class StudioIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
     graph: dict[str, Any]
+    visibility: str | None = None  # private | lab; new workflows are private unless set
 
 
 class StudioOut(ORM):
@@ -402,6 +410,8 @@ class StudioOut(ORM):
     description: str
     graph: dict[str, Any]
     created_by: str | None
+    visibility: str = "private"
+    can_edit: bool = False
     created_at: datetime
     updated_at: datetime
 

@@ -79,14 +79,21 @@ def to_index_entry(d: ModuleDef) -> dict[str, Any]:
     return e
 
 
-def index(db: Session) -> dict[str, dict[str, Any]]:
-    """Built-in modules plus the user's own (used by validate/compile/publish)."""
+def index(db: Session, user=None) -> dict[str, dict[str, Any]]:
+    """Built-in modules plus user modules (all of them, or those `user` may see: own, shared with the lab, or admin)."""
+    from . import access
+
     merged = dict(MODULE_INDEX)
     for m in db.query(CustomModule).all():
+        if user is not None and not access.can_view(user, m.created_by, m.visibility):
+            continue
         try:
-            merged[m.id] = to_index_entry(ModuleDef.model_validate(m.definition))
+            e = to_index_entry(ModuleDef.model_validate(m.definition))
         except ValidationError:
             continue  # a definition that no longer validates is skipped (shown as an error when edited)
+        e.update(owner=m.created_by, visibility=m.visibility,
+                 can_edit=access.can_edit(user, m.created_by) if user is not None else True)
+        merged[m.id] = e
     return merged
 
 
@@ -370,8 +377,9 @@ def check_module(raw: dict[str, Any], *, existing_id: str | None = None, db: Ses
         return {"valid": False, "issues": issues, "module": None}
     if d.id in MODULE_INDEX:
         issues.append({"level": "error", "field": "id", "message": "This id belongs to a built-in module; choose another"})
-    if db is not None and d.id != existing_id and db.get(CustomModule, d.id):
-        issues.append({"level": "error", "field": "id", "message": "A module with this id already exists"})
+    if db is not None and d.id != existing_id and (other := db.get(CustomModule, d.id)):
+        issues.append({"level": "error", "field": "id",
+                       "message": f"The id {d.id} is already used{f' by a module of {other.created_by}' if other.created_by else ''}; choose another"})
     for group in ("inputs", "outputs", "params"):
         names = [x.name for x in getattr(d, group)]
         if len(names) != len(set(names)):

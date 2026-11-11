@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Download, Layers, PackagePlus, Pencil, Puzzle, Search, Trash2 } from "lucide-react";
+import { Download, Layers, Lock, PackagePlus, Pencil, Puzzle, Search, Trash2, Users } from "lucide-react";
 import type { StudioModule, StudioWorkflow } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -12,10 +12,11 @@ export const DND_SUBWORKFLOW = "application/x-biocompute-subworkflow";
 
 const CATEGORY_ORDER = ["Inputs", "Quality control", "Preprocessing", "Alignment", "Peak calling", "Quantification", "Visualization", "Reporting", "Outputs", "My modules", "Custom code"];
 
-export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd, onInsertSub, onDeleteSub, onAddSoftware, onEditModule, onExportModule, onDeleteModule }: {
+export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd, onInsertSub, onDeleteSub, onAddSoftware, onEditModule, onExportModule, onDeleteModule, onShareModule }: {
   modules: StudioModule[]; portTypes: PortTypes; customAllowed: boolean; subworkflows: StudioWorkflow[];
   onAdd: (m: StudioModule) => void; onInsertSub: (w: StudioWorkflow) => void; onDeleteSub: (w: StudioWorkflow) => void;
   onAddSoftware: () => void; onEditModule: (m: StudioModule) => void; onExportModule: (m: StudioModule) => void; onDeleteModule: (m: StudioModule) => void;
+  onShareModule?: (m: StudioModule, visibility: "private" | "lab") => void;
 }) {
   const [q, setQ] = useState("");
   const groups = useMemo(() => {
@@ -50,7 +51,7 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
                 const ports = [...m.inputs.map((p) => p.type), ...m.outputs.map((p) => p.type)];
                 return (
                   <li key={m.id} className={cn(m.user && "group/mod relative")}>
-                    <Tip side="right" content={<div className="space-y-1"><p>{m.description}</p>{m.tools?.length ? <p className="text-muted">Requires: {m.tools.join(", ")}</p> : null}{m.user && <p className="text-muted">Your module ({m.id})</p>}{disabled && <p className="text-wait">Custom code is disabled by the administrator.</p>}</div>}>
+                    <Tip side="right" content={<div className="space-y-1"><p>{m.description}</p>{m.tools?.length ? <p className="text-muted">Requires: {m.tools.join(", ")}</p> : null}{m.user && <p className="text-muted">{m.can_edit === false ? `Shared by ${m.owner} (${m.id}); read-only` : `Your module (${m.id}), ${m.visibility === "lab" ? "shared with the lab" : "private"}`}</p>}{disabled && <p className="text-wait">Custom code is disabled by the administrator.</p>}</div>}>
                       <button
                         draggable={!disabled}
                         disabled={disabled}
@@ -68,9 +69,15 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
                     </Tip>
                     {m.user && (
                       <span className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center rounded-md bg-surface shadow-sm group-hover/mod:flex group-focus-within/mod:flex">
-                        <button onClick={() => onEditModule(m)} className="rounded p-1 text-muted hover:text-text" aria-label={`Edit module ${m.name}`}><Pencil className="size-3.5" /></button>
+                        {m.can_edit !== false && <button onClick={() => onEditModule(m)} className="rounded p-1 text-muted hover:text-text" aria-label={`Edit module ${m.name}`}><Pencil className="size-3.5" /></button>}
+                        {m.can_edit !== false && onShareModule && (
+                          <button onClick={() => onShareModule(m, m.visibility === "lab" ? "private" : "lab")} className="rounded p-1 text-muted hover:text-text"
+                            aria-label={m.visibility === "lab" ? `Make module ${m.name} private` : `Share module ${m.name} with the lab`} title={m.visibility === "lab" ? "Make private" : "Share with the lab"}>
+                            {m.visibility === "lab" ? <Lock className="size-3.5" /> : <Users className="size-3.5" />}
+                          </button>
+                        )}
                         <button onClick={() => onExportModule(m)} className="rounded p-1 text-muted hover:text-text" aria-label={`Export module ${m.name}`}><Download className="size-3.5" /></button>
-                        <button onClick={() => onDeleteModule(m)} className="rounded p-1 text-muted hover:text-bad" aria-label={`Delete module ${m.name}`}><Trash2 className="size-3.5" /></button>
+                        {m.can_edit !== false && <button onClick={() => onDeleteModule(m)} className="rounded p-1 text-muted hover:text-bad" aria-label={`Delete module ${m.name}`}><Trash2 className="size-3.5" /></button>}
                       </span>
                     )}
                   </li>

@@ -149,7 +149,9 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `POST   /api/studio/workflows`
 - `POST   /api/studio/workflows/{wid}/publish`
 - `PUT    /api/studio/modules/{mid}`
+- `PUT    /api/studio/modules/{mid}/visibility`
 - `PUT    /api/studio/workflows/{wid}`
+- `PUT    /api/studio/workflows/{wid}/visibility`
 
 ### assistant
 

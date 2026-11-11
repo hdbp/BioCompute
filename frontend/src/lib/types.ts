@@ -11,6 +11,7 @@ export interface Pipeline {
   id: string; slug: string; name: string; description: string; category: string;
   kind: "installed" | "template" | "studio"; source_type: string; source_url: string | null; engine: string;
   favorite: boolean; tags: string[]; studio_workflow_id: string | null; created_at: string; updated_at: string;
+  owner: string | null; visibility: "private" | "lab"; can_edit: boolean;
   latest_version: PipelineVersion | null; has_schema: boolean; run_count: number; last_run_status: string | null; preset_count: number;
 }
 export interface InputColumn {
@@ -97,8 +98,9 @@ export interface StudioModule {
   inputs: { name: string; type: string; multiple?: boolean }[]; outputs: { name: string; type: string; pattern?: string }[];
   params: { name: string; type: string; default?: unknown; enum?: unknown[]; minimum?: number; maximum?: number; description?: string; widget?: "path"; path_mode?: "file" | "dir" | "auto" }[];
   tools?: string[]; cpus?: number; memory_gb?: number; language?: string; script?: string; conda?: string; container?: string; custom?: boolean; user?: boolean;
+  owner?: string | null; visibility?: "private" | "lab"; can_edit?: boolean;
 }
-export interface StudioWorkflow { id: string; name: string; description: string; graph: { nodes: unknown[]; edges: unknown[]; meta?: Record<string, unknown> }; created_by: string | null; created_at: string; updated_at: string }
+export interface StudioWorkflow { id: string; name: string; description: string; graph: { nodes: unknown[]; edges: unknown[]; meta?: Record<string, unknown> }; created_by: string | null; visibility: "private" | "lab"; can_edit: boolean; created_at: string; updated_at: string }
 
 /** A user-defined Pipeline Studio module (same shape the API stores and exports). */
 export interface ModuleDef {

@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { PathInput } from "@/components/file-browser";
 import { RunStatusBadge } from "@/components/status";
 import { StudioDrafts } from "@/components/studio-drafts";
+import { SharingBadge } from "@/components/sharing";
 
 const KINDS = [
   { id: "all", label: "All" },
@@ -31,6 +32,8 @@ export default function PipelinesPage() {
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
   const [favOnly, setFavOnly] = useState(false);
+  const [whose, setWhose] = useState<"all" | "mine" | "others">("all");
+  const me = user?.username;
   const [importOpen, setImportOpen] = useState<null | { url?: string; name?: string; category?: string }>(null);
   const list = useQuery({ queryKey: ["pipelines"], queryFn: () => api.get<Pipeline[]>("/api/pipelines") });
 
@@ -39,8 +42,9 @@ export default function PipelinesPage() {
     const ql = q.toLowerCase();
     return (list.data ?? []).filter((p) =>
       (kind === "all" || p.kind === kind) && (!category || p.category === category) && (!favOnly || p.favorite) &&
+      (whose === "all" || (whose === "mine" ? p.owner === me : p.owner !== me)) &&
       (!ql || [p.name, p.description, p.category, ...p.tags].some((s) => s.toLowerCase().includes(ql))));
-  }, [list.data, kind, q, category, favOnly]);
+  }, [list.data, kind, q, category, favOnly, whose, me]);
 
   const fav = useMutation({
     mutationFn: (p: Pipeline) => api.patch(`/api/pipelines/${p.id}`, { favorite: !p.favorite }),
@@ -71,12 +75,18 @@ export default function PipelinesPage() {
           className={cn("inline-flex h-8.5 items-center gap-1.5 rounded-md border px-3 text-[13px]", favOnly ? "border-wait/50 text-wait bg-wait/10" : "border-line text-muted hover:text-text")}>
           <Star className={cn("size-4", favOnly && "fill-current")} />Favorites
         </button>
+        <div className="flex rounded-md border border-line p-0.5 text-[13px]" role="group" aria-label="Whose pipelines">
+          {([["all", "Everything"], ["mine", "Mine"], ["others", "Lab & catalog"]] as const).map(([k, l]) => (
+            <button key={k} onClick={() => setWhose(k)} aria-pressed={whose === k}
+              className={cn("rounded px-2.5 py-1", whose === k ? "bg-raised text-text" : "text-muted hover:text-text")}>{l}</button>
+          ))}
+        </div>
       </div>
       <Tabs value={kind} onValueChange={setKind}>
         <TabsList className="mb-5">{KINDS.map((k) => <TabsTrigger key={k.id} value={k.id}>{k.label}</TabsTrigger>)}</TabsList>
         <TabsContent value={kind}>
           {list.isLoading && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-40" />)}</div>}
-          {(kind === "all" || kind === "studio") && <StudioDrafts query={q} />}
+          {(kind === "all" || kind === "studio") && whose !== "others" && <StudioDrafts query={q} />}
           {list.data && items.length === 0 && <Panel><Empty icon={<Boxes />} title="No pipelines match">Clear the search or filters, or import a pipeline from Git or a local folder.</Empty></Panel>}
           {installed.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-8">
@@ -126,6 +136,7 @@ function PipelineCard({ p, onFav }: { p: Pipeline; onFav: () => void }) {
         {v?.engines.map((e) => <Badge key={e} tone={e === "nextflow" ? "accent" : "neutral"}>{e === "bcflow" ? "native engine" : e}</Badge>)}
         {p.has_schema ? <Badge tone="ok">schema</Badge> : <Badge tone="wait">no schema</Badge>}
         {p.kind === "studio" && <Badge>Studio</Badge>}
+        <SharingBadge owner={p.owner} visibility={p.visibility} />
         {p.tags.slice(0, 2).map((t) => <Badge key={t}>{t}</Badge>)}
       </div>
       <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-xs text-muted">
@@ -146,6 +157,7 @@ function ImportDialog({ init, onClose, onDone }: { init: null | { url?: string; 
   const [tab, setTab] = useState("git");
   const [git, setGit] = useState({ url: "", ref: "", name: "", category: "" });
   const [local, setLocal] = useState({ path: "", name: "", category: "", copy_files: true });
+  const [visibility, setVisibility] = useState<"private" | "lab">("private");
   const open = init !== null;
   const [seeded, setSeeded] = useState<typeof init>(null);
   if (open && init !== seeded) {
@@ -155,8 +167,8 @@ function ImportDialog({ init, onClose, onDone }: { init: null | { url?: string; 
   }
   const run = useMutation({
     mutationFn: () => (tab === "git"
-      ? api.post<Pipeline>("/api/pipelines/import/git", { url: git.url, ref: git.ref || null, name: git.name || null, category: git.category || null })
-      : api.post<Pipeline>("/api/pipelines/import/local", { ...local, name: local.name || null, category: local.category || null })),
+      ? api.post<Pipeline>("/api/pipelines/import/git", { url: git.url, ref: git.ref || null, name: git.name || null, category: git.category || null, visibility })
+      : api.post<Pipeline>("/api/pipelines/import/local", { ...local, name: local.name || null, category: local.category || null, visibility })),
     onSuccess: (p) => { toast.success(`Imported ${p.name}`); qc.invalidateQueries({ queryKey: ["pipelines"] }); onClose(); onDone(p.id); },
     onError: (e) => toast.error(errMsg(e)),
   });
@@ -194,6 +206,12 @@ function ImportDialog({ init, onClose, onDone }: { init: null | { url?: string; 
             </label>
           </TabsContent>
         </Tabs>
+        <Field label="Who can use it" className="mt-4" hint={visibility === "private" ? "Only you (and administrators). You can share it later." : "Everyone in the lab can see, run and copy it; only you can change it."}>
+          <Select value={visibility} onChange={(e) => setVisibility(e.target.value as "private" | "lab")}>
+            <option value="private">Only me</option>
+            <option value="lab">Everyone in the lab</option>
+          </Select>
+        </Field>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={run.isPending} disabled={tab === "git" ? !git.url : !local.path} onClick={() => run.mutate()}>Import</Button>

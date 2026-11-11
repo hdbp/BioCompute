@@ -80,6 +80,12 @@ These limits apply to everything below.
 | Assistant via Anthropic API (`claude-opus-5-5`, structured outputs, server-side fallback) | Implemented; request accepted by the API up to authentication (no key here), so **no real completion tested** |
 | Assistant via OpenAI API (structured outputs) | Implemented, **untested** (API not reachable from the dev sandbox) |
 
+## Users and ownership
+
+| Feature | Status |
+|---|---|
+| Per-user pipelines, Studio workflows and modules: private by default, shared with the lab on request; others can view/run/copy but not change; admins see all; per-user favorites; sharing a workflow shares its modules and pipeline | Demonstrated (`test_ownership.py`, two-user browser test); migration keeps existing items shared |
+
 ## First run
 
 | Feature | Status |

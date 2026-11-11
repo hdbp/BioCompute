@@ -29,7 +29,7 @@ export function StudioDrafts({ query }: { query: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const ql = query.toLowerCase();
   const drafts = (wf.data ?? [])
-    .filter((w) => w.graph?.meta?.kind !== "subworkflow")
+    .filter((w) => w.graph?.meta?.kind !== "subworkflow" && w.created_by === user?.username)
     .map((w) => ({ w, s: publishState(w, pl.data ?? []) }))
     .filter(({ w, s }) => (!s.published || s.changed) && (!ql || w.name.toLowerCase().includes(ql) || w.description.toLowerCase().includes(ql)));
   if (!drafts.length) return null;

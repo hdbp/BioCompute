@@ -513,7 +513,7 @@ def _merge_meta(metas: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _create_missing(db: Session, index: dict[str, dict[str, Any]], missing: list[MissingModule], user: str,
-                    metas: list[dict[str, Any]], limit: int = 4) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                    metas: list[dict[str, Any]], limit: int = 4) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """Draft, check and save a module for each piece of software the design lacked. Nothing is run."""
     from ..models import CustomModule
     from . import custom_modules as cm
@@ -521,7 +521,7 @@ def _create_missing(db: Session, index: dict[str, dict[str, Any]], missing: list
     created: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     if not get_settings().allow_custom_code_modules:
-        return created, [{"tool": m.tool, "error": "Custom modules are disabled by the administrator"} for m in missing]
+        return created, [{"tool": m.tool, "error": "Custom modules are disabled by the administrator"} for m in missing], index
     for m in missing[:limit]:
         exe = re.split(r"[\s(,;/]", m.tool.strip())[0] if m.tool.strip() else ""
         found = bool(exe) and cm.check_tool(exe).get("found")
@@ -549,7 +549,7 @@ def _create_missing(db: Session, index: dict[str, dict[str, Any]], missing: list
         index = {**index, mod["id"]: cm.to_index_entry(cm.ModuleDef.model_validate(chk["module"]))}
         created.append({"id": mod["id"], "name": chk["module"]["name"], "tool": m.tool, "tool_installed": found,
                         "notes": d["notes"], "warnings": [i["message"] for i in chk["issues"] if i["level"] == "warning"]})
-    return created, failed
+    return created, failed, index
 
 
 def build(db: Session, index: dict[str, dict[str, Any]], description: str, current: dict[str, Any] | None = None,
@@ -564,10 +564,8 @@ def build(db: Session, index: dict[str, dict[str, Any]], description: str, curre
     created: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     if create_modules and res["draft"].missing_modules:
-        created, failed = _create_missing(db, index, res["draft"].missing_modules, user, metas)
+        created, failed, index = _create_missing(db, index, res["draft"].missing_modules, user, metas)  # index: the user's view + new modules
         if created:
-            from . import custom_modules as cm
-            index = cm.index(db)
             listing = ", ".join(f"{c['id']} ({c['tool']})" for c in created)
             res = _design(db, index, ask + f"\n\nNew modules were just added to the catalog for software that had none: {listing}. "
                                            "Use them where they fit; list only software that still has no module under missing_modules.")

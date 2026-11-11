@@ -243,26 +243,26 @@ def import_samplesheet(eid: str, body: SamplesheetImportIn, user: User = Depends
     return e
 
 
-def _pipeline_schema(db: Session, body: ExperimentValidateIn):
+def _pipeline_schema(db: Session, body: ExperimentValidateIn, user: User):
     if not body.pipeline_id:
         return None
-    p = get_pipeline(db, body.pipeline_id)
+    p = get_pipeline(db, body.pipeline_id, user)
     return get_version(p, body.version_id).input_schema_json
 
 
 @router.post("/{eid}/validate")
-def validate_experiment(eid: str, body: ExperimentValidateIn, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+def validate_experiment(eid: str, body: ExperimentValidateIn, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
     e = get_exp(db, eid)
-    return samplesheet.validate_experiment(e, _pipeline_schema(db, body), body.column_map)
+    return samplesheet.validate_experiment(e, _pipeline_schema(db, body, user), body.column_map)
 
 
 @router.post("/{eid}/samplesheet")
-def generate_samplesheet(eid: str, body: ExperimentValidateIn, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+def generate_samplesheet(eid: str, body: ExperimentValidateIn, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
     e = get_exp(db, eid)
     if e.assay == "proteomics" and not body.pipeline_id:
         cols, rows = samplesheet.proteomics_design(e)
         return {"columns": cols, "rows": rows, "csv": samplesheet.to_csv(rows, cols, "\t"), "format": "openms-design-tsv"}
-    schema = _pipeline_schema(db, body)
+    schema = _pipeline_schema(db, body, user)
     cols = samplesheet.columns_for(schema, e)
     rows = samplesheet.build_rows(e, cols, body.column_map)
     return {"columns": cols, "rows": rows, "csv": samplesheet.to_csv(rows, cols), "format": "csv"}

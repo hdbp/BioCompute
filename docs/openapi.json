@@ -411,6 +411,22 @@
                             "default": false,
                             "title": "Favorites"
                         }
+                    },
+                    {
+                        "name": "owner",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Owner"
+                        }
                     }
                 ],
                 "responses": {
@@ -742,6 +758,7 @@
                     "pipelines"
                 ],
                 "summary": "Duplicate",
+                "description": "Your own copy of a pipeline you can see (files copied into the pipeline store).",
                 "operationId": "duplicate_api_pipelines__pid__duplicate_post",
                 "security": [
                     {
@@ -4770,6 +4787,61 @@
                 }
             }
         },
+        "/api/studio/modules/{mid}/visibility": {
+            "put": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Module Visibility",
+                "operationId": "module_visibility_api_studio_modules__mid__visibility_put",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "mid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Mid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/VisibilityIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/studio/workflows": {
             "get": {
                 "tags": [
@@ -4967,6 +5039,62 @@
                         }
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/studio/workflows/{wid}/visibility": {
+            "put": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "Workflow Visibility",
+                "description": "Share a workflow with the lab (or make it private again). Sharing also shares the owner's private\nmodules it uses (others could not open it otherwise) and the pipeline published from it.",
+                "operationId": "workflow_visibility_api_studio_workflows__wid__visibility_put",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "wid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Wid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/VisibilityIn"
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "Successful Response",
@@ -6695,6 +6823,11 @@
                     "name": {
                         "type": "string",
                         "title": "Name"
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility",
+                        "default": "private"
                     }
                 },
                 "type": "object",
@@ -7031,6 +7164,11 @@
                             }
                         ],
                         "title": "Category"
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility",
+                        "default": "private"
                     }
                 },
                 "type": "object",
@@ -7071,6 +7209,11 @@
                         "type": "boolean",
                         "title": "Copy Files",
                         "default": false
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility",
+                        "default": "private"
                     }
                 },
                 "type": "object",
@@ -7662,6 +7805,22 @@
                         ],
                         "title": "Studio Workflow Id"
                     },
+                    "owner": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Owner"
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility",
+                        "default": "lab"
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time",
@@ -7671,6 +7830,11 @@
                         "type": "string",
                         "format": "date-time",
                         "title": "Updated At"
+                    },
+                    "can_edit": {
+                        "type": "boolean",
+                        "title": "Can Edit",
+                        "default": false
                     },
                     "latest_version": {
                         "anyOf": [
@@ -7838,6 +8002,22 @@
                         ],
                         "title": "Studio Workflow Id"
                     },
+                    "owner": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Owner"
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility",
+                        "default": "lab"
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time",
@@ -7847,6 +8027,11 @@
                         "type": "string",
                         "format": "date-time",
                         "title": "Updated At"
+                    },
+                    "can_edit": {
+                        "type": "boolean",
+                        "title": "Can Edit",
+                        "default": false
                     },
                     "latest_version": {
                         "anyOf": [
@@ -7963,6 +8148,17 @@
                             }
                         ],
                         "title": "Tags"
+                    },
+                    "visibility": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Visibility"
                     }
                 },
                 "type": "object",
@@ -9243,6 +9439,17 @@
                         "additionalProperties": true,
                         "type": "object",
                         "title": "Graph"
+                    },
+                    "visibility": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Visibility"
                     }
                 },
                 "type": "object",
@@ -9281,6 +9488,16 @@
                             }
                         ],
                         "title": "Created By"
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility",
+                        "default": "private"
+                    },
+                    "can_edit": {
+                        "type": "boolean",
+                        "title": "Can Edit",
+                        "default": false
                     },
                     "created_at": {
                         "type": "string",
@@ -9470,6 +9687,19 @@
                     "type"
                 ],
                 "title": "ValidationError"
+            },
+            "VisibilityIn": {
+                "properties": {
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "visibility"
+                ],
+                "title": "VisibilityIn"
             }
         },
         "securitySchemes": {

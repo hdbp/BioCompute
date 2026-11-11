@@ -14,6 +14,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { GenericParamEditor, SchemaForm, type Params } from "@/components/schema-form";
 import { RunStatusBadge } from "@/components/status";
+import { ShareButton, SharingBadge, type Visibility } from "@/components/sharing";
 
 export default function PipelineDetailPage() {
   const { id } = useParams();
@@ -44,6 +45,14 @@ export default function PipelineDetailPage() {
   const pin = useMutation({ mutationFn: (vid: string) => api.post(`/api/pipeline-versions/${vid}/pin`), onSuccess: () => { toast.success("Version pinned"); refresh(); } });
   const del = useMutation({ mutationFn: () => api.del(`/api/pipelines/${id}`), onSuccess: () => { refresh(); nav("/pipelines"); }, onError: (e) => toast.error(errMsg(e)) });
   const fav = useMutation({ mutationFn: () => api.patch(`/api/pipelines/${id}`, { favorite: !p.data?.favorite }), onSuccess: refresh });
+  const share = useMutation({
+    // a pipeline built in Studio follows its workflow (which also shares the modules it uses)
+    mutationFn: (v: Visibility) => p.data?.studio_workflow_id
+      ? api.put(`/api/studio/workflows/${p.data.studio_workflow_id}/visibility`, { visibility: v })
+      : api.patch(`/api/pipelines/${id}`, { visibility: v }),
+    onSuccess: (_r, v) => { refresh(); qc.invalidateQueries({ queryKey: ["pipelines"] }); toast.success(v === "lab" ? "Shared with the lab" : "Now private"); },
+    onError: (e) => toast.error(errMsg(e)),
+  });
 
   if (p.isLoading) return <Skeleton className="h-96" />;
   if (!p.data) return <Empty title="Pipeline not found" action={<Button asChild><Link to="/pipelines">Back to library</Link></Button>} />;
@@ -57,12 +66,14 @@ export default function PipelineDetailPage() {
         <button onClick={() => fav.mutate()} aria-label="Toggle favorite" className="text-muted hover:text-wait"><Star className={cn("size-5", d.favorite && "fill-wait text-wait")} /></button></span>}
         description={d.description}
         actions={!isTemplate && <>
-          {sci && <Button variant="ghost" onClick={() => setDupOpen(true)}><Copy />Duplicate</Button>}
-          {sci && <Button variant="ghost" onClick={() => confirm(`Delete ${d.name}? Pipelines with run history cannot be deleted.`) && del.mutate()}><Trash2 />Delete</Button>}
+          {d.can_edit && d.owner && <ShareButton visibility={d.visibility} onChange={(v) => share.mutate(v)} loading={share.isPending} size="md" />}
+          {sci && <Button variant="ghost" onClick={() => setDupOpen(true)}><Copy />{d.can_edit ? "Duplicate" : "Make my own copy"}</Button>}
+          {d.can_edit && <Button variant="ghost" onClick={() => confirm(`Delete ${d.name}? Pipelines with run history cannot be deleted.`) && del.mutate()}><Trash2 />Delete</Button>}
           <Button asChild variant="primary"><Link to={`/jobs/new?pipeline=${d.id}${versionId ? `&version=${versionId}` : ""}`}><Play />Configure and run</Link></Button>
         </>}>
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Badge>{d.category}</Badge>
+          <SharingBadge owner={d.owner} visibility={d.visibility} />
           <Badge tone={isTemplate ? "wait" : "ok"}>{isTemplate ? "Catalog template, not installed" : d.kind === "studio" ? "Built in Pipeline Studio" : "Installed"}</Badge>
           {d.runnable.map((r) => <Badge key={r.engine} tone={r.available ? "accent" : "neutral"} title={r.detail}>{r.engine === "bcflow" ? "native engine" : r.engine}{r.available ? "" : " (unavailable)"}</Badge>)}
           {d.source_url && <a href={d.source_url.startsWith("http") ? d.source_url : undefined} target="_blank" rel="noreferrer" className="text-xs text-muted hover:text-text self-center ml-1 font-mono">{d.source_url}</a>}
@@ -105,7 +116,7 @@ export default function PipelineDetailPage() {
                         <div className="mt-1.5 flex gap-1">
                           <Button size="sm" variant="secondary" onClick={() => { setParams({ ...schema.data?.defaults, ...pr.params }); toast.success(`Loaded ${pr.name}`); }}>Load</Button>
                           <Button size="sm" variant="ghost" onClick={() => setCompare(pr)}><FileDiff />Compare</Button>
-                          {sci && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => delPreset.mutate(pr.id)} aria-label={`Delete ${pr.name}`}><Trash2 /></Button>}
+                          {sci && (d.can_edit || pr.created_by === user?.username) && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => delPreset.mutate(pr.id)} aria-label={`Delete ${pr.name}`}><Trash2 /></Button>}
                         </div>
                       </div>
                     ))}

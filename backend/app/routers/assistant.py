@@ -84,13 +84,13 @@ def test(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
 
 @router.post("/build")
 def build(body: BuildIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    return _run(db, user, "build", lambda: ai.build(db, cm.index(db), body.description, body.graph, body.create_modules, user.username),
+    return _run(db, user, "build", lambda: ai.build(db, cm.index(db, user), body.description, body.graph, body.create_modules, user.username),
                 request=body.description, create_modules=body.create_modules)
 
 
 @router.post("/review")
 def review(body: ReviewIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    return _run(db, user, "review", lambda: ai.review(db, cm.index(db), body.graph, body.goal), request=body.goal,
+    return _run(db, user, "review", lambda: ai.review(db, cm.index(db, user), body.graph, body.goal), request=body.goal,
                 nodes=len(body.graph.get("nodes", [])))
 
 
@@ -104,7 +104,7 @@ def draft_module(body: DraftModuleIn, user: User = Depends(require_scientist), d
             help_text = cm.tool_help(tool)
 
     def go():
-        res = ai.draft_module(db, cm.index(db), body.description, tool, help_text)
+        res = ai.draft_module(db, cm.index(db, user), body.description, tool, help_text)
         res["check"] = cm.check_module(res["module"], db=db)
         res["grounded_on_help"] = bool(help_text)
         return res
@@ -114,7 +114,7 @@ def draft_module(body: DraftModuleIn, user: User = Depends(require_scientist), d
 
 @router.post("/ask")
 def ask(body: AskIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    return _run(db, user, "ask", lambda: ai.ask(db, cm.index(db), body.question, body.graph), request=body.question)
+    return _run(db, user, "ask", lambda: ai.ask(db, cm.index(db, user), body.question, body.graph), request=body.question)
 
 
 @router.get("/history")

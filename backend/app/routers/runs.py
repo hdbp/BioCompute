@@ -56,7 +56,7 @@ def list_runs(status: str | None = None, pipeline_id: str | None = None, limit: 
 
 @router.post("", response_model=RunDetail)
 def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    p = get_pipeline(db, body.pipeline_id)
+    p = get_pipeline(db, body.pipeline_id, user)
     v = get_version(p, body.version_id)
     engine = body.engine
     if engine is None:

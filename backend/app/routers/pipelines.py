@@ -15,7 +15,7 @@ from ..models import ParameterPreset, Pipeline, PipelineVersion, Run, User
 from ..schemas import (DuplicateIn, ImportGit, ImportLocal, ParamValidateIn, PipelineDetail, PipelineSummary,
                        PipelineUpdate, PipelineVersionOut, PresetIn, PresetOut, SchemaAuthorIn)
 from ..security import audit, require_scientist, require_viewer
-from ..services import fs, nfschema
+from ..services import access, fs, nfschema
 from ..services import pipelines as svc
 
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
@@ -28,20 +28,27 @@ def _latest(p: Pipeline) -> PipelineVersion | None:
     return pinned[-1] if pinned else (p.versions[-1] if p.versions else None)
 
 
-def _summary(db: Session, p: Pipeline, cls=PipelineSummary, **extra):
+def _summary(db: Session, p: Pipeline, user: User, cls=PipelineSummary, **extra):
     v = _latest(p)
     run_count = db.query(func.count(Run.id)).filter(Run.pipeline_id == p.id).scalar() or 0
     last = db.query(Run.status).filter(Run.pipeline_id == p.id).order_by(Run.created_at.desc()).first()
     data = {c: getattr(p, c) for c in PipelineSummary.model_fields if hasattr(p, c)}
+    data["favorite"] = p.id in ((user.prefs or {}).get("favorite_pipelines") or [])  # favorites are per user
+    data["can_edit"] = access.can_edit(user, p.owner)
     return cls(**data, latest_version=PipelineVersionOut.model_validate(v) if v else None,
                has_schema=bool(v and v.schema_json), run_count=run_count,
                last_run_status=last[0] if last else None, preset_count=len(p.presets), **extra)
 
 
-def get_pipeline(db: Session, pid: str) -> Pipeline:
+def get_pipeline(db: Session, pid: str, user: User | None = None, edit: bool = False) -> Pipeline:
+    """Look up a pipeline. With `user`, someone else's private pipeline is "not found"; `edit` needs owner or admin."""
     p = db.get(Pipeline, pid) or db.query(Pipeline).filter(Pipeline.slug == pid).one_or_none()
     if not p:
         raise HTTPException(404, "Pipeline not found")
+    if user is not None:
+        access.check_view(user, p.owner, p.visibility, "Pipeline")
+        if edit:
+            access.check_edit(user, p.owner, f"“{p.name}”")
     return p
 
 
@@ -59,27 +66,35 @@ def get_version(p: Pipeline, version_id: str | None) -> PipelineVersion:
 
 @router.get("", response_model=list[PipelineSummary])
 def list_pipelines(q: str | None = None, kind: str | None = None, category: str | None = None,
-                   favorites: bool = False, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+                   favorites: bool = False, owner: str | None = None, user: User = Depends(require_viewer),
+                   db: Session = Depends(get_db)):
     query = db.query(Pipeline)
+    f = access.visible_filter(user, Pipeline.owner, Pipeline.visibility)
+    if f is not None:
+        query = query.filter(f)
+    if owner == "me":
+        query = query.filter(Pipeline.owner == user.username)
+    elif owner:
+        query = query.filter(Pipeline.owner == owner)
     if kind:
         query = query.filter(Pipeline.kind == kind)
     if category:
         query = query.filter(Pipeline.category == category)
     if favorites:
-        query = query.filter(Pipeline.favorite.is_(True))
+        query = query.filter(Pipeline.id.in_((user.prefs or {}).get("favorite_pipelines") or []))
     items = query.order_by(Pipeline.kind, Pipeline.name).all()
     if q:
         ql = q.lower()
         items = [p for p in items if ql in p.name.lower() or ql in p.description.lower() or ql in p.category.lower()
                  or any(ql in t.lower() for t in p.tags or [])]
-    return [_summary(db, p) for p in items]
+    return [_summary(db, p, user) for p in items]
 
 
 @router.get("/{pid}", response_model=PipelineDetail)
-def pipeline_detail(pid: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    p = get_pipeline(db, pid)
+def pipeline_detail(pid: str, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    p = get_pipeline(db, pid, user)
     v = _latest(p)
-    return _summary(db, p, PipelineDetail,
+    return _summary(db, p, user, PipelineDetail,
                     versions=[PipelineVersionOut.model_validate(x) for x in p.versions],
                     readme=(v.manifest or {}).get("readme") if v else None,
                     manifest={k: val for k, val in ((v.manifest or {}) if v else {}).items() if k != "readme"},
@@ -88,17 +103,29 @@ def pipeline_detail(pid: str, _: User = Depends(require_viewer), db: Session = D
 
 
 @router.patch("/{pid}", response_model=PipelineSummary)
-def update_pipeline(pid: str, body: PipelineUpdate, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    p = get_pipeline(db, pid)
-    for k, v in body.model_dump(exclude_unset=True).items():
+def update_pipeline(pid: str, body: PipelineUpdate, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    changes = body.model_dump(exclude_unset=True)
+    fav = changes.pop("favorite", None)
+    p = get_pipeline(db, pid, user, edit=bool(changes))
+    if fav is not None:  # anyone who can see a pipeline can star it for themselves
+        prefs = dict(user.prefs or {})
+        favs = [x for x in prefs.get("favorite_pipelines", []) if x != p.id]
+        prefs["favorite_pipelines"] = favs + ([p.id] if fav else [])
+        user.prefs = prefs
+    if "visibility" in changes:
+        access.check_visibility_value(changes["visibility"])
+        if p.owner is None:
+            raise HTTPException(400, "Catalog and bundled pipelines are always shared with the lab")
+        audit(db, user.username, "pipeline.visibility", p.slug, visibility=changes["visibility"])
+    for k, v in changes.items():
         setattr(p, k, v)
     db.commit()
-    return _summary(db, p)
+    return _summary(db, p, user)
 
 
 @router.delete("/{pid}")
 def delete_pipeline(pid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    p = get_pipeline(db, pid)
+    p = get_pipeline(db, pid, user, edit=True)
     if db.query(Run).filter(Run.pipeline_id == p.id).count():
         raise HTTPException(409, "Pipeline has execution history; it cannot be deleted (provenance)")
     managed = get_settings().pipelines_path
@@ -120,18 +147,26 @@ def import_local(body: ImportLocal, user: User = Depends(require_scientist), db:
             raise HTTPException(409, f"{dest.name} already exists in the pipeline store")
         shutil.copytree(path, dest, symlinks=True)
         path = dest
+    access.check_visibility_value(body.visibility)
     p = svc.register_from_dir(db, path, source_type="local", source_url=body.path, name=body.name, category=body.category)
-    audit(db, user.username, "pipeline.import_local", p.slug, path=str(path))
+    p.owner, p.visibility = user.username, body.visibility
+    audit(db, user.username, "pipeline.import_local", p.slug, path=str(path), visibility=body.visibility)
     db.commit()
-    return _summary(db, p)
+    return _summary(db, p, user)
 
 
 @router.post("/import/git", response_model=PipelineSummary)
 def import_git(body: ImportGit, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    access.check_visibility_value(body.visibility)
     p = svc.import_git(db, body.url, body.ref, body.name, body.category)
+    p.owner, p.visibility = user.username, body.visibility
     # if this matched a catalog template, mark the template as installed by linking
     tmpl = db.query(Pipeline).filter(Pipeline.kind == "template", Pipeline.source_url == body.url.removesuffix(".git")).first()
-    if tmpl:  # the catalog entry is now genuinely installed: replace the template
+    if tmpl and body.visibility == "private":  # a private install must not take the catalog entry away from others
+        p.category = body.category or tmpl.category
+        p.description = p.description or tmpl.description
+        tmpl = None
+    if tmpl:  # the catalog entry is now genuinely installed for the lab: replace the template
         p.category = body.category or tmpl.category
         p.description = p.description or tmpl.description
         p.tags = sorted(set((p.tags or []) + (tmpl.tags or [])))
@@ -139,15 +174,15 @@ def import_git(body: ImportGit, user: User = Depends(require_scientist), db: Ses
         db.delete(tmpl)
         db.flush()
         p.slug = slug
-    audit(db, user.username, "pipeline.import_git", p.slug, url=body.url, ref=body.ref)
+    audit(db, user.username, "pipeline.import_git", p.slug, url=body.url, ref=body.ref, visibility=body.visibility)
     db.commit()
-    return _summary(db, p)
+    return _summary(db, p, user)
 
 
 @router.post("/{pid}/versions/update", response_model=PipelineSummary)
 def fetch_new_version(pid: str, body: ImportGit, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
     """Check out another ref of a git pipeline as a new version (version pinning)."""
-    p = get_pipeline(db, pid)
+    p = get_pipeline(db, pid, user, edit=True)
     if p.source_type not in ("git", "nf-core"):
         raise HTTPException(400, "Only git-based pipelines can fetch versions")
     tmp = svc.import_git(db, p.source_url or body.url, body.ref, f"{p.slug}-{body.ref or 'latest'}", p.category)
@@ -158,12 +193,14 @@ def fetch_new_version(pid: str, body: ImportGit, user: User = Depends(require_sc
     audit(db, user.username, "pipeline.version_add", p.slug, ref=body.ref)
     db.commit()
     db.refresh(p)
-    return _summary(db, p)
+    return _summary(db, p, user)
 
 
 @router.post("/{pid}/duplicate", response_model=PipelineSummary)
 def duplicate(pid: str, body: DuplicateIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    p = get_pipeline(db, pid)
+    """Your own copy of a pipeline you can see (files copied into the pipeline store)."""
+    access.check_visibility_value(body.visibility)
+    p = get_pipeline(db, pid, user)
     v = get_version(p, None)
     dest = get_settings().pipelines_path / svc.slugify(body.name)
     if dest.exists():
@@ -171,12 +208,14 @@ def duplicate(pid: str, body: DuplicateIn, user: User = Depends(require_scientis
     shutil.copytree(v.path, dest, symlinks=True, ignore=shutil.ignore_patterns("work", ".nextflow*"))
     newp = svc.register_from_dir(db, dest, source_type="local", source_url=f"duplicate:{p.slug}", name=body.name,
                                  category=p.category)
+    newp.owner, newp.visibility = user.username, body.visibility
+    newp.description = p.description
     for pr in p.presets:
         db.add(ParameterPreset(pipeline_id=newp.id, name=pr.name, description=pr.description, params=pr.params,
                                created_by=user.username))
     audit(db, user.username, "pipeline.duplicate", p.slug, new=newp.slug)
     db.commit()
-    return _summary(db, newp)
+    return _summary(db, newp, user)
 
 
 # --------------------------------------------------------------------------- versions
@@ -185,6 +224,7 @@ def pin_version(version_id: str, pinned: bool = True, user: User = Depends(requi
     v = db.get(PipelineVersion, version_id)
     if not v:
         raise HTTPException(404)
+    get_pipeline(db, v.pipeline_id, user, edit=True)
     for other in v.pipeline.versions:
         other.pinned = False
     v.pinned = pinned
@@ -195,8 +235,8 @@ def pin_version(version_id: str, pinned: bool = True, user: User = Depends(requi
 
 # --------------------------------------------------------------------------- schema / params
 @schemas_router.get("/{pid}")
-def form_schema(pid: str, version_id: str | None = None, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    p = get_pipeline(db, pid)
+def form_schema(pid: str, version_id: str | None = None, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    p = get_pipeline(db, pid, user)
     v = get_version(p, version_id)
     form = nfschema.normalize(v.schema_json)
     return {"pipeline_id": p.id, "version_id": v.id, "form": form, "defaults": nfschema.defaults(v.schema_json),
@@ -205,8 +245,8 @@ def form_schema(pid: str, version_id: str | None = None, _: User = Depends(requi
 
 
 @schemas_router.post("/{pid}/validate")
-def validate_params(pid: str, body: ParamValidateIn, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    p = get_pipeline(db, pid)
+def validate_params(pid: str, body: ParamValidateIn, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    p = get_pipeline(db, pid, user)
     v = get_version(p, body.version_id)
     issues = nfschema.validate_params(v.schema_json, body.params)
     return {"valid": not any(i["level"] == "error" for i in issues), "issues": issues}
@@ -215,7 +255,7 @@ def validate_params(pid: str, body: ParamValidateIn, _: User = Depends(require_v
 @schemas_router.post("/{pid}/author")
 def author_schema(pid: str, body: SchemaAuthorIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
     """Schema-authoring wizard for pipelines without nextflow_schema.json."""
-    p = get_pipeline(db, pid)
+    p = get_pipeline(db, pid, user, edit=True)
     v = get_version(p, body.version_id)
     groups: dict[str, dict] = {}
     for f in body.fields:
@@ -245,8 +285,8 @@ def author_schema(pid: str, body: SchemaAuthorIn, user: User = Depends(require_s
 
 
 @schemas_router.post("/{pid}/export", response_class=PlainTextResponse)
-def export_params(pid: str, body: ParamValidateIn, fmt: str = "json", _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    get_pipeline(db, pid)
+def export_params(pid: str, body: ParamValidateIn, fmt: str = "json", user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    get_pipeline(db, pid, user)
     clean = {k: v for k, v in body.params.items() if v not in ("", None)}
     if fmt == "yaml":
         lines = []
@@ -258,14 +298,16 @@ def export_params(pid: str, body: ParamValidateIn, fmt: str = "json", _: User = 
 
 # --------------------------------------------------------------------------- presets
 @router.get("/{pid}/presets", response_model=list[PresetOut])
-def list_presets(pid: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    return get_pipeline(db, pid).presets
+def list_presets(pid: str, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    return get_pipeline(db, pid, user).presets
 
 
 @router.post("/{pid}/presets", response_model=PresetOut)
 def save_preset(pid: str, body: PresetIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    p = get_pipeline(db, pid)
+    p = get_pipeline(db, pid, user)  # anyone who can use a pipeline can save presets for it
     pr = next((x for x in p.presets if x.name == body.name), None)
+    if pr and pr.created_by not in (None, user.username) and not access.can_edit(user, p.owner):
+        raise HTTPException(403, f"The preset “{body.name}” belongs to {pr.created_by}; save yours under another name")
     if pr:
         pr.params, pr.description = body.params, body.description
     else:
@@ -280,16 +322,19 @@ def save_preset(pid: str, body: PresetIn, user: User = Depends(require_scientist
 @router.delete("/{pid}/presets/{preset_id}")
 def delete_preset(pid: str, preset_id: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
     pr = db.get(ParameterPreset, preset_id)
-    if not pr or pr.pipeline_id != get_pipeline(db, pid).id:
+    p = get_pipeline(db, pid, user)
+    if not pr or pr.pipeline_id != p.id:
         raise HTTPException(404)
+    if pr.created_by not in (None, user.username) and not access.can_edit(user, p.owner):
+        raise HTTPException(403, f"This preset belongs to {pr.created_by}")
     db.delete(pr)
     db.commit()
     return {"ok": True}
 
 
 @router.get("/{pid}/history")
-def pipeline_history(pid: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    p = get_pipeline(db, pid)
+def pipeline_history(pid: str, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    p = get_pipeline(db, pid, user)
     runs = db.query(Run).filter(Run.pipeline_id == p.id).order_by(Run.created_at.desc()).limit(100).all()
     return [{"id": r.id, "name": r.name, "status": r.status, "created_at": r.created_at, "finished_at": r.finished_at,
              "engine": r.engine, "params": r.params, "version_id": r.pipeline_version_id} for r in runs]

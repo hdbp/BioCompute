@@ -38,6 +38,7 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), default="scientist")  # admin | scientist | viewer
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    prefs: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # per-user settings, e.g. favorite pipelines
 
 
 class AuditEvent(Base):
@@ -73,6 +74,9 @@ class Pipeline(TimestampMixin, Base):
     favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     studio_workflow_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # who added it (None: catalog, bundled examples, items from before ownership) and who may see it
+    owner: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    visibility: Mapped[str] = mapped_column(String(10), default="lab")  # private | lab
 
     versions: Mapped[list[PipelineVersion]] = relationship(
         back_populates="pipeline", cascade="all, delete-orphan", order_by="PipelineVersion.created_at"
@@ -168,7 +172,8 @@ class StudioWorkflow(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     graph: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # {nodes:[], edges:[]}
-    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)  # the owner
+    visibility: Mapped[str] = mapped_column(String(10), default="private")  # private | lab
 
 
 class DataRoot(TimestampMixin, Base):
@@ -199,7 +204,8 @@ class CustomModule(TimestampMixin, Base):
     __tablename__ = "custom_modules"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # module id used in graphs
     definition: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)  # the owner
+    visibility: Mapped[str] = mapped_column(String(10), default="private")  # private | lab
 
 
 # --------------------------------------------------------------------------- runs
