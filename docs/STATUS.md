@@ -74,6 +74,8 @@ These limits apply to everything below.
 | Run generated DSL2 with Nextflow | Implemented, **untested** here |
 | Import arbitrary Nextflow scripts back into a graph | Not supported by design |
 | User modules for installed software: scan PATH, 15 templates (Genrich, SEACR, HOMER, epic2, GoPeaks, …), builder with live checks, edit/export/import/delete | Demonstrated (`test_custom_modules.py`, browser); a user-made module ran end to end on the native engine |
+| Input nodes with default samplesheet / FASTQ folder / reference path; launch from an experiment, a samplesheet file or a FASTQ folder (recursive pair detection) | Demonstrated (`test_launch_studio_pipeline_from_a_fastq_folder_default`, browser launch completed) |
+| Assistant Build creates, checks and saves modules for missing software, then redesigns with them; custom nodes saved as modules | Demonstrated with a stub provider (`test_build_creates_and_saves_missing_modules`); not yet with a real model |
 | Assistant: Build (validate + up to 2 repair rounds), Review, Ask, Draft module | Demonstrated with Claude Code (one real Build call: valid 9-node CUT&RUN graph, ~30 s, $0.33); prompt/repair logic covered by tests with a stub provider |
 | Assistant via Anthropic API (`claude-opus-5-5`, structured outputs, server-side fallback) | Implemented; request accepted by the API up to authentication (no key here), so **no real completion tested** |
 | Assistant via OpenAI API (structured outputs) | Implemented, **untested** (API not reachable from the dev sandbox) |

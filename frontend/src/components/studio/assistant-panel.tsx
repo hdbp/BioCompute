@@ -16,6 +16,8 @@ interface BuildResult {
   graph: RawGraph; name: string; description: string; explanation: string; assumptions: string[];
   missing_modules: { tool: string; reason: string }[]; valid: boolean; issues: Issue[]; attempts: number; meta: AssistantMeta;
   result_id?: string; workflow_id?: string | null;
+  created_modules?: { id: string; name: string; tool: string; tool_installed: boolean; notes: string; warnings: string[] }[];
+  module_failures?: { tool: string; error: string }[];
 }
 interface HistoryRow { id: string; task: string; request: string; created_at: string; workflow_id: string | null; name: string | null; valid: boolean | null; model: string | null; cost_usd: number | null }
 interface ReviewResult {
@@ -39,6 +41,7 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
   const [busy, setBusy] = useState<null | "build" | "review" | "ask">(null);
   const [prompt, setPrompt] = useState("");
   const [modify, setModify] = useState(false);
+  const [createModules, setCreateModules] = useState(true);
   const [build, setBuild] = useState<BuildResult | null>(null);
   const [goal, setGoal] = useState("");
   const [review, setReview] = useState<ReviewResult | null>(null);
@@ -51,8 +54,9 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
   };
 
   const doBuild = () => run("build", async () => {
-    const r = await api.post<BuildResult>("/api/assistant/build", { description: prompt, graph: modify && hasNodes ? getGraph() : null });
+    const r = await api.post<BuildResult>("/api/assistant/build", { description: prompt, graph: modify && hasNodes ? getGraph() : null, create_modules: createModules });
     setBuild(r);
+    if (r.created_modules?.length) qc.invalidateQueries({ queryKey: ["studio-modules"] });
     refreshHistory();
   });
   const doReview = () => run("review", async () => { setReview(await api.post<ReviewResult>("/api/assistant/review", { graph: getGraph(), goal })); refreshHistory(); });
@@ -101,6 +105,10 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
               <label className="flex items-center gap-2 text-[12.5px] text-muted">
                 <Checkbox checked={modify && hasNodes} disabled={!hasNodes} onCheckedChange={(c) => setModify(!!c)} />Change the pipeline on the canvas instead of starting over
               </label>
+              <label className="flex items-start gap-2 text-[12.5px] text-muted">
+                <Checkbox className="mt-0.5" checked={createModules} onCheckedChange={(c) => setCreateModules(!!c)} />
+                <span>Create and save modules for software that has none yet, then use them (one extra request per module)</span>
+              </label>
               <Button size="sm" variant="primary" onClick={doBuild} loading={busy === "build"} disabled={prompt.trim().length < 3}><Wand2 />Build pipeline</Button>
               {busy === "build" && <p className="text-xs text-muted">Designing and checking the graph. This usually takes 20 to 60 seconds.</p>}
               {build && (
@@ -111,6 +119,26 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
                   </div>
                   <p className="whitespace-pre-wrap">{build.explanation}</p>
                   {build.assumptions.length > 0 && <Section title="Assumptions"><ul className="list-disc space-y-1 pl-4">{build.assumptions.map((a, i) => <li key={i}>{a}</li>)}</ul></Section>}
+                  {!!build.created_modules?.length && (
+                    <Section title="New modules saved to your library">
+                      <ul className="space-y-2">
+                        {build.created_modules.map((m) => (
+                          <li key={m.id} className="rounded-md bg-raised/50 p-2">
+                            <p className="flex items-center gap-1.5 font-medium">{m.name} <span className="font-mono text-[11px] text-muted">{m.id}</span></p>
+                            <p className="text-muted">For {m.tool}. {m.tool_installed ? "Written from its --help text." : "Not installed on the controller, so its options were not checked."}</p>
+                            {m.notes && <p className="text-muted">{m.notes}</p>}
+                            {m.warnings.map((w) => <p key={w} className="text-wait">{w}</p>)}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-1 text-xs text-muted">Review them in the module library (hover, then edit) before relying on their results.</p>
+                    </Section>
+                  )}
+                  {!!build.module_failures?.length && (
+                    <Section title="Modules that could not be created">
+                      <ul className="space-y-1">{build.module_failures.map((f) => <li key={f.tool} className="text-wait">{f.tool}: {f.error}</li>)}</ul>
+                    </Section>
+                  )}
                   {build.missing_modules.length > 0 && (
                     <Section title="Software without a module">
                       <ul className="space-y-2">

@@ -259,3 +259,54 @@ def guess_virtual(value: str) -> str:
         return value
     v = fs.to_virtual(Path(value))
     return v or value
+
+
+# --------------------------------------------------------------------------- launch from a folder or a samplesheet file
+CELL_VPATH = re.compile(r"^[A-Za-z0-9_.-]+:")
+
+
+def from_folder(folder: Path, columns: list[str] | None = None, max_files: int = 20_000) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    """Samplesheet rows for every FASTQ under `folder` (recursively, hidden folders skipped), paired by file name.
+
+    `folder` must lie inside a data root; files reached through symlinks that leave the root are ignored.
+    """
+    root = fs.root_of(folder)
+    if root is None:
+        raise HTTPException(403, "The folder is not inside a data folder")
+    files: list[str] = []
+    for p in sorted(folder.rglob("*")):
+        rel = p.relative_to(folder)
+        if any(part.startswith(".") for part in rel.parts) or not p.is_file() or not fs.FASTQ_RE.search(p.name):
+            continue
+        real = p.resolve()
+        if not real.is_relative_to(root.path):
+            continue
+        files.append(str(real))
+        if len(files) >= max_files:
+            break
+    det = detect_pairs(files)
+    cols = list(columns or [])
+    for c in ("sample", "fastq_1", "fastq_2"):
+        if c not in cols:
+            cols.insert(["sample", "fastq_1", "fastq_2"].index(c), c)
+    rows = [{"sample": s["sample_id"], "fastq_1": r["fastq_1"], "fastq_2": r["fastq_2"] or ""}
+            for s in det["samples"] for r in s["runs"]]
+    notes = det["warnings"] + ([f"{len(det['unmatched'])} file(s) ignored"] if det["unmatched"] else [])
+    return cols, rows, notes
+
+
+def resolve_sheet(src: Path) -> tuple[str, int]:
+    """Copy of a user samplesheet with data-folder paths (root:rel/file) turned into absolute paths."""
+    text = src.read_text(errors="replace")
+    delim = "\t" if src.suffix.lower() == ".tsv" or text.split("\n", 1)[0].count("\t") > text.split("\n", 1)[0].count(",") else ","
+    rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+    changed = 0
+    for r in rows[1:]:
+        for i, cell in enumerate(r):
+            if CELL_VPATH.match(cell) and cell.split(":", 1)[0] in fs.roots():
+                _, p = fs.resolve(cell, must_exist=False)
+                r[i] = str(p)
+                changed += 1
+    buf = io.StringIO()
+    csv.writer(buf, delimiter=delim, lineterminator="\n").writerows(rows)
+    return buf.getvalue(), changed

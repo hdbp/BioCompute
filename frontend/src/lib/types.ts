@@ -95,7 +95,7 @@ export type NodeState = "discovered" | "candidate" | "enrolled" | "active" | "dr
 export interface StudioModule {
   id: string; kind: "source" | "sink" | "module"; name: string; category: string; description: string; scope?: "per_sample" | "aggregate";
   inputs: { name: string; type: string; multiple?: boolean }[]; outputs: { name: string; type: string; pattern?: string }[];
-  params: { name: string; type: string; default?: unknown; enum?: unknown[]; minimum?: number; maximum?: number; description?: string }[];
+  params: { name: string; type: string; default?: unknown; enum?: unknown[]; minimum?: number; maximum?: number; description?: string; widget?: "path"; path_mode?: "file" | "dir" | "auto" }[];
   tools?: string[]; cpus?: number; memory_gb?: number; language?: string; script?: string; conda?: string; container?: string; custom?: boolean; user?: boolean;
 }
 export interface StudioWorkflow { id: string; name: string; description: string; graph: { nodes: unknown[]; edges: unknown[]; meta?: Record<string, unknown> }; created_by: string | null; created_at: string; updated_at: string }

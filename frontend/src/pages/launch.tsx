@@ -46,6 +46,9 @@ export default function LaunchPage() {
   const [pipelineId, setPipelineId] = useState(sp.get("pipeline") ?? "");
   const [versionId, setVersionId] = useState(sp.get("version") ?? "");
   const [experimentId, setExperimentId] = useState(sp.get("experiment") ?? "");
+  // where the samples come from: an experiment, a samplesheet file, or a folder of FASTQ files
+  const [source, setSource] = useState<"experiment" | "file" | "folder">("experiment");
+  const [inputPath, setInputPath] = useState("");
   const [engine, setEngine] = useState("");
   const [params, setParams] = useState<Params>({});
   const [outdir, setOutdir] = useState("");
@@ -87,7 +90,22 @@ export default function LaunchPage() {
   const capC = controller?.allocation?.max_cpus ?? 1;
   const capM = controller?.allocation?.max_memory_gb ?? 1;
   useEffect(() => { if (controller && !cpus) { setCpus(capC); setMem(capM); } }, [controller, capC, capM, cpus]);
-  useEffect(() => { if (schema.data) { setParams(schema.data.defaults); setServerIssues([]); } }, [schema.data]);
+  useEffect(() => {
+    if (!schema.data) return;
+    setParams(schema.data.defaults);
+    setServerIssues([]);
+    // a pipeline built in Studio can carry a default samplesheet or FASTQ folder
+    const def = typeof schema.data.defaults.input === "string" ? schema.data.defaults.input : "";
+    if (def && !sp.get("experiment")) {
+      setSource(/\.(csv|tsv)$/i.test(def) ? "file" : "folder");
+      setInputPath(def);
+    }
+  }, [schema.data, sp]);
+  const folderPreview = useQuery({
+    queryKey: ["detect-pairs", inputPath],
+    queryFn: () => api.post<{ samples: { sample_id: string; paired: boolean }[]; warnings: string[] }>("/api/experiments/detect-pairs", { directory: inputPath }),
+    enabled: source === "folder" && !!inputPath, retry: false,
+  });
   useEffect(() => {
     const avail = detail.data?.runnable.filter((r) => r.available) ?? [];
     if (detail.data && !avail.some((a) => a.engine === engine)) setEngine(avail[0]?.engine ?? "");
@@ -105,12 +123,16 @@ export default function LaunchPage() {
   const clientErrors = useMemo(() => formErrors(groups, params, ["input", "outdir"]), [groups, params]);
   const exp = experiments.data?.find((e) => e.id === experimentId);
   const needsSamples = !!schema.data?.form.groups.some((g) => g.fields.some((f) => f.name === "input" && f.required));
-  const ready = !!pipelineId && !!engine && !!outdir && Object.keys(clientErrors).length === 0 && (!needsSamples || !!experimentId) && (!experimentId || validation.data?.valid !== false);
+  const usingExperiment = source === "experiment";
+  const haveSamples = usingExperiment ? !!experimentId : !!inputPath && (source !== "folder" || (folderPreview.data?.samples.length ?? 0) > 0);
+  const ready = !!pipelineId && !!engine && !!outdir && Object.keys(clientErrors).length === 0 && (!needsSamples || haveSamples)
+    && (!usingExperiment || !experimentId || validation.data?.valid !== false);
   const multiNode = nodeIds.length > 1 || (nodeIds.length === 1 && nodeIds[0] !== controller?.id);
 
   const body = (dry: boolean) => ({
-    pipeline_id: pipelineId, version_id: versionId || null, engine, name: name || null, params, output_dir: outdir,
-    experiment_id: experimentId || null, node_ids: nodeIds, dry_run: dry,
+    pipeline_id: pipelineId, version_id: versionId || null, engine, name: name || null, output_dir: outdir,
+    params: usingExperiment ? params : { ...params, input: inputPath },
+    experiment_id: usingExperiment ? experimentId || null : null, node_ids: nodeIds, dry_run: dry,
     resources: { max_cpus: cpus, max_memory_gb: mem, profile: profile || undefined,
       ...(Number(needMem) ? { min_memory_gb: Number(needMem) } : {}), ...(needDisk ? { min_disk_gb: Number(needDisk) } : {}),
       ...(needGpu ? { requires_gpu: true } : {}) },
@@ -132,7 +154,7 @@ export default function LaunchPage() {
 
   return (
     <>
-      <PageHeader title="Launch analysis" description="Choose a pipeline and an experiment, adjust parameters and resources, then launch. Runs continue on the controller after you close the browser." />
+      <PageHeader title="Launch analysis" description="Choose a pipeline and its samples (an experiment, a samplesheet or a FASTQ folder), adjust parameters and resources, then launch. Runs continue on the controller after you close the browser." />
       <div className="grid gap-8 xl:grid-cols-[1fr_320px]">
         <div className="space-y-10 min-w-0">
           <Step n={1} title="Pipeline" done={!!pipelineId && !!engine}>
@@ -164,8 +186,44 @@ export default function LaunchPage() {
             )}
           </Step>
 
-          <Step n={2} title="Experiment" done={!!experimentId && validation.data?.valid} description="Samples, conditions and files. BioCompute writes the pipeline's samplesheet from it.">
-            <div className="flex flex-wrap items-end gap-3">
+          <Step n={2} title="Samples" done={usingExperiment ? !!experimentId && validation.data?.valid : haveSamples}
+            description="Where the reads come from. An experiment carries conditions, replicates and controls; a samplesheet file or a FASTQ folder is quicker for simple pipelines.">
+            <div className="mb-3 flex w-fit rounded-md border border-line p-0.5 text-[13px]" role="group" aria-label="Sample source">
+              {([["experiment", "Experiment"], ["file", "Samplesheet file"], ["folder", "Folder of FASTQ files"]] as const).map(([k, l]) => (
+                <button key={k} onClick={() => setSource(k)} aria-pressed={source === k}
+                  className={cn("rounded px-3 py-1", source === k ? "bg-raised text-text" : "text-muted hover:text-text")}>{l}</button>
+              ))}
+            </div>
+            {source === "file" && (
+              <Field label="Samplesheet" hint="CSV or TSV with sample, fastq_1, fastq_2 (and the columns this pipeline needs). Paths may be absolute or data-folder paths like raw:run1/A_R1.fastq.gz.">
+                <PathInput id="launch-samplesheet" mode="file" value={inputPath} onChange={setInputPath} />
+              </Field>
+            )}
+            {source === "folder" && (
+              <div className="space-y-2">
+                <Field label="FASTQ folder" hint="Searched recursively. Samples, lanes and R1/R2 pairs are detected from the file names; lanes of a sample are merged.">
+                  <PathInput id="launch-fastq-folder" mode="dir" value={inputPath} onChange={setInputPath} />
+                </Field>
+                {inputPath && (folderPreview.isLoading ? <Skeleton className="h-5 w-64" />
+                  : folderPreview.isError ? <p className="text-[13px] text-bad">{errMsg(folderPreview.error)}</p>
+                  : folderPreview.data && (
+                    <div className="rounded-md border border-line bg-surface px-4 py-3 text-[13px]">
+                      <p className={cn("flex items-center gap-2 font-medium", folderPreview.data.samples.length ? "text-ok" : "text-bad")}>
+                        {folderPreview.data.samples.length ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}
+                        {folderPreview.data.samples.length
+                          ? `${folderPreview.data.samples.length} samples (${folderPreview.data.samples.filter((x) => x.paired).length} paired-end)`
+                          : "No FASTQ files found in this folder"}
+                      </p>
+                      {folderPreview.data.samples.length > 0 && <p className="mt-1 truncate text-xs text-muted">{folderPreview.data.samples.slice(0, 12).map((x) => x.sample_id).join(", ")}{folderPreview.data.samples.length > 12 ? ", …" : ""}</p>}
+                      {folderPreview.data.warnings
+                        .filter((w) => folderPreview.data!.samples.some((x) => x.paired) || !w.includes("without matching R2")) // all single-end: expected
+                        .slice(0, 4).map((w) => <p key={w} className="text-xs text-wait">{w}</p>)}
+                      <p className="mt-1 text-xs text-muted">Condition, replicate and control columns stay empty. Use an experiment when the pipeline needs them.</p>
+                    </div>
+                  ))}
+              </div>
+            )}
+            {usingExperiment && <div className="flex flex-wrap items-end gap-3">
               <Field label="Experiment" className="w-96 max-w-full">
                 <Select value={experimentId} onChange={(e) => setExperimentId(e.target.value)}>
                   <option value="">{needsSamples ? "Choose an experiment" : "None (pipeline needs no samplesheet)"}</option>
@@ -173,8 +231,8 @@ export default function LaunchPage() {
                 </Select>
               </Field>
               <Button asChild variant="ghost"><Link to={experimentId ? `/experiments/${experimentId}` : "/experiments"}>{experimentId ? "Edit samples" : "Create an experiment"}</Link></Button>
-            </div>
-            {experimentId && pipelineId && (
+            </div>}
+            {usingExperiment && experimentId && pipelineId && (
               <div className="mt-3 rounded-md border border-line bg-surface px-4 py-3">
                 {validation.isLoading ? <Skeleton className="h-5 w-64" /> : validation.data && (
                   <>
@@ -203,7 +261,7 @@ export default function LaunchPage() {
                 )}
                 {schema.data.form.has_schema
                   ? <SchemaForm groups={groups} params={params} defaults={schema.data.defaults} onChange={setParams} serverIssues={serverByField} compact
-                      managed={[{ name: "input", note: exp ? `Samplesheet generated from "${exp.name}"` : "Generated from the selected experiment" }, { name: "outdir", note: "Set in step 4" }]} />
+                      managed={[{ name: "input", note: !usingExperiment ? (inputPath ? `From ${inputPath} (step 2)` : "Set in step 2") : exp ? `Samplesheet generated from "${exp.name}"` : "Generated from the selected experiment" }, { name: "outdir", note: "Set in step 4" }]} />
                   : <p className="text-[13px] text-muted">No schema: parameters can be set on the pipeline page with the generic editor or the schema wizard.</p>}
               </>
             )}
@@ -212,7 +270,7 @@ export default function LaunchPage() {
           <Step n={4} title="Execution" done={!!outdir}>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Output folder" required hint="A writable data root. Results and provenance are written here." className="sm:col-span-2">
-                <PathInput mode="dir" value={outdir} onChange={setOutdir} writableOnly />
+                <PathInput id="launch-outdir" mode="dir" value={outdir} onChange={setOutdir} writableOnly />
               </Field>
               <Field label="Run name" hint="Optional; defaults to pipeline and timestamp"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
               <Field label="Software profile" hint={engine === "nextflow" ? "Nextflow -profile" : "Only used by Nextflow"}>
@@ -248,7 +306,8 @@ export default function LaunchPage() {
             <dl className="space-y-1.5 text-[13px]">
               <Row k="Pipeline" v={detail.data?.name} />
               <Row k="Engine" v={engine === "bcflow" ? "native engine" : engine || null} />
-              <Row k="Experiment" v={exp ? `${exp.name}, ${exp.sample_count} samples` : null} />
+              <Row k="Samples" v={usingExperiment ? (exp ? `${exp.name}, ${exp.sample_count} samples` : null)
+                : source === "folder" ? (inputPath ? `${folderPreview.data?.samples.length ?? "…"} from ${inputPath}` : null) : inputPath || null} />
               <Row k="Input data" v={placement.data ? `${bytes(placement.data.input_bytes)}${placement.data.restricted ? ", restricted" : ""}` : null} />
               <Row k="Placement" v={multiNode ? `HTCondor on ${nodeIds.length} node(s)` : "controller (data-local)"} />
               <Row k="Resources" v={`${cpus} cores, ${mem} GB`} />

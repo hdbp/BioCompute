@@ -1,14 +1,16 @@
-import { Copy, RotateCcw, Trash2 } from "lucide-react";
-import type { Issue, StudioModule } from "@/lib/types";
+import { Copy, FolderInput, PackagePlus, RotateCcw, Trash2 } from "lucide-react";
+import { PathInput } from "@/components/file-browser";
+import type { Issue, ModuleDef, StudioModule } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Badge, Switch } from "@/components/ui/misc";
 import { IssueList } from "@/components/page";
 import { effective, type ModuleData, type Port, type PortTypes, type StudioNode } from "./model";
 
-export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, onDuplicate }: {
+export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, onDuplicate, onSaveAsModule }: {
   node: StudioNode; mod: StudioModule | undefined; portTypes: PortTypes; issues: Issue[];
   onChange: (patch: Partial<ModuleData>) => void; onDelete: () => void; onDuplicate: () => void;
+  onSaveAsModule?: (def: ModuleDef) => void;
 }) {
   const d = node.data;
   const spec = effective(mod, d);
@@ -37,6 +39,14 @@ export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, on
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {mod?.description && <p className="text-[12.5px] text-muted">{mod.description}</p>}
+        {mod?.kind === "source" && (
+          <div className="flex gap-2 rounded-md border border-accent/30 bg-accent/5 p-2.5 text-[12.5px]">
+            <FolderInput className="mt-0.5 size-4 shrink-0 text-accent" />
+            <p>{mod.id === "input_samplesheet"
+              ? "The data is chosen when the pipeline is launched: an experiment, a samplesheet file or a folder of FASTQ files. A default set below is pre-filled at launch and can still be changed there."
+              : "The file is chosen when the pipeline is launched. A default set below is pre-filled there."}</p>
+          </div>
+        )}
         {issues.length > 0 && <IssueList issues={issues} className="rounded-md border border-line bg-ink/40 p-2.5" />}
 
         <Field label="Label" hint={isModule ? "Also determines the Nextflow process name." : undefined}>
@@ -49,6 +59,14 @@ export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, on
             {mod.params.map((p) => {
               const v = d.params?.[p.name];
               const label = p.name.replace(/_/g, " ");
+              if (p.widget === "path") {
+                const mode = p.path_mode === "auto" ? (d.params?.format === "directory-path" ? "dir" : "file") : (p.path_mode ?? "file");
+                return (
+                  <Field key={p.name} label={p.name.replace(/_/g, " ")} hint={p.description}>
+                    <PathInput id={`param-${node.id}-${p.name}`} mode={mode} value={String(v ?? "")} onChange={(x) => setParam(p.name, x)} />
+                  </Field>
+                );
+              }
               if (p.enum) {
                 return (
                   <Field key={p.name} label={label} hint={p.description}>
@@ -114,6 +132,19 @@ export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, on
               </div>
             </div>
 
+            {custom && onSaveAsModule && (
+              <Button size="sm" variant="secondary" className="w-full" onClick={() => onSaveAsModule({
+                id: `u_${d.label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 36) || "module"}`,
+                name: d.label, category: "My modules", description: mod?.description ?? "", scope: spec.scope === "aggregate" ? "aggregate" : "per_sample",
+                language: (spec.language as ModuleDef["language"]) ?? "bash",
+                inputs: spec.inputs.map((x) => ({ name: x.name, type: x.type, multiple: !!x.multiple })),
+                outputs: spec.outputs.map((x) => ({ name: x.name, type: x.type, pattern: x.pattern ?? "{prefix}.out" })),
+                params: [], tools: mod?.tools ?? [], conda: "", container: "", cpus: d.cpus ?? 1, memory_gb: d.memory_gb ?? 2,
+                script: String(d.script ?? mod?.script ?? ""),
+              })}>
+                <PackagePlus />Save as reusable module
+              </Button>
+            )}
             {custom && (
               <div className="space-y-3">
                 <h4 className="text-xs font-medium text-muted">Custom module shape</h4>

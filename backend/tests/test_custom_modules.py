@@ -184,3 +184,76 @@ def test_assistant_review_and_draft_module(client, auth, monkeypatch):
 def test_assistant_config_requires_admin(client):
     r = client.put("/api/assistant/config", json={"provider": "openai"})
     assert r.status_code in (401, 403)
+
+
+# --------------------------------------------------------------------------- input defaults / launch without an experiment
+def test_launch_studio_pipeline_from_a_fastq_folder_default(client, auth):
+    """A Studio input node can point at a folder of FASTQs; the launch needs no experiment."""
+    graph = {"nodes": [node("in", "input_samplesheet", params={"fastq_folder": "raw:run1"}), node("st", "fastq_stats"),
+                       node("out", "output_results")],
+             "edges": [edge("in", "reads", "st", "reads"), edge("st", "stats", "out", "results")]}
+    comp = client.post("/api/studio/compile", headers=auth, json={"name": "folder", "graph": graph}).json()
+    assert comp["valid"], comp["issues"]
+    assert json.loads(comp["files"]["nextflow_schema.json"])["$defs"]["input_output_options"]["properties"]["input"]["default"] == "raw:run1"
+    w = client.post("/api/studio/workflows", headers=auth, json={"name": "Folder stats", "graph": graph}).json()
+    pid = client.post(f"/api/studio/workflows/{w['id']}/publish", headers=auth).json()["pipeline_id"]
+    run = client.post("/api/runs", headers=auth, json={"pipeline_id": pid, "engine": "bcflow", "output_dir": "results:folder1", "params": {}}).json()
+    assert "id" in run, run
+    done = wait_for_run(client, auth, run["id"])
+    assert done["status"] == "completed", client.get(f"/api/runs/{run['id']}/log", headers=auth).json()["content"][-2000:]
+    names = {e["name"] for e in client.get(f"/api/results/{run['id']}", params={"path": "fastq_statistics"}, headers=auth).json()["entries"]}
+    assert {"CTRL_rep1.stats.tsv", "TREAT_rep2.stats.tsv", "INPUT.stats.tsv"} <= names
+    client.delete(f"/api/studio/workflows/{w['id']}", headers=auth)
+
+
+def test_samplesheet_file_with_data_folder_paths(client, auth, tmp_root):
+    from app.services import samplesheet
+    sheet = tmp_root / "results" / "sheet.csv"
+    sheet.write_text("sample,fastq_1,fastq_2\nA,raw:run1/CTRL_rep1_R1.fastq.gz,raw:run1/CTRL_rep1_R2.fastq.gz\n")
+    text, n = samplesheet.resolve_sheet(sheet)
+    assert n == 2 and str(tmp_root / "raw" / "run1" / "CTRL_rep1_R1.fastq.gz") in text
+
+
+def test_build_creates_and_saves_missing_modules(client, auth, monkeypatch):
+    client.put("/api/assistant/config", headers=auth, json={"provider": "openai", "model": "gpt-test", "api_key": "sk-test-5678"})
+    first = {"name": "PRO-seq", "description": "d", "explanation": "e", "assumptions": [],
+             "missing_modules": [{"tool": "proseq_3prime (strand-specific 3' end coverage)", "reason": "PRO-seq needs single-nucleotide 3' ends"}],
+             "nodes": [{"id": "in", "module": "input_samplesheet", "label": "PRO-seq reads", "params": []},
+                       {"id": "st", "module": "fastq_stats", "label": "Stats", "params": []}],
+             "edges": [{"source": "in", "source_port": "reads", "target": "st", "target_port": "reads"}]}
+    module = {"id": "u_proseq_3prime", "name": "PRO-seq 3' ends", "category": "Signal", "description": "3' end counts",
+              "scope": "per_sample", "language": "bash", "inputs": [{"name": "reads", "type": "fastq", "multiple": False}],
+              "outputs": [{"name": "counts", "type": "table", "pattern": "{prefix}.3p.tsv"}], "params": [], "tools": ["awk"],
+              "conda": "", "container": "", "cpus": 1, "memory_gb": 1, "notes": "toy",
+              "script": 'set -euo pipefail\nzcat -f $BC_IN_READS | awk \'NR%4==2{n++}END{print n}\' > "$BC_PREFIX.3p.tsv"\n'}
+    calls = []
+
+    def fake(model, system, prompt, schema, name, key):
+        calls.append(name)
+        if name == "ModuleDraft":
+            return module, {"provider": "openai", "model": model}
+        if "New modules were just added" in prompt:
+            assert "u_proseq_3prime" in prompt
+            second = json.loads(json.dumps(first))
+            second["missing_modules"] = []
+            second["nodes"].append({"id": "p3", "module": "u_proseq_3prime", "label": "3' ends", "params": []})
+            second["edges"].append({"source": "in", "source_port": "reads", "target": "p3", "target_port": "reads"})
+            return second, {"provider": "openai", "model": model}
+        return first, {"provider": "openai", "model": model}
+
+    monkeypatch.setattr(ai, "_run_openai", fake)
+    r = client.post("/api/assistant/build", headers=auth, json={"description": "PRO-seq", "create_modules": True}).json()
+    assert calls == ["PipelineDraft", "ModuleDraft", "PipelineDraft"]
+    assert [c["id"] for c in r["created_modules"]] == ["u_proseq_3prime"] and r["missing_modules"] == []
+    assert r["valid"] and "u_proseq_3prime" in {n["data"]["module"] for n in r["graph"]["nodes"]}
+    assert r["meta"]["calls"] == 3
+    mods = client.get("/api/studio/modules", headers=auth).json()["modules"]
+    saved = next(m for m in mods if m["id"] == "u_proseq_3prime")
+    assert saved["user"] and "Drafted by the assistant" in saved["description"]
+    # a second build that wants the same tool gets a fresh id instead of overwriting
+    calls.clear()
+    r2 = client.post("/api/assistant/build", headers=auth, json={"description": "PRO-seq again", "create_modules": True}).json()
+    assert r2["created_modules"][0]["id"] == "u_proseq_3prime_2"
+    for mid in ("u_proseq_3prime", "u_proseq_3prime_2"):
+        client.delete(f"/api/studio/modules/{mid}", headers=auth)
+    client.put("/api/assistant/config", headers=auth, json={"provider": "off", "clear_key": True})

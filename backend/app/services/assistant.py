@@ -14,6 +14,7 @@ sent to the provider - never data files, sample names or paths.
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -389,6 +390,8 @@ per_sample module. "aggregate" modules run once over all samples; inputs marked 
 (for example MultiQC collecting QC files from several steps).
 - Every input must be connected; inputs not marked multiple take exactly one edge. No cycles.
 - Node params are name/value strings for that module's parameters; leave defaults out.
+- Where the data lives is chosen when the pipeline is launched (an experiment, a samplesheet or a FASTQ folder), so never \
+invent file paths. Keep the input nodes generic: label the samplesheet node after the reads (e.g. "PRO-seq reads").
 
 Working rules:
 - Use only module ids from the catalog. Prefer modules whose tools are installed. If the analysis needs software \
@@ -476,15 +479,11 @@ def draft_to_graph(d: PipelineDraft, index: dict[str, dict[str, Any]]) -> dict[s
     return {"nodes": nodes, "edges": edges}
 
 
-def build(db: Session, index: dict[str, dict[str, Any]], description: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
-    base = (f"Module catalog:\n{catalog(index)}\n\n")
-    if current and current.get("nodes"):
-        ask = (f"Current pipeline:\n{json.dumps(_graph_as_draft(current), indent=1)}\n\n"
-               f"Change the current pipeline as follows (keep what is not affected):\n{description}")
-    else:
-        ask = f"Design a pipeline for this request:\n{description}"
-    prompt = base + ask
-    draft, meta = call(db, "build", SYSTEM, prompt, PipelineDraft)
+def _design(db: Session, index: dict[str, dict[str, Any]], ask: str) -> dict[str, Any]:
+    """One design: draft, then validate and repair up to twice."""
+    base = f"Module catalog:\n{catalog(index)}\n\n"
+    draft, meta = call(db, "build", SYSTEM, base + ask, PipelineDraft)
+    metas = [meta]
     graph = draft_to_graph(draft, index)
     v = studio.validate(graph, index)
     attempts = 1
@@ -493,12 +492,91 @@ def build(db: Session, index: dict[str, dict[str, Any]], description: str, curre
         repair = (base + ask + f"\n\nYour previous answer:\n{draft.model_dump_json(indent=1)}\n\n"
                   f"BioCompute's validator rejected it:\n{problems}\n\nReturn a corrected pipeline.")
         draft, meta = call(db, "build-repair", SYSTEM, repair, PipelineDraft)
+        metas.append(meta)
         graph = draft_to_graph(draft, index)
         v = studio.validate(graph, index)
         attempts += 1
-    return {"graph": graph, "name": draft.name, "description": draft.description, "explanation": draft.explanation,
-            "assumptions": draft.assumptions, "missing_modules": [m.model_dump() for m in draft.missing_modules],
-            "valid": v["valid"], "issues": v["issues"], "attempts": attempts, "meta": meta}
+    return {"draft": draft, "graph": graph, "validation": v, "attempts": attempts, "metas": metas}
+
+
+def _merge_meta(metas: list[dict[str, Any]]) -> dict[str, Any]:
+    out = dict(metas[-1])
+    costs = [m.get("cost_usd") for m in metas if m.get("cost_usd") is not None]
+    if costs:
+        out["cost_usd"] = round(sum(costs), 4)
+    for k in ("input_tokens", "output_tokens"):
+        vals = [m.get(k) for m in metas if m.get(k) is not None]
+        if vals:
+            out[k] = sum(vals)
+    out["calls"] = len(metas)
+    return out
+
+
+def _create_missing(db: Session, index: dict[str, dict[str, Any]], missing: list[MissingModule], user: str,
+                    metas: list[dict[str, Any]], limit: int = 4) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Draft, check and save a module for each piece of software the design lacked. Nothing is run."""
+    from ..models import CustomModule
+    from . import custom_modules as cm
+
+    created: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    if not get_settings().allow_custom_code_modules:
+        return created, [{"tool": m.tool, "error": "Custom modules are disabled by the administrator"} for m in missing]
+    for m in missing[:limit]:
+        exe = re.split(r"[\s(,;/]", m.tool.strip())[0] if m.tool.strip() else ""
+        found = bool(exe) and cm.check_tool(exe).get("found")
+        help_text = cm.tool_help(exe) if found else None
+        try:
+            d = draft_module(db, index, f"{m.tool}: {m.reason}", exe or None, help_text)
+        except AssistantError as exc:
+            failed.append({"tool": m.tool, "error": str(exc)})
+            continue
+        metas.append(d["meta"])
+        mod = d["module"]
+        base_id = re.sub(r"[^a-z0-9_]", "_", str(mod.get("id") or "u_module").lower())[:36] or "u_module"
+        if not base_id.startswith("u_"):
+            base_id = ("u_" + base_id)[:36]
+        mod["id"], k = base_id, 2
+        while mod["id"] in index or db.get(CustomModule, mod["id"]):
+            mod["id"], k = f"{base_id}_{k}", k + 1
+        mod["description"] = (str(mod.get("description") or "") + " Drafted by the assistant: review before relying on it.").strip()
+        chk = cm.check_module(mod, db=db)
+        if not chk["valid"]:
+            failed.append({"tool": m.tool, "error": "; ".join(i["message"] for i in chk["issues"] if i["level"] == "error")[:400]})
+            continue
+        db.add(CustomModule(id=mod["id"], definition=chk["module"], created_by=user))
+        db.flush()
+        index = {**index, mod["id"]: cm.to_index_entry(cm.ModuleDef.model_validate(chk["module"]))}
+        created.append({"id": mod["id"], "name": chk["module"]["name"], "tool": m.tool, "tool_installed": found,
+                        "notes": d["notes"], "warnings": [i["message"] for i in chk["issues"] if i["level"] == "warning"]})
+    return created, failed
+
+
+def build(db: Session, index: dict[str, dict[str, Any]], description: str, current: dict[str, Any] | None = None,
+          create_modules: bool = False, user: str = "assistant") -> dict[str, Any]:
+    if current and current.get("nodes"):
+        ask = (f"Current pipeline:\n{json.dumps(_graph_as_draft(current), indent=1)}\n\n"
+               f"Change the current pipeline as follows (keep what is not affected):\n{description}")
+    else:
+        ask = f"Design a pipeline for this request:\n{description}"
+    res = _design(db, index, ask)
+    metas = list(res["metas"])
+    created: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    if create_modules and res["draft"].missing_modules:
+        created, failed = _create_missing(db, index, res["draft"].missing_modules, user, metas)
+        if created:
+            from . import custom_modules as cm
+            index = cm.index(db)
+            listing = ", ".join(f"{c['id']} ({c['tool']})" for c in created)
+            res = _design(db, index, ask + f"\n\nNew modules were just added to the catalog for software that had none: {listing}. "
+                                           "Use them where they fit; list only software that still has no module under missing_modules.")
+            metas += res["metas"]
+    d, v = res["draft"], res["validation"]
+    return {"graph": res["graph"], "name": d.name, "description": d.description, "explanation": d.explanation,
+            "assumptions": d.assumptions, "missing_modules": [m.model_dump() for m in d.missing_modules],
+            "created_modules": created, "module_failures": failed,
+            "valid": v["valid"], "issues": v["issues"], "attempts": res["attempts"], "meta": _merge_meta(metas)}
 
 
 def review(db: Session, index: dict[str, dict[str, Any]], graph: dict[str, Any], goal: str = "") -> dict[str, Any]:

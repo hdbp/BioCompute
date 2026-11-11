@@ -709,7 +709,8 @@ function StudioInner() {
 
           {single ? (
             <Inspector key={single.id} node={single} mod={modIndex[single.data.module]} portTypes={portTypes} issues={issuesByNode[single.id] ?? []}
-              onChange={(p) => updateNodeData(single.id, p)} onDelete={() => deleteNodes([single.id])} onDuplicate={() => duplicateNode(single)} />
+              onChange={(p) => updateNodeData(single.id, p)} onDelete={() => deleteNodes([single.id])} onDuplicate={() => duplicateNode(single)}
+              onSaveAsModule={(def) => openBuilder(normalizeModule(def), false, "Saved modules appear in the library and can be reused in any pipeline. The node on the canvas keeps its own copy of the script.")} />
           ) : selected.length > 1 ? (
             <aside className="w-80 shrink-0 border-l border-line bg-surface p-4 space-y-3">
               <p className="text-sm font-semibold">{selected.length} nodes selected</p>

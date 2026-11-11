@@ -218,8 +218,8 @@ def compile_graph(graph: dict[str, Any], name: str, description: str = "",
         "input_output_options": {
             "title": "Input/output options", "type": "object", "fa_icon": "fas fa-terminal",
             "required": ["outdir"], "properties": {
-                "input": {"type": "string", "format": "file-path", "mimetype": "text/csv", "schema": "assets/schema_input.json",
-                          "pattern": "^\\S+\\.(csv|tsv)$", "description": "Samplesheet (sample, fastq_1, fastq_2, condition, replicate)", "fa_icon": "fas fa-file-csv"},
+                "input": {"type": "string", "format": "path", "mimetype": "text/csv", "schema": "assets/schema_input.json",
+                          "description": "Samplesheet (sample, fastq_1, fastq_2, condition, replicate), or a folder of FASTQ files when launched from BioCompute", "fa_icon": "fas fa-file-csv"},
                 "outdir": {"type": "string", "format": "directory-path", "description": "Output directory", "fa_icon": "fas fa-folder-open"},
             }}}
     has_sheet = any(g.specs[n]["id"] == "input_samplesheet" for n in order)
@@ -236,6 +236,10 @@ def compile_graph(graph: dict[str, Any], name: str, description: str = "",
         s = g.specs[nid]
         proc = names[nid]
         if s["id"] == "input_samplesheet":
+            default = (s["param_values"].get("samplesheet") or s["param_values"].get("fastq_folder") or "").strip()
+            if default:
+                params["input"] = default
+                schema_groups["input_output_options"]["properties"]["input"]["default"] = default
             wf.append(
                 "    ch_rows = Channel.fromPath(params.input, checkIfExists: true)\n"
                 "        .splitCsv(header: true, sep: params.input.endsWith('.tsv') ? '\\t' : ',')\n"
@@ -256,11 +260,13 @@ def compile_graph(graph: dict[str, Any], name: str, description: str = "",
         if s["id"] == "input_file":
             pn = s["param_values"]["param_name"]
             fmt = s["param_values"].get("format") or "file-path"
-            params[pn] = None
+            default = (s["param_values"].get("default_path") or "").strip() or None
+            params[pn] = default
             schema_groups.setdefault("reference_options", {"title": "Reference files", "type": "object",
                                                            "fa_icon": "fas fa-dna", "required": [], "properties": {}})
             schema_groups["reference_options"]["properties"][pn] = {"type": "string", "format": fmt,
-                                                                    "description": f"{s['label']} ({PORT_TYPES.get(s['outputs'][0]['type'], {}).get('label', 'file')})"}
+                                                                    "description": f"{s['label']} ({PORT_TYPES.get(s['outputs'][0]['type'], {}).get('label', 'file')})",
+                                                                    **({"default": default} if default else {})}
             schema_groups["reference_options"]["required"].append(pn)
             wf.append(f"    ch_{pn} = Channel.value(file(params.{pn}, checkIfExists: true))")
             emit_ref[(nid, "file")] = f"ch_{pn}"

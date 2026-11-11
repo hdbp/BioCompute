@@ -26,6 +26,7 @@ class ConfigIn(BaseModel):
 class BuildIn(BaseModel):
     description: str = Field(min_length=3, max_length=8000)
     graph: dict[str, Any] | None = None  # current editor graph when the user asks for a change
+    create_modules: bool = False  # draft, check and save modules for software that has none, then design again
 
 
 class ReviewIn(BaseModel):
@@ -83,7 +84,8 @@ def test(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
 
 @router.post("/build")
 def build(body: BuildIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    return _run(db, user, "build", lambda: ai.build(db, cm.index(db), body.description, body.graph), request=body.description)
+    return _run(db, user, "build", lambda: ai.build(db, cm.index(db), body.description, body.graph, body.create_modules, user.username),
+                request=body.description, create_modules=body.create_modules)
 
 
 @router.post("/review")

@@ -94,6 +94,31 @@ def prepare(db: Session, *, pipeline: Pipeline, version: PipelineVersion, engine
                     eff[f["name"]] = str(p)
                 except HTTPException as exc:
                     issues.append({"level": "error", "field": f["name"], "message": str(exc.detail)})
+    # no experiment: the samplesheet comes from a file or a folder of FASTQ files chosen at launch (or the pipeline default)
+    inp = eff.get("input")
+    if experiment is None and isinstance(inp, str) and inp and Path(inp).exists():
+        src = Path(inp).resolve()
+        if fs.root_of(src) is None:
+            issues.append({"level": "error", "field": "input", "message": "The samplesheet or FASTQ folder must be inside a data folder"})
+        elif src.is_dir():
+            try:
+                cols, rows, notes = samplesheet.from_folder(src, samplesheet.columns_for(version.input_schema_json, None)
+                                                            if version.input_schema_json else None)
+            except HTTPException as exc:
+                cols, rows, notes = [], [], [str(exc.detail)]
+            if not rows:
+                issues.append({"level": "error", "field": "input", "message": f"No FASTQ files found in {fs.to_virtual(src) or src}"})
+            else:
+                sheet = run_dir / "samplesheet.csv"
+                sheet.write_text(samplesheet.to_csv(rows, cols))
+                eff["input"] = str(sheet)
+                (run_dir / "input_source.json").write_text(json.dumps({"folder": fs.to_virtual(src), "samples": len({r["sample"] for r in rows}),
+                                                                       "rows": len(rows), "notes": notes[:50]}, indent=2))
+        elif src.suffix.lower() in (".csv", ".tsv"):
+            text, _ = samplesheet.resolve_sheet(src)
+            sheet = run_dir / f"samplesheet{src.suffix.lower()}"
+            sheet.write_text(text)
+            eff["input"] = str(sheet)
     # experiment -> samplesheet
     if experiment is not None:
         if experiment.assay == "proteomics" and not version.input_schema_json:

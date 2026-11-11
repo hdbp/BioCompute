@@ -27,6 +27,23 @@ each time you publish. *Export* downloads it as a zip.
 
 Validation rejects anything outside this subset before code is generated.
 
+## Where the data comes from
+
+The **Samplesheet reads** node (it can be renamed, e.g. "PRO-seq reads"; the node still shows the module name
+underneath) declares that the pipeline takes per-sample FASTQ reads. The actual data is chosen **at launch**,
+in step 2 (*Samples*):
+
+* **Experiment:** samples with conditions, replicates and controls. BioCompute writes the samplesheet.
+* **Samplesheet file:** a CSV/TSV with `sample, fastq_1, fastq_2` (and any columns the pipeline needs).
+  File paths may be absolute or data-folder paths (`raw:run1/A_R1.fastq.gz`).
+* **Folder of FASTQ files:** searched recursively. Samples, lanes and R1/R2 pairs are detected from the file names,
+  and lanes are merged. Condition, replicate and control columns stay empty.
+
+In Studio you can set a default samplesheet or FASTQ folder on the node (Inspector → *samplesheet* /
+*fastq folder*). The node shows `data: …`, and the launch form is pre-filled with it. **Reference / parameter
+file** nodes likewise take a *default path* (an index, a FASTA, a GTF). All paths must be inside a data folder
+(Settings → Data folders).
+
 ## Module contract
 
 A module script reads everything from environment variables:
@@ -93,6 +110,12 @@ the last four characters.
 
 What it does:
 
+* **Build** can also **create the modules it needs** (on by default). When the design needs software that has no
+  module, the assistant drafts one module per program (from its `--help` text when it is installed on the
+  controller). BioCompute checks each draft, saves the valid ones to your module library ("Drafted by the
+  assistant"), and designs the pipeline again with them. Each module is one extra request. Review the new
+  modules before relying on them.
+* A **custom script** node can be turned into a reusable module with *Save as reusable module* in the Inspector.
 * **Build.** It turns a description ("CUT&RUN, paired-end, IgG control…") into a graph that uses your module library,
   including your own modules. BioCompute's validator checks the graph. If the graph is invalid, the errors go back
   to the model for up to two repair rounds. The answer lists its assumptions (genome, layout, controls) and any

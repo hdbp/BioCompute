@@ -24,7 +24,10 @@ function ModuleNodeImpl({ id, data, selected }: NodeProps<StudioNode>) {
       <div className={cn("flex items-center gap-2 rounded-t-lg border-b border-line px-2.5 py-2",
         mod?.kind === "source" ? "bg-run/10" : mod?.kind === "sink" ? "bg-ok/10" : "bg-raised/60")}>
         <Icon className="size-3.5 shrink-0 text-muted" />
-        <span className="flex-1 truncate font-medium text-text" title={data.label}>{data.label}</span>
+        <span className="min-w-0 flex-1 leading-tight">
+          <span className="block truncate font-medium text-text" title={data.label}>{data.label}</span>
+          {mod && mod.name !== data.label && <span className="block truncate text-[10.5px] font-normal text-muted">{mod.name}</span>}
+        </span>
         {errors.length > 0 && (
           <span title={errors.map((e) => e.message).join("\n")} className="text-bad"><AlertTriangle className="size-3.5" /></span>
         )}
@@ -65,8 +68,18 @@ function ModuleNodeImpl({ id, data, selected }: NodeProps<StudioNode>) {
           {data.publish === false && <span className="ml-auto">not published</span>}
         </div>
       )}
+      {mod?.id === "input_samplesheet" && (() => {
+        const src = String(data.params?.samplesheet || data.params?.fastq_folder || "");
+        return (
+          <div className="truncate border-t border-line px-2.5 py-1.5 text-[11px] text-muted" title={src || "Chosen when the pipeline is launched"}>
+            data: {src ? <span className="font-mono">{src}</span> : "chosen at launch"}
+          </div>
+        );
+      })()}
       {mod?.id === "input_file" && (
-        <div className="border-t border-line px-2.5 py-1.5 font-mono text-[11px] text-muted truncate">params.{String(data.params?.param_name ?? "")}</div>
+        <div className="border-t border-line px-2.5 py-1.5 font-mono text-[11px] text-muted truncate" title={String(data.params?.default_path ?? "")}>
+          params.{String(data.params?.param_name ?? "")}{data.params?.default_path ? ` = ${String(data.params.default_path)}` : ""}
+        </div>
       )}
     </div>
   );
