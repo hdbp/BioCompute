@@ -1253,6 +1253,68 @@
                 }
             }
         },
+        "/api/pipelines/{pid}/map": {
+            "get": {
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Pipeline Map",
+                "description": "The pipeline's structure for one version: its Pipeline Studio graph, or a map read from its Nextflow code.",
+                "operationId": "pipeline_map_api_pipelines__pid__map_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "pid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Pid"
+                        }
+                    },
+                    {
+                        "name": "version_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Version Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/pipelines/{pid}/presets": {
             "get": {
                 "tags": [

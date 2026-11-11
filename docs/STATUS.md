@@ -72,6 +72,8 @@ These limits apply to everything below.
 | DSL2 + `nextflow_schema.json` + `bcflow.json` generation, zip export | Demonstrated (tests) |
 | Publish to the library and run (native engine) | Demonstrated (`test_publish_and_run_studio_pipeline`) |
 | Run generated DSL2 with Nextflow | Implemented, **untested** here |
+| Pipeline map: Studio graph per published version, edit a version in Studio and publish it as the next version, copies of others' Studio pipelines stay editable | Demonstrated (`test_pipeline_map.py`, browser) |
+| Read-only map of Nextflow DSL2 pipelines from their code (processes, subworkflows, aliases, conditions, channel flow) | Demonstrated on the bundled pipeline and an nf-core-shaped fixture (`test_pipeline_map.py`, browser); not yet checked against real nf-core releases (not downloadable here) |
 | Import arbitrary Nextflow scripts back into a graph | Not supported by design |
 | User modules for installed software: scan PATH, 15 templates (Genrich, SEACR, HOMER, epic2, GoPeaks, …), builder with live checks, edit/export/import/delete | Demonstrated (`test_custom_modules.py`, browser); a user-made module ran end to end on the native engine |
 | Input nodes with default samplesheet / FASTQ folder / reference path; launch from an experiment, a samplesheet file or a FASTQ folder (recursive pair detection) | Demonstrated (`test_launch_studio_pipeline_from_a_fastq_folder_default`, browser launch completed) |

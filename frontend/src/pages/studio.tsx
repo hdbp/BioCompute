@@ -7,7 +7,7 @@ import {
 } from "@xyflow/react";
 import { toast } from "sonner";
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, Code2, Download, FilePlus2, FolderOpen, History, Info, Layers, Loader2, Redo2, Rocket, Save,
+  AlertTriangle, BookOpen, CheckCircle2, ChevronDown, Code2, Download, FilePlus2, FolderOpen, History, Info, Layers, Loader2, Redo2, Rocket, Save,
   ShieldCheck, Sparkles, Trash2, Undo2, Workflow,
 } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
@@ -163,6 +163,20 @@ function StudioInner() {
       setDescription(w.description);
       replaceGraph(deserialize(w.graph));
       setDirty(false);
+      // opened from a pipeline page for an earlier version: start from that version's graph
+      const sp = new URLSearchParams(window.location.search);
+      const pid = sp.get("pipeline"), vid = sp.get("version");
+      if (pid && vid) {
+        window.history.replaceState(null, "", window.location.pathname);
+        api.get<{ version: string; studio?: { graph: { nodes: unknown[]; edges: unknown[] } | null; next_version: string } }>(`/api/pipelines/${pid}/map?version_id=${encodeURIComponent(vid)}`)
+          .then((m) => {
+            if (!m.studio?.graph) return;
+            replaceGraph(deserialize(m.studio.graph));
+            setDirty(true);
+            toast.info(`Loaded ${m.version} of “${w.name}”. Publish saves it as ${m.studio.next_version}; Save alone keeps it as the Studio draft.`, { duration: 10000 });
+          })
+          .catch((e) => toast.error(`Could not load that version: ${errMsg(e)}`));
+      }
     }).catch((e) => {
       toast.error(`Could not open workflow: ${errMsg(e)}`);
       navigate("/studio", { replace: true });
@@ -621,7 +635,7 @@ function StudioInner() {
           <Tip content="Undo (Ctrl+Z)"><Button size="icon" variant="ghost" onClick={undo} disabled={!past.current.length} aria-label="Undo"><Undo2 /></Button></Tip>
           <Tip content="Redo (Ctrl+Shift+Z)"><Button size="icon" variant="ghost" onClick={redo} disabled={!future.current.length} aria-label="Redo"><Redo2 /></Button></Tip>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button size="sm" variant="ghost">Examples<ChevronDown /></Button></DropdownMenuTrigger>
+            <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" aria-label="Examples" title="Example workflows"><BookOpen className="2xl:hidden" /><span className="hidden 2xl:inline">Examples</span><ChevronDown /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuLabel>Replaces the canvas</DropdownMenuLabel>
               <DropdownMenuItem onSelect={() => loadExample("chip")}><Workflow />ChIP-seq: FastQC, fastp, Bowtie2, MACS3, MultiQC</DropdownMenuItem>
@@ -636,7 +650,16 @@ function StudioInner() {
           <Button size="sm" variant="secondary" onClick={validate} loading={validating} aria-label="Validate"><ShieldCheck /><span className="hidden xl:inline">Validate</span></Button>
           <Button size="sm" variant="secondary" onClick={showCode} loading={busy === "compile"} disabled={!nodes.length} aria-label="Show generated code"><Code2 /><span className="hidden xl:inline">Code</span></Button>
           <Button size="sm" variant="secondary" onClick={exportZip} loading={busy === "export"} disabled={!nodes.length} aria-label="Export Nextflow pipeline"><Download /><span className="hidden xl:inline">Export</span></Button>
-          <Button size="sm" variant="primary" onClick={publish} loading={busy === "publish"} disabled={!nodes.length}><Rocket />Publish</Button>
+          {(() => {
+            const pl = wfId && wfMeta?.can_edit !== false ? (pipelinesQ.data ?? []).find((x) => x.studio_workflow_id === wfId) : undefined;
+            const n = Number(/^v(\d+)$/.exec(pl?.latest_version?.version ?? "")?.[1] ?? 0);
+            const label = n ? `Publish v${n + 1}` : "Publish";
+            return (
+              <Tip content={n ? `Saves the workflow and adds it to “${pl!.name}” as v${n + 1}. Earlier versions stay available and runnable.` : "Saves the workflow and adds it to the Pipelines library."}>
+                <Button size="sm" variant="primary" onClick={publish} loading={busy === "publish"} disabled={!nodes.length}><Rocket />{n ? <>Publish<span className="hidden 2xl:inline"> v{n + 1}</span></> : label}</Button>
+              </Tip>
+            );
+          })()}
         </div>
 
         <div className="flex min-h-0 flex-1">

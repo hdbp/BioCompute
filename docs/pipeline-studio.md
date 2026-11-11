@@ -45,6 +45,24 @@ file** nodes likewise take a *default path* (an index, a FASTA, a GTF). All path
 (Settings → Data folders), or a refgenie reference such as `refgenie://hg38/bowtie2_index.dir`
 (DNA button next to the path; see [reference-genomes.md](reference-genomes.md)).
 
+## Pipeline map and versions
+
+Every pipeline page opens on a **Map** tab (also available in the launch form: *Show pipeline map*):
+
+* **Built in Studio:** the graph of the selected version. Each published version keeps the graph it was built from
+  (`studio_graph.json` next to its files), so earlier versions can still be viewed. *Edit in Pipeline Studio* opens the
+  workflow; from an earlier version, Studio starts from that version's graph. **Publish** (labelled *Publish v3*, etc.
+  on wide screens) saves the workflow and adds it to the same pipeline as the next version; earlier versions stay
+  available and runnable, and runs record which version they used. *Save* alone only keeps the Studio draft.
+  Versions published before graphs were kept are shown from their generated code, and Studio can only open the
+  current workflow for them.
+* **Someone else's Studio pipeline:** *Make my own copy* copies the files and the workflow, so the copy can be
+  changed in Studio and published as new versions of your copy.
+* **Written in Nextflow** (nf-core, git, imported folders): a read-only map read from the code (nothing is run):
+  the workflow that calls the most steps (for nf-core, the pipeline workflow in `workflows/`), its processes and
+  subworkflows, aliases, containers, conditions (`if (!params.skip_trimming)` → "only if …") and the channel flow
+  between steps. Dynamic channel logic can hide or add an arrow. These pipelines are changed in their code.
+
 ## Module contract
 
 A module script reads everything from environment variables:

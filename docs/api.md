@@ -38,6 +38,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `GET    /api/pipelines`
 - `GET    /api/pipelines/{pid}`
 - `GET    /api/pipelines/{pid}/history`
+- `GET    /api/pipelines/{pid}/map`
 - `GET    /api/pipelines/{pid}/presets`
 - `PATCH  /api/pipelines/{pid}`
 - `POST   /api/pipeline-schemas/{pid}/author`

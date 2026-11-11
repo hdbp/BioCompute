@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import shutil
 import zipfile
 from pathlib import Path
@@ -253,6 +254,8 @@ def publish(wid: str, user: User = Depends(require_scientist), db: Session = Dep
         p.write_text(content)
         if name.startswith("bin/"):
             p.chmod(0o755)
+    # the graph this version was built from, so the pipeline page can show it and Studio can reopen it
+    (dest / "studio_graph.json").write_text(json.dumps({"workflow_id": w.id, "name": w.name, "graph": w.graph}))
     p = psvc.register_from_dir(db, dest, source_type="studio", name=w.name, category="Studio", version=f"v{n}",
                                pipeline=existing, studio_workflow_id=w.id)
     p.description = w.description or p.description

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,12 +12,14 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..models import ParameterPreset, Pipeline, PipelineVersion, Run, User
+from ..models import ParameterPreset, Pipeline, PipelineVersion, Run, StudioWorkflow, User
 from ..schemas import (DuplicateIn, ImportGit, ImportLocal, ParamValidateIn, PipelineDetail, PipelineSummary,
                        PipelineUpdate, PipelineVersionOut, PresetIn, PresetOut, SchemaAuthorIn)
 from ..security import audit, require_scientist, require_viewer
-from ..services import access, fs, nfschema
+from ..services import access, fs, nf_map, nfschema
 from ..services import pipelines as svc
+
+STUDIO_SNAPSHOT = "studio_graph.json"  # written next to each published Studio version
 
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 versions_router = APIRouter(prefix="/api/pipeline-versions", tags=["pipelines"])
@@ -206,8 +209,19 @@ def duplicate(pid: str, body: DuplicateIn, user: User = Depends(require_scientis
     if dest.exists():
         raise HTTPException(409, "A pipeline with this name already exists in the store")
     shutil.copytree(v.path, dest, symlinks=True, ignore=shutil.ignore_patterns("work", ".nextflow*"))
-    newp = svc.register_from_dir(db, dest, source_type="local", source_url=f"duplicate:{p.slug}", name=body.name,
-                                 category=p.category)
+    graph = _studio_graph(db, p, v)
+    if graph is not None:
+        # a Studio pipeline: copy its workflow too, so the copy can be changed in Studio and published as new versions
+        w = StudioWorkflow(name=body.name, description=p.description, graph=graph, created_by=user.username,
+                           visibility=body.visibility)
+        db.add(w)
+        db.flush()
+        (dest / STUDIO_SNAPSHOT).write_text(json.dumps({"workflow_id": w.id, "graph": graph}))
+        newp = svc.register_from_dir(db, dest, source_type="studio", source_url=f"duplicate:{p.slug}", name=body.name,
+                                     category=p.category, version="v1", studio_workflow_id=w.id)
+    else:
+        newp = svc.register_from_dir(db, dest, source_type="local", source_url=f"duplicate:{p.slug}", name=body.name,
+                                     category=p.category)
     newp.owner, newp.visibility = user.username, body.visibility
     newp.description = p.description
     for pr in p.presets:
@@ -216,6 +230,57 @@ def duplicate(pid: str, body: DuplicateIn, user: User = Depends(require_scientis
     audit(db, user.username, "pipeline.duplicate", p.slug, new=newp.slug)
     db.commit()
     return _summary(db, newp, user)
+
+
+# --------------------------------------------------------------------------- map
+def _naive(t):
+    return t.replace(tzinfo=None) if t is not None and t.tzinfo else t
+
+
+def _studio_graph(db: Session, p: Pipeline, v: PipelineVersion) -> dict | None:
+    if p.source_type != "studio":
+        return None
+    snap = Path(v.path) / STUDIO_SNAPSHOT
+    if snap.is_file():
+        try:
+            return json.loads(snap.read_text()).get("graph")
+        except (OSError, ValueError):
+            return None
+    w = db.get(StudioWorkflow, p.studio_workflow_id) if p.studio_workflow_id else None
+    return w.graph if w else None
+
+
+@router.get("/{pid}/map")
+def pipeline_map(pid: str, version_id: str | None = None, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    """The pipeline's structure for one version: its Pipeline Studio graph, or a map read from its Nextflow code."""
+    p = get_pipeline(db, pid, user)
+    if p.kind == "template" or not p.versions:
+        return {"kind": "none", "reason": "Not installed on this controller"}
+    v = get_version(p, version_id)
+    base = {"version_id": v.id, "version": v.version}
+    if p.source_type == "studio" and p.studio_workflow_id:
+        w = db.get(StudioWorkflow, p.studio_workflow_id)
+        nums = [int(x.version[1:]) for x in p.versions if x.version[:1] == "v" and x.version[1:].isdigit()]
+        studio = {"workflow_id": p.studio_workflow_id, "workflow_exists": w is not None, "graph": None, "exact": False,
+                  "can_view_workflow": bool(w) and access.can_view(user, w.created_by, w.visibility),
+                  "can_edit": bool(w) and access.can_edit(user, w.created_by),
+                  "next_version": f"v{max(nums, default=len(p.versions)) + 1}", "latest": v.id == p.versions[-1].id}
+        snap = Path(v.path) / STUDIO_SNAPSHOT
+        if snap.is_file():
+            try:
+                studio.update(graph=json.loads(snap.read_text()).get("graph"), exact=True)
+            except (OSError, ValueError):
+                pass
+        elif w is not None and studio["latest"] and _naive(w.updated_at) <= _naive(v.created_at) + timedelta(seconds=5):
+            studio.update(graph=w.graph, exact=True)  # published before snapshots were kept, workflow unchanged since
+        out = {**base, "kind": "studio", "studio": studio}
+        if studio["graph"] is None:
+            out["nextflow"] = nf_map.build_map(v.path)  # older version: read it from its generated code
+        return out
+    m = nf_map.build_map(v.path)
+    if not m.get("ok"):
+        return {**base, "kind": "none", "reason": m.get("reason")}
+    return {**base, "kind": "nextflow", "nextflow": m}
 
 
 # --------------------------------------------------------------------------- versions
