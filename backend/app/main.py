@@ -21,6 +21,7 @@ from .models import Node, Pipeline, User
 from .routers import assistant, auth, cluster, data, experiments, explore, pipelines, runs, studio, system
 from .security import hash_secret
 from .services import cluster as cluster_svc
+from .services import data_roots
 from .services import hostinfo
 from .services import pipelines as pipeline_svc
 from .services import runner
@@ -104,6 +105,7 @@ async def lifespan(app: FastAPI):
     s = get_settings()
     migrate()
     bootstrap()
+    data_roots.reload()
     if s.environment != "test":
         stats = runner.reconcile()
         print(f"[biocompute] run reconciliation: {stats}", file=sys.stderr)

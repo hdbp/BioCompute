@@ -50,7 +50,7 @@ def dashboard(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
                        "message": f"{nf.get('detail')}. Nextflow pipelines cannot be launched; the BioCompute native engine is used for bcflow pipelines."})
     if not fs.roots():
         alerts.append({"level": "warning", "title": "No data roots configured",
-                       "message": "Set BIOCOMPUTE_DATA_ROOTS to allow browsing input data and writing results."})
+                       "message": "Add the folders that hold your data in Settings, Controller, Data folders (or set BIOCOMPUTE_DATA_ROOTS)."})
     for r in db.query(Run).filter(Run.status.in_(("failed", "lost"))).order_by(Run.finished_at.desc()).limit(3).all():
         if r.finished_at and datetime.now(timezone.utc) - (r.finished_at if r.finished_at.tzinfo else r.finished_at.replace(tzinfo=timezone.utc)) < timedelta(days=2):
             alerts.append({"level": "error", "title": f"Run {r.name} {r.status}", "message": (r.error or "")[:300], "run_id": r.id})

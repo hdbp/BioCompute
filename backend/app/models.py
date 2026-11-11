@@ -171,6 +171,17 @@ class StudioWorkflow(TimestampMixin, Base):
     created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 
+class DataRoot(TimestampMixin, Base):
+    """A data folder on the controller added by an administrator in Settings (in addition to BIOCOMPUTE_DATA_ROOTS)."""
+    __tablename__ = "data_roots"
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    path: Mapped[str] = mapped_column(Text)
+    restricted: Mapped[bool] = mapped_column(Boolean, default=True)
+    writable: Mapped[bool] = mapped_column(Boolean, default=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
 class AssistantResult(TimestampMixin, Base):
     """Every assistant answer, so a pipeline that was paid for is never lost (only proposals; nothing here runs)."""
     __tablename__ = "assistant_results"

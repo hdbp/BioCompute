@@ -56,14 +56,18 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 
 ### data
 
+- `DELETE /api/datasets/roots/{name}`
 - `GET    /api/datasets`
 - `GET    /api/datasets/browse`
 - `GET    /api/datasets/download`
 - `GET    /api/datasets/preview`
 - `GET    /api/datasets/roots`
+- `GET    /api/datasets/roots/check`
 - `GET    /api/datasets/search`
+- `PATCH  /api/datasets/roots/{name}`
 - `POST   /api/datasets`
 - `POST   /api/datasets/mkdir`
+- `POST   /api/datasets/roots`
 
 ### explore
 

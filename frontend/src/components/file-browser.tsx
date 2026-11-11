@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge, Checkbox, Empty, Skeleton } from "@/components/ui/misc";
 import { toast } from "sonner";
+import { MissingDataHint } from "@/components/missing-data-hint";
 
 export type PickMode = "file" | "files" | "dir";
 
@@ -173,6 +174,7 @@ export function FileBrowser({ open, onOpenChange, mode, onPick, title, start, ki
           </div>
         </div>
         <DialogFooter>
+          <MissingDataHint className="mr-auto self-center" onNavigate={() => onOpenChange(false)} />
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button variant="primary" onClick={confirm} disabled={mode !== "dir" && !selected.length}>
             {mode === "dir" ? "Use this folder" : `Add ${selected.length || ""} file${selected.length === 1 ? "" : "s"}`}

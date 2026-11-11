@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Dataset, User
-from ..security import audit, require_scientist, require_viewer
-from ..services import fs
+from ..security import audit, require_admin, require_scientist, require_viewer
+from ..services import data_roots, fs
 
 router = APIRouter(prefix="/api/datasets", tags=["data"])
 
@@ -17,6 +17,50 @@ router = APIRouter(prefix="/api/datasets", tags=["data"])
 @router.get("/roots")
 def list_roots(_: User = Depends(require_viewer)):
     return [r.public() for r in fs.roots().values()]
+
+
+class RootIn(BaseModel):
+    name: str
+    path: str
+    restricted: bool = True
+    writable: bool = False
+    description: str = ""
+
+
+class RootPatch(BaseModel):
+    restricted: bool | None = None
+    writable: bool | None = None
+    description: str | None = None
+
+
+@router.get("/roots/check")
+def check_root(path: str, _: User = Depends(require_admin)):
+    """Is this controller folder usable as a data folder? (exists, readable, not a system/hidden/state folder)."""
+    return data_roots.check_path(path)
+
+
+@router.post("/roots")
+def add_root(body: RootIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    r = data_roots.create(db, body.name, body.path, body.restricted, body.writable, body.description, admin.username)
+    audit(db, admin.username, "data_root.add", r.name, path=r.path, restricted=r.restricted, writable=r.writable)
+    db.commit()
+    return fs.roots()[r.name].public() | {"path": r.path}
+
+
+@router.patch("/roots/{name}")
+def edit_root(name: str, body: RootPatch, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    r = data_roots.update(db, name, body.restricted, body.writable, body.description)
+    audit(db, admin.username, "data_root.update", name, **body.model_dump(exclude_none=True))
+    db.commit()
+    return fs.roots()[r.name].public() | {"path": r.path}
+
+
+@router.delete("/roots/{name}")
+def remove_root(name: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    data_roots.delete(db, name)
+    audit(db, admin.username, "data_root.remove", name)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/browse")

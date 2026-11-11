@@ -151,6 +151,15 @@ BIOCOMPUTE_MAX_CONCURRENT_RUNS=4
 # BIOCOMPUTE_NEXTFLOW_BIN=/home/YOU/.local/bin/nextflow
 ```
 
+You can also skip `BIOCOMPUTE_DATA_ROOTS` and add folders after the first login, in
+**Settings → Controller → Data folders → Add folder**. Folders added there are stored in the database. They take effect
+at once, and they can be made restricted or writable, or removed (only the folder's registration is removed;
+the files stay on disk). BioCompute refuses system folders, a whole home folder, hidden folders such as `~/.ssh`,
+and its own state folder.
+
+The folders must be on the computer running BioCompute (the controller). If your data sits on another machine,
+mount it on the controller first (NFS/SMB share, external drive) and add the mount point.
+
 Before starting, make sure:
 
 * every `path` in `BIOCOMPUTE_DATA_ROOTS` exists;

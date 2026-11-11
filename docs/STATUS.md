@@ -78,6 +78,12 @@ These limits apply to everything below.
 | Assistant via Anthropic API (`claude-opus-5-5`, structured outputs, server-side fallback) | Implemented; request accepted by the API up to authentication (no key here), so **no real completion tested** |
 | Assistant via OpenAI API (structured outputs) | Implemented, **untested** (API not reachable from the dev sandbox) |
 
+## Data folders
+
+| Feature | Status |
+|---|---|
+| Admins add/edit/remove data folders in Settings (DB-backed, merged with `BIOCOMPUTE_DATA_ROOTS`); live check of the path; system, home, hidden and state folders refused; restricted by default | Demonstrated (`test_data_roots.py`, browser) |
+
 ## Data Explorer
 
 | Feature | Status |

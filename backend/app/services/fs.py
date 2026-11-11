@@ -44,6 +44,7 @@ class Root:
     restricted: bool
     writable: bool
     description: str = ""
+    source: str = "settings"  # "settings" (BIOCOMPUTE_DATA_ROOTS) or "ui" (added in Settings)
 
     def public(self) -> dict[str, Any]:
         return {
@@ -52,7 +53,17 @@ class Root:
             "writable": self.writable,
             "description": self.description,
             "exists": self.path.is_dir(),
+            "source": self.source,
         }
+
+
+_ui_roots: dict[str, Root] = {}
+
+
+def set_ui_roots(items: list[Root]) -> None:
+    """Folders added in Settings (stored in the database); BIOCOMPUTE_DATA_ROOTS wins on a name clash."""
+    global _ui_roots
+    _ui_roots = {r.name: r for r in items}
 
 
 def roots() -> dict[str, Root]:
@@ -68,6 +79,8 @@ def roots() -> dict[str, Root]:
             writable=bool(r.get("writable", False)),
             description=str(r.get("description", "")),
         )
+    for name, r in _ui_roots.items():
+        out.setdefault(name, r)
     return out
 
 

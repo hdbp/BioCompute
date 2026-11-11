@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { TableView } from "@/components/explore/table-view";
+import { MissingDataHint } from "@/components/missing-data-hint";
 import { trackId, useExplorer, type TrackRef } from "@/components/explore/store";
 
 const GenomeBrowser = lazy(() => import("@/components/explore/genome-browser"));
@@ -148,6 +149,7 @@ function FileTree({ roots, dir, selected, onDir, onFile }: {
           );
         })}
       </ul>
+      <MissingDataHint className="border-t border-line px-3 py-2" />
     </>
   );
 }

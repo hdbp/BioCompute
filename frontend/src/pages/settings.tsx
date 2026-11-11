@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, CircleSlash, Lock, RefreshCw, UserPlus } from "lucide-react";
+import { CheckCircle2, CircleSlash, RefreshCw, UserPlus } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
 import { AssistantSettings } from "@/components/assistant-settings";
+import { DataRootsPanel } from "@/components/data-roots";
 import { cn, when } from "@/lib/utils";
 import { KV, PageHeader } from "@/components/page";
 import { Badge, Panel, PanelHeader, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/misc";
@@ -18,7 +19,7 @@ import { useTheme } from "@/hooks/theme";
 interface SettingsData {
   site_name: string; environment: string; database: string; pipelines_dir: string; runs_dir: string; max_concurrent_runs: number;
   allow_custom_code_modules: boolean; enable_demo_engine: boolean;
-  data_roots: { name: string; path: string; restricted: boolean; writable: boolean; description: string; exists: boolean }[];
+  data_roots: { name: string; path: string; restricted: boolean; writable: boolean; description: string; exists: boolean; source?: "settings" | "ui" }[];
   software: Record<string, string | null | { available: boolean; version?: string; detail?: string; path?: string }>;
   discovery: { authorized_cidrs: string[]; mdns: boolean; tailscale: boolean; htcondor: boolean; neighbors: boolean };
   ui: { default_output_dir?: string | null };
@@ -48,24 +49,7 @@ export default function SettingsPage() {
         <TabsContent value="system">
           {d && (
             <div className="grid gap-5 lg:grid-cols-2">
-              <Panel>
-                <PanelHeader title="Data roots" description="The only folders users can browse. Restricted roots never leave the controller's site." />
-                <div className="divide-y divide-line/60">
-                  {d.data_roots.length === 0 && <p className="p-4 text-[13px] text-bad">No data roots configured. Set BIOCOMPUTE_DATA_ROOTS.</p>}
-                  {d.data_roots.map((r) => (
-                    <div key={r.name} className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{r.name}</span>
-                        {r.restricted && <Badge tone="wait"><Lock className="size-3" />restricted</Badge>}
-                        <Badge>{r.writable ? "writable" : "read-only"}</Badge>
-                        {!r.exists && <Badge tone="bad">missing on disk</Badge>}
-                      </div>
-                      <p className="font-mono text-[12px] text-muted mt-0.5">{r.path}</p>
-                      {r.description && <p className="text-xs text-muted">{r.description}</p>}
-                    </div>
-                  ))}
-                </div>
-              </Panel>
+              <DataRootsPanel roots={d.data_roots} admin={admin} />
               <Panel className="p-4">
                 <dl>
                   <KV k="Site" v={d.site_name} />

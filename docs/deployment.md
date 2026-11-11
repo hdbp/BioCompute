@@ -22,7 +22,7 @@ sudoedit /etc/biocompute/biocompute.env
 Edit at least these settings:
 
 * `POSTGRES_PASSWORD` and the matching `BIOCOMPUTE_DATABASE_URL`;
-* `BIOCOMPUTE_DATA_ROOTS`, a JSON list of roots. Raw data should be `restricted: true, writable: false`.
+* `BIOCOMPUTE_DATA_ROOTS`, a JSON list of roots. Raw data should be `restricted: true, writable: false`. Admins can add more in Settings → Data folders (stored in the database; system, hidden, home and state folders are refused).
   Make the output area writable and add it to `ReadWritePaths=` in `/etc/systemd/system/biocompute.service`;
 * `BIOCOMPUTE_SITE_NAME`, the data-locality domain of this controller (e.g. `lab`);
 * `BIOCOMPUTE_DISCOVERY_AUTHORIZED_CIDRS`, the networks where active probing is permitted.
