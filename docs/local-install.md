@@ -72,6 +72,27 @@ cd BioCompute
 
 ---
 
+## Recommended: one-step install
+
+```bash
+./install.sh --data /path/to/raw/data
+```
+
+* **What it does:**
+  * installs the Python environment and builds the web interface;
+  * writes `~/.config/biocompute/biocompute.env`, linked as `backend/.env` so the command-line tools use it too;
+  * installs and starts the `biocompute` systemd service. The service runs as you, starts at boot, and leaves
+    running analyses alone on restarts.
+  * If Tailscale is running, it publishes BioCompute with `tailscale serve` and sets `BIOCOMPUTE_PUBLIC_URL`
+    to that address.
+* **Data and database:** your database and state go to `~/.local/share/biocompute`, results to
+  `~/biocompute-results`. A database from an earlier `scripts/dev.sh` (`var/biocompute.db`) is reused, so
+  accounts and pipelines are kept.
+* **Sudo:** asked for only to install the system service and run `tailscale serve`. `--user` installs a user
+  service instead, with no sudo.
+
+The rest of this page describes doing the same by hand.
+
 ## Option A: demo in one command
 
 ```bash

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Advanced: BioCompute controller as a dedicated "biocompute" system account with PostgreSQL/nginx in Docker.
+# Most labs should use ./install.sh in the repository root instead (one step, runs as you).
 # Install the native BioCompute controller on a Linux workstation (run with sudo).
 # Creates a 'biocompute' service user, a virtualenv, the systemd unit, and builds the UI.
 set -euo pipefail

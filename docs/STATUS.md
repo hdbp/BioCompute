@@ -87,6 +87,12 @@ These limits apply to everything below.
 | New accounts after the first: requests from the sign-in page approved by an admin (role chosen), single-use invite links with role and expiry, on/off switch | Demonstrated (`test_account_requests_and_invites`, three-person browser test) |
 | Per-user pipelines, Studio workflows and modules: private by default, shared with the lab on request; others can view/run/copy but not change; admins see all; per-user favorites; sharing a workflow shares its modules and pipeline | Demonstrated (`test_ownership.py`, two-user browser test); migration keeps existing items shared |
 
+## Installation
+
+| Feature | Status |
+|---|---|
+| `./install.sh`: prerequisites, venv, UI build, config, `--data` folders, systemd service as the user, health check, `tailscale serve` + public URL, re-run updates, `--uninstall` | Tested end to end as a normal user with `systemctl`/`sudo`/`tailscale` stand-ins (no systemd in the dev sandbox); generated unit passes `systemd-analyze verify`. **Not yet run on a real systemd host or a real tailnet.** |
+
 ## First run
 
 | Feature | Status |

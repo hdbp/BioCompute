@@ -35,6 +35,24 @@ docs/               architecture, deployment, agent, Studio, troubleshooting, AP
 docker-compose.yml  PostgreSQL + nginx (the controller itself runs natively; see below)
 ```
 
+## Install (one step)
+
+On the Linux computer that holds your data, as your normal user:
+
+```bash
+git clone https://github.com/hdbp/BioCompute.git && cd BioCompute
+./install.sh                     # optionally: --data /path/to/raw/data  (repeatable)
+```
+
+It checks prerequisites (Python 3.11+, Node 18+). It then installs everything, writes the settings, and sets
+up and starts a **systemd service** that runs as you and starts at boot. If Tailscale is running, it also
+publishes BioCompute on your tailnet (`https://<computer>.<tailnet>.ts.net`). Finally it prints the address
+to open; the first visit asks you to create the administrator account.
+
+* `git pull && ./install.sh` updates.
+* `./install.sh --uninstall` removes the service and keeps your data.
+* `./install.sh --help` lists the options (port, user service without sudo, no tailnet).
+
 ## Quick start (development, one machine)
 
 Requirements: Python 3.11+, Node 20+, git. Nextflow and Java 17+ are optional; without them, only
@@ -58,7 +76,9 @@ A first walkthrough:
 3. **Run analysis**: validate, then launch. The run page streams the log and shows per-process progress.
 4. **Results**: browse `qc_report.html` and `qc_summary.tsv`. Provenance is written next to the outputs.
 
-## Production deployment (lab workstation)
+## Production deployment with PostgreSQL and nginx (advanced)
+
+`./install.sh` (above) is the recommended install. The setup below adds PostgreSQL and an nginx front end in Docker.
 
 The controller runs **natively** under systemd because Nextflow needs the host's Java, container
 runtime, scheduler client and data directories. PostgreSQL and the nginx front end run in Docker Compose.
