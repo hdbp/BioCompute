@@ -92,11 +92,42 @@ say "Installing the Python environment"
 "$backend/.venv/bin/pip" install -q -r "$backend/requirements.txt"
 
 say "Building the web interface"
+# Downloads from the npm registry: prefer IPv4 (a common cause of ETIMEDOUT is IPv6 that is configured but not
+# routed), long timeouts and retries for slow links, and three whole attempts.
+npm_install() {
+  local i
+  for i in 1 2 3; do
+    if (cd "$frontend" && NODE_OPTIONS="--dns-result-order=ipv4first ${NODE_OPTIONS:-}" \
+        npm ci --no-audit --no-fund --loglevel=error --fetch-retries=5 --fetch-retry-mintimeout=20000 \
+               --fetch-retry-maxtimeout=120000 --fetch-timeout=600000); then
+      return 0
+    fi
+    [ "$i" -lt 3 ] && { warn "Downloading the web interface's packages failed (attempt $i of 3); trying again"; sleep $((i * 10)); }
+  done
+  return 1
+}
 stamp="$frontend/node_modules/.biocompute-lock"
+ui_ready=yes
 if [ ! -d "$frontend/node_modules" ] || ! cmp -s "$frontend/package-lock.json" "$stamp"; then
-  (cd "$frontend" && npm ci --no-audit --no-fund --loglevel=error) && cp "$frontend/package-lock.json" "$stamp"
+  if npm_install; then
+    cp "$frontend/package-lock.json" "$stamp"
+  else
+    ui_ready=no
+  fi
 fi
-(cd "$frontend" && npm run --silent build >/dev/null) || die "Building the web interface failed (run: cd frontend && npm run build)"
+if [ "$ui_ready" = yes ]; then
+  (cd "$frontend" && npm run --silent build >/dev/null) || die "Building the web interface failed (run: cd frontend && npm run build)"
+elif [ -f "$frontend/dist/index.html" ]; then
+  warn "Could not download the packages needed to rebuild the web interface; keeping the one built earlier."
+  warn "Run ./install.sh again when the network works to get the newest interface."
+else
+  die "Could not download the web interface's packages from $(npm config get registry 2>/dev/null || echo the npm registry).
+    This computer could not reach it in time. Things to check:
+      - internet access:  curl -sI https://registry.npmjs.org/ | head -1
+      - a proxy, if your network needs one:  npm config set proxy http://PROXY:PORT && npm config set https-proxy http://PROXY:PORT
+      - or try again later (the download is about 100 MB the first time)
+    Then run ./install.sh again."
+fi
 
 # ----------------------------------------------------------------------------- configuration
 # One file, used by the service and by `python -m app.cli`: backend/.env (or a symlink to ~/.config/biocompute).
