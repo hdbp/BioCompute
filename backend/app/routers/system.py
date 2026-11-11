@@ -27,7 +27,7 @@ def health(db: Session = Depends(get_db)):
 
 
 @router.get("/dashboard")
-def dashboard(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
+def dashboard(user: User = Depends(require_viewer), db: Session = Depends(get_db)):
     cluster.refresh_states(db)
     db.commit()
     nodes = db.query(Node).all()
@@ -44,6 +44,12 @@ def dashboard(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
     active_runs = db.query(Run).filter(Run.status.in_(("running", "cancelling", "queued", "preflight"))).order_by(Run.created_at.desc()).all()
     recent = db.query(Run).order_by(Run.created_at.desc()).limit(8).all()
     alerts = []
+    if user.role == "admin":
+        from ..services import accounts
+        n = len(accounts.pending(db))
+        if n:
+            alerts.append({"level": "warning", "title": f"{n} account request{'s' if n > 1 else ''} waiting",
+                           "message": "Approve or decline them in Settings, Users."})
     nf = tools.nextflow_status()
     if not nf["available"]:
         alerts.append({"level": "warning", "title": "Nextflow not available",

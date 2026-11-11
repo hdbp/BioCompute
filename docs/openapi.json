@@ -341,6 +341,449 @@
                 }
             }
         },
+        "/api/auth/signup": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Signup Options",
+                "description": "What the sign-in page may offer (no authentication).",
+                "operationId": "signup_options_api_auth_signup_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/request-account": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Request Account",
+                "operationId": "request_account_api_auth_request_account_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AccountRequestIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/requests": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Account Requests",
+                "operationId": "account_requests_api_auth_requests_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/auth/requests/{user_id}/approve": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Approve Request",
+                "operationId": "approve_request_api_auth_requests__user_id__approve_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "User Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApproveIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/requests/{user_id}": {
+            "delete": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Decline Request",
+                "operationId": "decline_request_api_auth_requests__user_id__delete",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "User Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/account-settings": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get Account Settings",
+                "operationId": "get_account_settings_api_auth_account_settings_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Put Account Settings",
+                "operationId": "put_account_settings_api_auth_account_settings_put",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AccountSettingsIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/auth/invites": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List Invites",
+                "operationId": "list_invites_api_auth_invites_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Create Invite",
+                "operationId": "create_invite_api_auth_invites_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/InviteIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/auth/invites/{invite_id}": {
+            "delete": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Revoke Invite",
+                "operationId": "revoke_invite_api_auth_invites__invite_id__delete",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "invite_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Invite Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/invites/check": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Check Invite",
+                "operationId": "check_invite_api_auth_invites_check_get",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Token"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/invites/accept": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Accept Invite",
+                "operationId": "accept_invite_api_auth_invites_accept_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/InviteAcceptIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TokenOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/pipelines": {
             "get": {
                 "tags": [
@@ -7042,6 +7485,42 @@
     },
     "components": {
         "schemas": {
+            "AccountRequestIn": {
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "title": "Username"
+                    },
+                    "password": {
+                        "type": "string",
+                        "title": "Password"
+                    },
+                    "note": {
+                        "type": "string",
+                        "title": "Note",
+                        "default": ""
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "username",
+                    "password"
+                ],
+                "title": "AccountRequestIn"
+            },
+            "AccountSettingsIn": {
+                "properties": {
+                    "requests": {
+                        "type": "boolean",
+                        "title": "Requests"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "requests"
+                ],
+                "title": "AccountSettingsIn"
+            },
             "AgentEnroll": {
                 "properties": {
                     "token": {
@@ -7327,6 +7806,17 @@
                     "preset"
                 ],
                 "title": "AllocationOut"
+            },
+            "ApproveIn": {
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "title": "Role",
+                        "default": "scientist"
+                    }
+                },
+                "type": "object",
+                "title": "ApproveIn"
             },
             "AskIn": {
                 "properties": {
@@ -8017,6 +8507,50 @@
                     "path"
                 ],
                 "title": "ImportLocal"
+            },
+            "InviteAcceptIn": {
+                "properties": {
+                    "token": {
+                        "type": "string",
+                        "title": "Token"
+                    },
+                    "username": {
+                        "type": "string",
+                        "title": "Username"
+                    },
+                    "password": {
+                        "type": "string",
+                        "title": "Password"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "token",
+                    "username",
+                    "password"
+                ],
+                "title": "InviteAcceptIn"
+            },
+            "InviteIn": {
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "title": "Role",
+                        "default": "scientist"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "title": "Days",
+                        "default": 7
+                    },
+                    "note": {
+                        "type": "string",
+                        "title": "Note",
+                        "default": ""
+                    }
+                },
+                "type": "object",
+                "title": "InviteIn"
             },
             "ItemIn": {
                 "properties": {

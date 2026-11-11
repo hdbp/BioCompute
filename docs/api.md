@@ -8,15 +8,27 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 
 ### auth
 
+- `DELETE /api/auth/invites/{invite_id}`
+- `DELETE /api/auth/requests/{user_id}`
 - `DELETE /api/auth/users/{user_id}`
+- `GET    /api/auth/account-settings`
 - `GET    /api/auth/audit`
+- `GET    /api/auth/invites`
+- `GET    /api/auth/invites/check`
 - `GET    /api/auth/me`
+- `GET    /api/auth/requests`
 - `GET    /api/auth/setup`
+- `GET    /api/auth/signup`
 - `GET    /api/auth/users`
+- `POST   /api/auth/invites`
+- `POST   /api/auth/invites/accept`
 - `POST   /api/auth/login`
 - `POST   /api/auth/password`
+- `POST   /api/auth/request-account`
+- `POST   /api/auth/requests/{user_id}/approve`
 - `POST   /api/auth/setup`
 - `POST   /api/auth/users`
+- `PUT    /api/auth/account-settings`
 
 ### pipelines
 

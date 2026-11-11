@@ -8,6 +8,7 @@ import { can, useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
 import { AssistantSettings } from "@/components/assistant-settings";
 import { DataRootsPanel } from "@/components/data-roots";
+import { UserOnboarding } from "@/components/user-onboarding";
 import { cn, when } from "@/lib/utils";
 import { KV, PageHeader } from "@/components/page";
 import { Badge, Panel, PanelHeader, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/misc";
@@ -99,7 +100,7 @@ export default function SettingsPage() {
             <PasswordForm />
           </div>
         </TabsContent>
-        {admin && <TabsContent value="users"><Users /></TabsContent>}
+        {admin && <TabsContent value="users"><UserOnboarding /><Users /></TabsContent>}
         {admin && <TabsContent value="audit"><Audit /></TabsContent>}
       </Tabs>
     </>

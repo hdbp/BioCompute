@@ -148,3 +148,50 @@ def test_admin_with_own_password_is_not_offered_setup(fresh):
         "db.commit()\n")
     s = fresh(prepare)
     assert s.call("GET", "/api/auth/setup")[1] == {"needed": False}
+
+
+# --------------------------------------------------------------------------- new accounts after the first one
+def test_account_requests_and_invites(client, auth):
+    # someone asks for an account from the sign-in page
+    assert client.get("/api/auth/signup").json() == {"requests": True}
+    r = client.post("/api/auth/request-account", json={"username": "newbie", "password": "newbie-password-1", "note": "Postdoc, ChIP-seq"})
+    assert r.status_code == 200
+    assert client.post("/api/auth/request-account", json={"username": "newbie", "password": "another-password-1"}).status_code == 409
+    # cannot sign in yet, and says why only to whoever knows the password
+    assert client.post("/api/auth/login", json={"username": "newbie", "password": "newbie-password-1"}).status_code == 403
+    assert client.post("/api/auth/login", json={"username": "newbie", "password": "wrong-password-1"}).status_code == 401
+    assert not any(u["username"] == "newbie" for u in client.get("/api/auth/users", headers=auth).json())
+    reqs = client.get("/api/auth/requests", headers=auth).json()
+    req = next(x for x in reqs if x["username"] == "newbie")
+    assert req["note"] == "Postdoc, ChIP-seq"
+    assert any("account request" in a["title"] for a in client.get("/api/dashboard", headers=auth).json()["alerts"])
+    approved = client.post(f"/api/auth/requests/{req['id']}/approve", headers=auth, json={"role": "scientist"}).json()
+    assert approved["role"] == "scientist" and approved["is_active"]
+    assert client.post("/api/auth/login", json={"username": "newbie", "password": "newbie-password-1"}).status_code == 200
+    # declined requests disappear; turned-off requests are refused
+    client.post("/api/auth/request-account", json={"username": "spammer", "password": "spammer-password"})
+    sp = next(x for x in client.get("/api/auth/requests", headers=auth).json() if x["username"] == "spammer")
+    client.delete(f"/api/auth/requests/{sp['id']}", headers=auth)
+    assert client.post("/api/auth/login", json={"username": "spammer", "password": "spammer-password"}).status_code == 401
+    client.put("/api/auth/account-settings", headers=auth, json={"requests": False})
+    assert client.post("/api/auth/request-account", json={"username": "late", "password": "late-password-1"}).status_code == 403
+    client.put("/api/auth/account-settings", headers=auth, json={"requests": True})
+
+    # invite link: single use, role chosen by the admin
+    inv = client.post("/api/auth/invites", headers=auth, json={"role": "viewer", "days": 3}).json()
+    token = inv["token"]
+    assert client.get("/api/auth/invites/check", params={"token": token}).json()["role"] == "viewer"
+    assert "token" not in client.get("/api/auth/invites", headers=auth).json()[0]
+    t = client.post("/api/auth/invites/accept", json={"token": token, "username": "guest", "password": "guest-password-1"}).json()
+    assert t["user"]["role"] == "viewer" and t["access_token"]
+    assert client.post("/api/auth/invites/accept", json={"token": token, "username": "guest2", "password": "guest-password-1"}).status_code == 410
+    assert client.get("/api/auth/invites/check", params={"token": "made-up"}).status_code == 404
+    assert next(i for i in client.get("/api/auth/invites", headers=auth).json() if i["id"] == inv["id"])["status"] == "used"
+    # a revoked invite stops working
+    inv2 = client.post("/api/auth/invites", headers=auth, json={"role": "scientist"}).json()
+    client.delete(f"/api/auth/invites/{inv2['id']}", headers=auth)
+    assert client.get("/api/auth/invites/check", params={"token": inv2["token"]}).status_code == 404
+    # only admins manage invites and requests
+    viewer = {"Authorization": f"Bearer {t['access_token']}"}
+    assert client.post("/api/auth/invites", headers=viewer, json={"role": "admin"}).status_code == 403
+    assert client.get("/api/auth/requests", headers=viewer).status_code == 403

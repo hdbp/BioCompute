@@ -13,18 +13,128 @@ export const GETTING_STARTED_KEY = "biocompute.getting-started";
 
 export default function LoginPage() {
   const setup = useQuery({ queryKey: ["setup"], queryFn: () => api.get<SetupStatus>("/api/auth/setup"), retry: 1 });
+  const invite = window.location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)/)?.[1] ?? null;
+  const [mode, setMode] = useState<"signin" | "request">("signin");
   return (
     <div className="grid min-h-full place-items-center px-4 py-10">
       <div className="w-full max-w-sm">
         <CoreLattice total={32} allocated={24} busyPercent={30} size="sm" className="mb-6" />
-        {setup.isLoading ? null : setup.data?.needed ? <SetupForm s={setup.data} onDone={() => setup.refetch()} /> : <SignIn />}
+        {setup.isLoading ? null
+          : setup.data?.needed ? <SetupForm s={setup.data} onDone={() => setup.refetch()} />
+          : invite ? <InviteForm token={invite} />
+          : mode === "request" ? <RequestForm onBack={() => setMode("signin")} />
+          : <SignIn onRequest={() => setMode("request")} />}
       </div>
     </div>
   );
 }
 
-function SignIn() {
+const leaveInvitePath = () => { if (window.location.pathname.startsWith("/invite/")) window.history.replaceState(null, "", "/"); };
+
+/** Someone who was sent an invite link chooses their username and password. */
+function InviteForm({ token }: { token: string }) {
+  const setSession = useAuth((st) => st.setSession);
+  const check = useQuery({ queryKey: ["invite", token], queryFn: () => api.get<{ role: string; expires_at: string; invited_by: string }>(`/api/auth/invites/check?token=${encodeURIComponent(token)}`), retry: false });
+  const [f, setF] = useState({ username: "", password: "", repeat: "" });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ok = /^[A-Za-z0-9_.-]{2,80}$/.test(f.username) && f.password.length >= 10 && f.password === f.repeat;
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ok) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await api.post<{ access_token: string; user: User }>("/api/auth/invites/accept", { token, username: f.username, password: f.password });
+      leaveInvitePath();
+      setSession(r.access_token, r.user);
+    } catch (err) { setError(errMsg(err)); } finally { setBusy(false); }
+  };
+  if (check.isLoading) return null;
+  if (check.isError) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold">Invite link</h1>
+        <p className="text-[13.5px] text-bad">{errMsg(check.error)}</p>
+        <Button variant="secondary" onClick={() => { leaveInvitePath(); window.location.reload(); }}>Go to sign in</Button>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold">Join BioCompute</h1>
+        <p className="mt-1 text-[13.5px] text-muted">{check.data!.invited_by} invited you as a <b className="font-medium text-text">{check.data!.role}</b>. Choose your username and password.</p>
+      </div>
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Username" hint="Letters, digits, '.', '_' or '-'."><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} autoComplete="username" required autoFocus /></Field>
+        <Field label="Password" hint="At least 10 characters." error={f.password && f.password.length < 10 ? "At least 10 characters" : null}>
+          <Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" required />
+        </Field>
+        <Field label="Repeat password" error={f.repeat && f.repeat !== f.password ? "The passwords do not match" : null}>
+          <Input type="password" value={f.repeat} onChange={(e) => setF({ ...f, repeat: e.target.value })} autoComplete="new-password" required />
+        </Field>
+        {error && <p className="text-[13px] text-bad" role="alert">{error}</p>}
+        <Button type="submit" variant="primary" size="lg" className="w-full" loading={busy} disabled={!ok}>Create account and sign in</Button>
+      </form>
+    </>
+  );
+}
+
+/** Ask for an account; an administrator approves it with a role. */
+function RequestForm({ onBack }: { onBack: () => void }) {
+  const [f, setF] = useState({ username: "", password: "", repeat: "", note: "" });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const ok = /^[A-Za-z0-9_.-]{2,80}$/.test(f.username) && f.password.length >= 10 && f.password === f.repeat;
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ok) return;
+    setBusy(true); setError(null);
+    try {
+      await api.post("/api/auth/request-account", { username: f.username, password: f.password, note: f.note });
+      setSent(true);
+    } catch (err) { setError(errMsg(err)); } finally { setBusy(false); }
+  };
+  if (sent) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold">Request sent</h1>
+        <p className="text-[13.5px] text-muted">An administrator has to approve your account (and choose what you can do) before you can sign in as <b className="font-medium text-text">{f.username}</b> with the password you chose.</p>
+        <Button variant="secondary" onClick={onBack}>Back to sign in</Button>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold">Request an account</h1>
+        <p className="mt-1 text-[13.5px] text-muted">Choose a username and password. You can sign in once an administrator approves the request.</p>
+      </div>
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Username" hint="Letters, digits, '.', '_' or '-'."><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} autoComplete="username" required autoFocus /></Field>
+        <Field label="Password" hint="At least 10 characters." error={f.password && f.password.length < 10 ? "At least 10 characters" : null}>
+          <Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" required />
+        </Field>
+        <Field label="Repeat password" error={f.repeat && f.repeat !== f.password ? "The passwords do not match" : null}>
+          <Input type="password" value={f.repeat} onChange={(e) => setF({ ...f, repeat: e.target.value })} autoComplete="new-password" required />
+        </Field>
+        <Field label="Who are you? (optional)" hint="Helps the administrator: your name, group or project.">
+          <Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. Ana, postdoc, ChIP-seq project" />
+        </Field>
+        {error && <p className="text-[13px] text-bad" role="alert">{error}</p>}
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" onClick={onBack}>Back</Button>
+          <Button type="submit" variant="primary" className="flex-1" loading={busy} disabled={!ok}>Send request</Button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+function SignIn({ onRequest }: { onRequest: () => void }) {
   const setSession = useAuth((s) => s.setSession);
+  const signup = useQuery({ queryKey: ["signup"], queryFn: () => api.get<{ requests: boolean }>("/api/auth/signup"), retry: 1 });
   const [username, setU] = useState("");
   const [password, setP] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -53,11 +163,16 @@ function SignIn() {
       <form onSubmit={submit} className="space-y-4">
         <Field label="Username"><Input value={username} onChange={(e) => setU(e.target.value)} autoComplete="username" required autoFocus /></Field>
         <Field label="Password" error={error}
-          hint={<>Forgotten it? On the controller run <code className="font-mono">python -m app.cli reset-password &lt;name&gt;</code> in <code className="font-mono">backend/</code> (demo: <code className="font-mono">scripts/dev.sh admin reset-password</code>). No account? Ask your BioCompute administrator, or create one on the controller with <code className="font-mono">python -m app.cli reset-password &lt;name&gt; --create</code>.</>}>
+          hint={<>Forgotten it? Ask an administrator, or on the controller run <code className="font-mono">python -m app.cli reset-password &lt;name&gt;</code> in <code className="font-mono">backend/</code>.</>}>
           <Input type="password" value={password} onChange={(e) => setP(e.target.value)} autoComplete="current-password" required />
         </Field>
         <Button type="submit" variant="primary" size="lg" className="w-full" loading={busy}>Sign in</Button>
       </form>
+      <div className="mt-6 border-t border-line pt-4 text-[13px] text-muted">
+        {signup.data?.requests
+          ? <p>New here? <button className="text-accent hover:underline" onClick={onRequest}>Request an account</button>, or open the invite link an administrator sent you.</p>
+          : <p>New here? Ask an administrator for an account or an invite link.</p>}
+      </div>
     </>
   );
 }

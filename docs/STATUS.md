@@ -84,6 +84,7 @@ These limits apply to everything below.
 
 | Feature | Status |
 |---|---|
+| New accounts after the first: requests from the sign-in page approved by an admin (role chosen), single-use invite links with role and expiry, on/off switch | Demonstrated (`test_account_requests_and_invites`, three-person browser test) |
 | Per-user pipelines, Studio workflows and modules: private by default, shared with the lab on request; others can view/run/copy but not change; admins see all; per-user favorites; sharing a workflow shares its modules and pipeline | Demonstrated (`test_ownership.py`, two-user browser test); migration keeps existing items shared |
 
 ## First run

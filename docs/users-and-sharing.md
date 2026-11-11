@@ -7,6 +7,23 @@ others in **Settings → Users** as:
 * **scientist**: can build and run;
 * **admin**: also manages users, data folders and computers.
 
+## Getting an account
+
+* **First run:** the very first visitor creates the administrator account (see *First run* in
+  `docs/deployment.md`).
+* **Request an account** (sign-in page): a newcomer picks a username and password and can add a note
+  (who they are). The account cannot sign in until an administrator approves it in **Settings → Users** and
+  chooses a role, or declines it. Admins also see a dashboard alert for waiting requests. Turn the link off there
+  if only invited people should get in.
+* **Invite links** (Settings → Users): pick a role and how long the link stays valid (1 to 30 days). The link
+  works once; whoever opens it chooses their username and password and is signed in immediately. Only a hash of
+  the link is stored, open links can be revoked, and used ones show who joined. Set `BIOCOMPUTE_PUBLIC_URL`
+  (e.g. `http://lab-ws.tailnet-name.ts.net:8045`) so links use an address others can reach, not `localhost`.
+* **Created by an administrator** (Settings → Users → *Add user*, or `python -m app.cli reset-password <name> --create`):
+  you set the initial password and pass it on; the person can change it in Settings → Preferences.
+
+There is no open sign-up: every account is either approved, invited or created by an administrator.
+
 ## Your own pipelines
 
 Each pipeline, Studio workflow and custom module has an **owner** (who created, imported or published it) and
