@@ -39,6 +39,25 @@ def check_root(path: str, _: User = Depends(require_admin)):
     return data_roots.check_path(path)
 
 
+@router.get("/roots/folders")
+def browse_controller_folders(path: str | None = None, _: User = Depends(require_admin)):
+    """Folder picker for adding a data folder: sub-folders of a controller folder (no file names)."""
+    return data_roots.browse(path)
+
+
+class FolderIn(BaseModel):
+    parent: str
+    name: str
+
+
+@router.post("/roots/folders")
+def create_controller_folder(body: FolderIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    out = data_roots.make_folder(body.parent, body.name)
+    audit(db, admin.username, "data_root.mkdir", out["path"])
+    db.commit()
+    return out
+
+
 @router.post("/roots")
 def add_root(body: RootIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     r = data_roots.create(db, body.name, body.path, body.restricted, body.writable, body.description, admin.username)

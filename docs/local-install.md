@@ -174,7 +174,7 @@ BIOCOMPUTE_MAX_CONCURRENT_RUNS=4
 ```
 
 You can also skip `BIOCOMPUTE_DATA_ROOTS` and add folders after the first login, in
-**Settings → Controller → Data folders → Add folder**. Folders added there are stored in the database. They take effect
+**Settings → Controller → Data folders → Add folder**. *Browse…* lets you pick the folder (or create a new one) on the controller; folder names only are shown, never hidden or system folders. Folders added there are stored in the database. They take effect
 at once, and they can be made restricted or writable, or removed (only the folder's registration is removed;
 the files stay on disk). BioCompute refuses system folders, a whole home folder, hidden folders such as `~/.ssh`,
 and its own state folder.

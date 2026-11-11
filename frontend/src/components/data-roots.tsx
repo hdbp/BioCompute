@@ -7,6 +7,7 @@ import { Badge, Panel, PanelHeader, Switch } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
+import { ControllerFolderPicker } from "@/components/folder-picker";
 
 export interface DataRootInfo { name: string; path: string; restricted: boolean; writable: boolean; description: string; exists: boolean; source?: "settings" | "ui" }
 interface Check {
@@ -71,6 +72,7 @@ function AddRootDialog({ open, onOpenChange, existing, onAdded }: { open: boolea
   const [writable, setWritable] = useState(false);
   const [check, setCheck] = useState<Check | null>(null);
   const [saving, setSaving] = useState(false);
+  const [picker, setPicker] = useState(false);
 
   useEffect(() => { if (open) { setPath(""); setName(""); setNameTouched(false); setDesc(""); setRestricted(true); setWritable(false); setCheck(null); } }, [open]);
   useEffect(() => {
@@ -99,9 +101,13 @@ function AddRootDialog({ open, onOpenChange, existing, onAdded }: { open: boolea
       <DialogContent title="Add a data folder"
         description="A folder on the controller (the computer running BioCompute). Data on another computer must be mounted on the controller first, e.g. an NFS/SMB share or an external drive.">
         <div className="space-y-4">
-          <Field label="Folder path on the controller" hint="e.g. /data/sequencing/2026, /mnt/nas/chipseq or ~/projects/rnaseq">
-            <Input autoFocus className="font-mono text-[12.5px]" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/your/data" />
-          </Field>
+          <div className="flex items-start gap-2">
+            <Field label="Folder path on the controller" className="flex-1" hint="Browse to pick or create it, or type it, e.g. /data/sequencing/2026, /mnt/nas/chipseq or ~/projects/rnaseq">
+              <Input autoFocus className="font-mono text-[12.5px]" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/your/data" />
+            </Field>
+            <Button type="button" variant="secondary" className="mt-[26px]" onClick={() => setPicker(true)}>Browse…</Button>
+          </div>
+          <ControllerFolderPicker open={picker} onOpenChange={setPicker} start={check?.ok ? check.path : undefined} onPick={setPath} />
           {check && (
             <div aria-live="polite" className="space-y-1 text-[12.5px]">
               {check.errors.map((e) => <p key={e} className="flex gap-1.5 text-bad"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{e}</p>)}

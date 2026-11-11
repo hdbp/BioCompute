@@ -136,3 +136,91 @@ def delete(db: Session, name: str) -> None:
     db.delete(r)
     db.commit()
     reload()
+
+
+# --------------------------------------------------------------------------- folder picker (administrators)
+def _browsable(p: Path) -> str | None:
+    """Why a folder may not be opened in the picker, or None."""
+    if any(part.startswith(".") for part in p.parts[1:]):
+        return "Hidden folders are not shown"
+    if any(str(p) == x or str(p).startswith(x + "/") for x in NEVER_INSIDE):
+        return "System folders cannot be browsed"
+    return None
+
+
+def shortcuts() -> list[dict[str, str]]:
+    home = Path.home()
+    out = [{"label": "Home", "path": str(home)}]
+    for cand in ("/data", "/mnt", "/media", f"/media/{home.name}", "/srv", "/scratch", "/storage", "/Volumes", "/nfs", "/home"):
+        p = Path(cand)
+        if p.is_dir() and os.access(p, os.R_OK | os.X_OK) and str(p) != str(home):
+            out.append({"label": cand, "path": cand})
+    for r in fs.roots().values():
+        out.append({"label": f"{r.name} (data folder)", "path": str(r.path)})
+    return out
+
+
+def browse(raw: str | None) -> dict[str, Any]:
+    """Sub-folders of a folder on the controller (names only, no files), to pick a data folder."""
+    p = Path(os.path.expanduser(raw or "~"))
+    if not p.is_absolute():
+        raise HTTPException(400, "Give a full path")
+    try:
+        p = p.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise HTTPException(404, f"{p} does not exist on the controller") from None
+    if not p.is_dir():
+        raise HTTPException(400, "Not a folder")
+    why = _browsable(p)
+    if why:
+        raise HTTPException(403, why)
+    entries: list[dict[str, Any]] = []
+    files = 0
+    try:
+        with os.scandir(p) as it:
+            for e in it:
+                if e.name.startswith("."):
+                    continue
+                try:
+                    is_dir = e.is_dir(follow_symlinks=True)
+                except OSError:
+                    continue
+                if not is_dir:
+                    files += 1
+                    continue
+                full = Path(e.path)
+                if _browsable(full.resolve()) is not None:
+                    continue
+                entries.append({"name": e.name, "path": str(full), "readable": os.access(full, os.R_OK | os.X_OK),
+                                "writable": os.access(full, os.W_OK)})
+                if len(entries) >= 2000:
+                    break
+    except PermissionError:
+        raise HTTPException(403, "The account running BioCompute cannot open this folder") from None
+    entries.sort(key=lambda x: x["name"].lower())
+    return {"path": str(p), "parent": str(p.parent) if p != p.parent else None, "entries": entries, "files": files,
+            "writable": os.access(p, os.W_OK), "shortcuts": shortcuts()}
+
+
+def make_folder(parent: str, name: str) -> dict[str, Any]:
+    name = (name or "").strip()
+    if not name or name in (".", "..") or "/" in name or name.startswith(".") or "\x00" in name:
+        raise HTTPException(400, "Folder names cannot contain '/' or start with '.'")
+    base = Path(os.path.expanduser(parent))
+    try:
+        base = base.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise HTTPException(404, "The parent folder does not exist") from None
+    why = _browsable(base)
+    if why:
+        raise HTTPException(403, why)
+    if str(base) in ("/", "/usr", "/var", "/opt", "/root"):
+        raise HTTPException(403, "Create data folders inside a data disk or your home folder, not at the top of the system")
+    target = base / name
+    if target.exists():
+        raise HTTPException(409, "A file or folder with this name already exists")
+    try:
+        target.mkdir()
+    except PermissionError:
+        raise HTTPException(403, "The account running BioCompute may not create folders here") from None
+    return {"path": str(target)}
