@@ -138,10 +138,14 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 
 ### assistant
 
+- `DELETE /api/assistant/history/{rid}`
+- `GET    /api/assistant/history`
+- `GET    /api/assistant/history/{rid}`
 - `GET    /api/assistant/status`
 - `POST   /api/assistant/ask`
 - `POST   /api/assistant/build`
 - `POST   /api/assistant/draft-module`
+- `POST   /api/assistant/history/{rid}/saved`
 - `POST   /api/assistant/review`
 - `POST   /api/assistant/test`
 - `PUT    /api/assistant/config`

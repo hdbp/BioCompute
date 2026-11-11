@@ -7,10 +7,11 @@ import {
 } from "@xyflow/react";
 import { toast } from "sonner";
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, Code2, Download, FilePlus2, FolderOpen, Info, Layers, Loader2, Redo2, Rocket, Save,
+  AlertTriangle, CheckCircle2, ChevronDown, Code2, Download, FilePlus2, FolderOpen, History, Info, Layers, Loader2, Redo2, Rocket, Save,
   ShieldCheck, Sparkles, Trash2, Undo2, Workflow,
 } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import type { Issue, ModuleDef, StudioModule, StudioWorkflow } from "@/lib/types";
 import { ago, cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/theme";
@@ -74,6 +75,12 @@ function StudioInner() {
   const [subDlg, setSubDlg] = useState(false);
   const [subName, setSubName] = useState("");
   const loadedRef = useRef<string | null>(null);
+  // the assistant answer currently on the canvas, linked to the workflow once saved
+  const pendingResult = useRef<string | null>(null);
+  // unsaved canvas, kept in this browser so leaving Studio never loses work
+  const username = useAuth((s) => s.user?.username ?? "anon");
+  const draftKey = `biocompute.studio-draft.${username}`;
+  const [draft, setDraft] = useState<Draft | null>(() => readDraft(draftKey));
   const [builder, setBuilder] = useState<{ open: boolean; def: ModuleDef; editing: boolean; notes: string | null }>({ open: false, def: emptyModule(), editing: false, notes: null });
   const [finderOpen, setFinderOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(() => { try { return localStorage.getItem("bc-assistant-open") === "1"; } catch { return false; } });
@@ -303,6 +310,13 @@ function StudioInner() {
         navigate(`/studio/${w.id}`, { replace: true });
       }
       setDirty(false);
+      clearDraft(draftKey);
+      setDraft(null);
+      if (pendingResult.current) {
+        api.post(`/api/assistant/history/${pendingResult.current}/saved`, { workflow_id: w.id })
+          .then(() => qc.invalidateQueries({ queryKey: ["assistant-history"] })).catch(() => undefined);
+        pendingResult.current = null;
+      }
       qc.invalidateQueries({ queryKey: ["studio-workflows"] });
       if (!silent) toast.success("Workflow saved");
       return w.id;
@@ -312,7 +326,7 @@ function StudioInner() {
     } finally {
       setBusy(null);
     }
-  }, [name, description, wfId, navigate, qc]);
+  }, [name, description, wfId, navigate, qc, draftKey]);
 
   const validate = useCallback(async () => {
     setValidating(true);
@@ -389,6 +403,8 @@ function StudioInner() {
 
   const newWorkflow = () => {
     if (!confirmDiscard()) return;
+    if (!draft) clearDraft(draftKey); // the stored draft is this canvas; an older one stays offered
+    pendingResult.current = null;
     loadedRef.current = null;
     setWfId(null);
     setName("Untitled workflow");
@@ -476,13 +492,45 @@ function StudioInner() {
     } catch (e) { toast.error(errMsg(e), { id: t }); }
   }, [openBuilder]);
 
-  const loadFromAssistant = useCallback((r: { graph: { nodes: unknown[]; edges: unknown[] }; name: string; description: string }) => {
+  const loadFromAssistant = useCallback((r: { graph: { nodes: unknown[]; edges: unknown[] }; name: string; description: string; result_id?: string }) => {
     if (graphRef.current.nodes.length && !window.confirm("Replace the canvas with the assistant's pipeline? You can undo this.")) return;
     replaceGraph(deserialize(r.graph), false);
     if (!wfId) { setName(r.name); setDescription(r.description); }
+    pendingResult.current = r.result_id ?? null;
     setDirty(true);
-    toast.success("Loaded. Check the parameters, then Save.");
-  }, [replaceGraph, wfId]);
+    toast.success("Loaded into the editor. It is not saved yet.", {
+      duration: 10000, action: { label: "Save now", onClick: () => { save(); } },
+    });
+  }, [replaceGraph, wfId, save]);
+
+  // ------------------------------------------------------------------ local draft
+  useEffect(() => {
+    if (draft || !dirty || !nodes.length) return;
+    const t = setTimeout(() => writeDraft(draftKey, {
+      wfId, name, description, graph: serialize(graphRef.current), at: new Date().toISOString(), resultId: pendingResult.current,
+    }), 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges, name, description, dirty, wfId, draft, draftKey]);
+
+  const restoreDraft = () => {
+    if (!draft) return;
+    loadedRef.current = draft.wfId;
+    setWfId(draft.wfId);
+    setName(draft.name);
+    setDescription(draft.description);
+    pendingResult.current = draft.resultId ?? null;
+    navigate(draft.wfId ? `/studio/${draft.wfId}` : "/studio", { replace: true });
+    replaceGraph(deserialize(draft.graph));
+    setDirty(true);
+    setDraft(null);
+    toast.success("Restored your unsaved workflow. Save it to keep it.");
+  };
+  const discardDraft = () => {
+    if (!window.confirm("Discard the unsaved workflow? This cannot be undone.")) return;
+    clearDraft(draftKey);
+    setDraft(null);
+  };
 
   // ------------------------------------------------------------------ keyboard
   useEffect(() => {
@@ -588,7 +636,15 @@ function StudioInner() {
                   maskColor="rgb(var(--ink) / 0.6)" />
               </ReactFlow>
 
-              {nodes.length === 0 && modulesQ.data && (
+              {draft && (
+                <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-wait/50 bg-surface px-3 py-2 text-[13px] shadow-lg" role="status">
+                  <History className="size-4 text-wait" />
+                  <span>Unsaved workflow <b className="font-medium">{draft.name}</b> from {ago(draft.at)} ({(draft.graph.nodes ?? []).length} nodes)</span>
+                  <Button size="sm" variant="primary" onClick={restoreDraft}>Restore</Button>
+                  <Button size="sm" variant="ghost" onClick={discardDraft}>Discard</Button>
+                </div>
+              )}
+              {nodes.length === 0 && modulesQ.data && !draft && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
                   <div className="pointer-events-auto max-w-md rounded-xl border border-line bg-surface/95 p-6 text-center shadow-xl">
                     <Workflow className="mx-auto mb-3 size-7 text-accent" />
@@ -714,4 +770,16 @@ function StudioInner() {
       </Dialog>
     </StudioContext.Provider>
   );
+}
+
+interface Draft { wfId: string | null; name: string; description: string; graph: { nodes: unknown[]; edges: unknown[] }; at: string; resultId?: string | null }
+
+function readDraft(key: string): Draft | null {
+  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as Draft) : null; } catch { return null; }
+}
+function writeDraft(key: string, d: Draft) {
+  try { localStorage.setItem(key, JSON.stringify(d)); } catch { /* storage full or blocked: the beforeunload warning still applies */ }
+}
+function clearDraft(key: string) {
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
 }

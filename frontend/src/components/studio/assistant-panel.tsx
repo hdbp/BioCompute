@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Lightbulb, Sparkles, Wand2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, History, Lightbulb, Sparkles, Wand2, X } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { AssistantMeta, AssistantStatus, Issue } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { ago, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Badge, Checkbox, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/misc";
@@ -15,7 +15,9 @@ type RawGraph = { nodes: unknown[]; edges: unknown[] };
 interface BuildResult {
   graph: RawGraph; name: string; description: string; explanation: string; assumptions: string[];
   missing_modules: { tool: string; reason: string }[]; valid: boolean; issues: Issue[]; attempts: number; meta: AssistantMeta;
+  result_id?: string; workflow_id?: string | null;
 }
+interface HistoryRow { id: string; task: string; request: string; created_at: string; workflow_id: string | null; name: string | null; valid: boolean | null; model: string | null; cost_usd: number | null }
 interface ReviewResult {
   verdict: "sound" | "needs_changes" | "invalid"; summary: string; recommendations: string[];
   findings: { severity: "error" | "warning" | "suggestion"; node_id: string; title: string; detail: string }[];
@@ -27,10 +29,12 @@ const VERDICT = { sound: { tone: "ok", label: "Looks sound" }, needs_changes: { 
 
 export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNode, onDraftModule, nodeLabel }: {
   getGraph: () => RawGraph; hasNodes: boolean; onClose: () => void;
-  onLoad: (r: { graph: RawGraph; name: string; description: string }) => void;
+  onLoad: (r: { graph: RawGraph; name: string; description: string; result_id?: string }) => void;
   onSelectNode: (id: string) => void; onDraftModule: (tool: string, reason: string) => void; nodeLabel: (id: string) => string | null;
 }) {
   const user = useAuth((s) => s.user);
+  const qc = useQueryClient();
+  const refreshHistory = () => qc.invalidateQueries({ queryKey: ["assistant-history"] });
   const status = useQuery({ queryKey: ["assistant-status"], queryFn: () => api.get<AssistantStatus>("/api/assistant/status"), staleTime: 60_000 });
   const [busy, setBusy] = useState<null | "build" | "review" | "ask">(null);
   const [prompt, setPrompt] = useState("");
@@ -49,13 +53,23 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
   const doBuild = () => run("build", async () => {
     const r = await api.post<BuildResult>("/api/assistant/build", { description: prompt, graph: modify && hasNodes ? getGraph() : null });
     setBuild(r);
+    refreshHistory();
   });
-  const doReview = () => run("review", async () => setReview(await api.post<ReviewResult>("/api/assistant/review", { graph: getGraph(), goal })));
+  const doReview = () => run("review", async () => { setReview(await api.post<ReviewResult>("/api/assistant/review", { graph: getGraph(), goal })); refreshHistory(); });
   const doAsk = () => run("ask", async () => {
     const r = await api.post<AskResult>("/api/assistant/ask", { question, graph: hasNodes ? getGraph() : null });
     setAnswers((a) => [{ q: question, a: r }, ...a]);
     setQuestion("");
+    refreshHistory();
   });
+  const reopen = async (row: HistoryRow) => {
+    try {
+      const item = await api.get<Record<string, unknown> & { request: string }>(`/api/assistant/history/${row.id}`);
+      if (row.task === "build") { setBuild(item as unknown as BuildResult); setPrompt(item.request); }
+      else if (row.task === "review") { setReview(item as unknown as ReviewResult); setGoal(item.request); }
+      else if (row.task === "ask") setAnswers((a) => [{ q: item.request, a: item as unknown as AskResult }, ...a.filter((x) => x.q !== item.request)]);
+    } catch (e) { toast.error(errMsg(e)); }
+  };
 
   const st = status.data;
   return (
@@ -110,12 +124,14 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
                     </Section>
                   )}
                   {!build.valid && <Section title="Validator"><Issues issues={build.issues} /></Section>}
+                  {build.workflow_id && <p className="text-xs text-ok">Already saved as a workflow.</p>}
                   <div className="flex items-center gap-2 pt-1">
                     <Button size="sm" variant="secondary" onClick={() => onLoad(build)}>Load into editor</Button>
                     <Meta m={build.meta} extra={build.attempts > 1 ? `${build.attempts} rounds` : undefined} />
                   </div>
                 </div>
               )}
+              <Recent task="build" onOpen={reopen} />
             </TabsContent>
 
             <TabsContent value="review" className="space-y-3">
@@ -153,6 +169,7 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
                   </div>
                 </div>
               )}
+              <Recent task="review" onOpen={reopen} />
             </TabsContent>
 
             <TabsContent value="ask" className="space-y-3">
@@ -169,6 +186,7 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
                   <Meta m={a.meta} />
                 </div>
               ))}
+              <Recent task="ask" onOpen={reopen} />
             </TabsContent>
           </div>
           <p className="border-t border-line px-3 py-2 text-[11.5px] text-muted">{st.privacy} Suggestions are never saved or run without you.</p>
@@ -196,4 +214,32 @@ function Meta({ m, extra }: { m: AssistantMeta; extra?: string }) {
   const parts = [m.model, extra, m.cost_usd != null ? `$${m.cost_usd.toFixed(2)}` : null,
     m.input_tokens != null ? `${(m.input_tokens + (m.output_tokens ?? 0)).toLocaleString()} tokens` : null].filter(Boolean);
   return <span className="ml-auto text-[11px] text-muted">{parts.join(" · ")}</span>;
+}
+
+const TASK_LABEL: Record<string, string> = { build: "Earlier builds", review: "Earlier reviews", ask: "Earlier questions" };
+
+/** Answers are stored on the server, so nothing that was paid for is lost when you leave the page. */
+function Recent({ task, onOpen }: { task: string; onOpen: (r: HistoryRow) => void }) {
+  const q = useQuery({ queryKey: ["assistant-history", task], queryFn: () => api.get<HistoryRow[]>(`/api/assistant/history?task=${task}&limit=15`) });
+  if (!q.data?.length) return null;
+  return (
+    <details className="rounded-lg border border-line" open={task === "build"}>
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted hover:text-text">
+        <History className="size-3.5" />{TASK_LABEL[task]} ({q.data.length})
+      </summary>
+      <ul className="divide-y divide-line border-t border-line">
+        {q.data.map((r) => (
+          <li key={r.id}>
+            <button onClick={() => onOpen(r)} className="w-full px-3 py-2 text-left hover:bg-raised">
+              <p className="flex items-center gap-1.5">
+                <span className="truncate font-medium">{r.name || r.request || "(no description)"}</span>
+                {r.workflow_id ? <Badge tone="ok">saved</Badge> : task === "build" ? <Badge tone="wait">not saved</Badge> : null}
+              </p>
+              <p className="truncate text-[11.5px] text-muted">{ago(r.created_at)}{r.model ? ` · ${r.model}` : ""}{r.cost_usd != null ? ` · $${r.cost_usd.toFixed(2)}` : ""}</p>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
 }

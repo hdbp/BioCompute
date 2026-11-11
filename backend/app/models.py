@@ -171,6 +171,17 @@ class StudioWorkflow(TimestampMixin, Base):
     created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 
+class AssistantResult(TimestampMixin, Base):
+    """Every assistant answer, so a pipeline that was paid for is never lost (only proposals; nothing here runs)."""
+    __tablename__ = "assistant_results"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    task: Mapped[str] = mapped_column(String(32), index=True)  # build | review | ask | draft_module
+    request: Mapped[str] = mapped_column(Text, default="")
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str] = mapped_column(String(80), index=True)
+    workflow_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # set once saved into a workflow
+
+
 class CustomModule(TimestampMixin, Base):
     """A Pipeline Studio module defined by a user (e.g. wrapping newly installed software)."""
 

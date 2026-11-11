@@ -104,6 +104,13 @@ What it does:
 * **Draft module.** It writes a module definition from the program's `--help` output. The builder then opens with
   the draft and its caveats.
 
+Nothing is lost if you leave without saving:
+
+* Every answer (build, review, question, module draft) is stored on the controller. The assistant panel lists
+  **Earlier builds / reviews / questions**, and clicking one reopens it. Builds are marked *saved* or *not saved*.
+* An unsaved canvas is kept in your browser. Coming back to Studio offers **Restore** or **Discard**.
+* After **Load into editor**, a **Save now** button appears. Saving links the answer to the new workflow.
+
 Safeguards:
 
 * Every answer is a typed JSON object (structured outputs) and is validated before use.

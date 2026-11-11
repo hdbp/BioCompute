@@ -5190,6 +5190,213 @@
                 ]
             }
         },
+        "/api/assistant/history": {
+            "get": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "History",
+                "description": "Your earlier assistant answers, newest first (summaries; fetch one by id for the full result).",
+                "operationId": "history_api_assistant_history_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "task",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Task"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 30,
+                            "title": "Limit"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/assistant/history/{rid}": {
+            "get": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "History Item",
+                "operationId": "history_item_api_assistant_history__rid__get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "rid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Rid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Delete History",
+                "operationId": "delete_history_api_assistant_history__rid__delete",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "rid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Rid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/assistant/history/{rid}/saved": {
+            "post": {
+                "tags": [
+                    "assistant"
+                ],
+                "summary": "Mark Saved",
+                "description": "Remember which saved workflow a generated pipeline went into.",
+                "operationId": "mark_saved_api_assistant_history__rid__saved_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "rid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Rid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LinkIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/health": {
             "get": {
                 "tags": [
@@ -6269,6 +6476,19 @@
                     "path"
                 ],
                 "title": "ImportLocal"
+            },
+            "LinkIn": {
+                "properties": {
+                    "workflow_id": {
+                        "type": "string",
+                        "title": "Workflow Id"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "workflow_id"
+                ],
+                "title": "LinkIn"
             },
             "LoginIn": {
                 "properties": {

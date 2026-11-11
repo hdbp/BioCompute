@@ -139,7 +139,15 @@ def test_assistant_build_repairs_invalid_draft(client, auth, monkeypatch):
     assert "rejected" in calls[1] and "index" in calls[1]  # validator errors are fed back
     assert {n["data"]["module"] for n in res["graph"]["nodes"]} == {"input_samplesheet", "bowtie2", "input_file"}
     assert all(e["sourceHandle"].startswith("out:") for e in res["graph"]["edges"])
-    # nothing was saved or run
+    # the paid-for answer is kept and can be reloaded later, but nothing was saved as a workflow or run
+    hist = client.get("/api/assistant/history", params={"task": "build"}, headers=auth).json()
+    assert hist[0]["id"] == res["result_id"] and hist[0]["name"] == "ChIP" and hist[0]["valid"]
+    item = client.get(f"/api/assistant/history/{res['result_id']}", headers=auth).json()
+    assert item["graph"] == res["graph"] and item["request"] == "ChIP-seq alignment"
+    w = client.post("/api/studio/workflows", headers=auth, json={"name": "From AI", "graph": item["graph"]}).json()
+    assert client.post(f"/api/assistant/history/{res['result_id']}/saved", headers=auth, json={"workflow_id": w["id"]}).status_code == 200
+    assert client.get("/api/assistant/history", headers=auth).json()[0]["workflow_id"] == w["id"]
+    client.delete(f"/api/studio/workflows/{w['id']}", headers=auth)
     assert not any(w["name"] == "ChIP" for w in client.get("/api/studio/workflows", headers=auth).json())
     ev = client.get("/api/auth/audit", headers=auth).json()
     hit = next(e for e in ev if e["action"] == "assistant.build")
