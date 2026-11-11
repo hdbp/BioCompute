@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { Issue, ModuleDef, StudioModule, StudioWorkflow } from "@/lib/types";
+import type { Issue, ModuleDef, Pipeline, StudioModule, StudioWorkflow } from "@/lib/types";
+import { publishState } from "@/components/studio-drafts";
 import { ago, cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/theme";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,8 @@ function StudioInner() {
 
   const modulesQ = useQuery({ queryKey: ["studio-modules"], queryFn: () => api.get<ModulesResponse>("/api/studio/modules"), staleTime: 300_000 });
   const workflowsQ = useQuery({ queryKey: ["studio-workflows"], queryFn: () => api.get<StudioWorkflow[]>("/api/studio/workflows") });
+  const pipelinesQ = useQuery({ queryKey: ["pipelines"], queryFn: () => api.get<Pipeline[]>("/api/pipelines") });
+  const publishRef = useRef<() => void>(() => undefined);
   const modIndex = useMemo(() => Object.fromEntries((modulesQ.data?.modules ?? []).map((m) => [m.id, m])), [modulesQ.data]);
   const portTypes = modulesQ.data?.port_types ?? {};
 
@@ -318,7 +321,11 @@ function StudioInner() {
         pendingResult.current = null;
       }
       qc.invalidateQueries({ queryKey: ["studio-workflows"] });
-      if (!silent) toast.success("Workflow saved");
+      if (!silent) {
+        const published = (pipelinesQ.data ?? []).some((p) => p.studio_workflow_id === w.id);
+        toast.success(published ? "Saved. Publish again to update the pipeline in the library." : "Saved as a Studio draft. Publish it to add it to Pipelines.",
+          { duration: 8000, action: { label: published ? "Publish update" : "Publish", onClick: () => publishRef.current() } });
+      }
       return w.id;
     } catch (e) {
       toast.error(`Save failed: ${errMsg(e)}`);
@@ -326,7 +333,7 @@ function StudioInner() {
     } finally {
       setBusy(null);
     }
-  }, [name, description, wfId, navigate, qc, draftKey]);
+  }, [name, description, wfId, navigate, qc, draftKey, pipelinesQ.data]);
 
   const validate = useCallback(async () => {
     setValidating(true);
@@ -387,6 +394,7 @@ function StudioInner() {
     try {
       const r = await api.post<{ pipeline_id: string; version: string }>(`/api/studio/workflows/${id}/publish`);
       qc.invalidateQueries({ queryKey: ["pipelines"] });
+      qc.invalidateQueries({ queryKey: ["studio-workflows"] });
       toast.success(`Published to the pipeline library as ${r.version}`, {
         action: { label: "Open pipeline", onClick: () => navigate(`/pipelines/${r.pipeline_id}`) },
       });
@@ -398,6 +406,7 @@ function StudioInner() {
       setBusy(null);
     }
   }, [save, qc, navigate]);
+  publishRef.current = publish;
 
   const confirmDiscard = () => !dirty || !graphRef.current.nodes.length || window.confirm("Discard unsaved changes to this workflow?");
 
@@ -566,6 +575,14 @@ function StudioInner() {
           <input value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} aria-label="Workflow name"
             className="min-w-0 w-48 rounded-md bg-transparent px-1.5 py-1 text-[14px] font-semibold hover:bg-raised focus:bg-raised focus:outline-none" />
           {dirty ? <Badge tone="wait">Unsaved</Badge> : wfId ? <Badge>Saved</Badge> : null}
+          {wfId && (() => {
+            const w = workflowsQ.data?.find((x) => x.id === wfId);
+            if (!w || !pipelinesQ.data) return null;
+            const st = publishState(w, pipelinesQ.data);
+            return !st.published ? <Tip content="Saved workflows stay in Studio. Publish adds them to the Pipelines library so they can be run."><Badge tone="neutral">Not in Pipelines</Badge></Tip>
+              : st.changed || dirty ? <Tip content="The library has an older version. Publish to update it."><Badge tone="wait">Library has {st.version}</Badge></Tip>
+              : <Badge tone="ok">Published {st.version}</Badge>;
+          })()}
           <Tip content={<div className="space-y-1"><p>Graphs export to a supported subset of Nextflow DSL2: per-sample and all-sample steps, branches, joins and merges.</p><p className="text-muted">Arbitrary Nextflow scripts cannot be imported back into a graph.</p></div>}>
             <span tabIndex={0} className="hidden 2xl:inline-flex cursor-help rounded border border-line px-1.5 py-px text-[11.5px] text-muted">DSL2 subset</span>
           </Tip>

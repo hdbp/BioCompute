@@ -14,6 +14,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { PathInput } from "@/components/file-browser";
 import { RunStatusBadge } from "@/components/status";
+import { StudioDrafts } from "@/components/studio-drafts";
 
 const KINDS = [
   { id: "all", label: "All" },
@@ -75,6 +76,7 @@ export default function PipelinesPage() {
         <TabsList className="mb-5">{KINDS.map((k) => <TabsTrigger key={k.id} value={k.id}>{k.label}</TabsTrigger>)}</TabsList>
         <TabsContent value={kind}>
           {list.isLoading && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-40" />)}</div>}
+          {(kind === "all" || kind === "studio") && <StudioDrafts query={q} />}
           {list.data && items.length === 0 && <Panel><Empty icon={<Boxes />} title="No pipelines match">Clear the search or filters, or import a pipeline from Git or a local folder.</Empty></Panel>}
           {installed.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-8">
