@@ -58,7 +58,7 @@ def _run(db: Session, user: User, task: str, fn, request: str = "", keep: bool =
         db.flush()
         res = {**res, "result_id": row.id}
     audit(db, user.username, f"assistant.{task}", None, ok=True, provider=meta.get("provider"), model=meta.get("model"),
-          cost_usd=meta.get("cost_usd"), request=request[:200], **audit_detail)
+          cost_usd=meta.get("cost_usd"), billing=meta.get("billing"), request=request[:200], **audit_detail)
     db.commit()
     return res
 
@@ -127,7 +127,8 @@ def history(task: str | None = None, limit: int = 30, user: User = Depends(requi
     return [{"id": r.id, "task": r.task, "request": r.request[:300], "created_at": r.created_at, "workflow_id": r.workflow_id,
              "name": (r.result or {}).get("name"), "valid": (r.result or {}).get("valid"),
              "model": ((r.result or {}).get("meta") or {}).get("model"),
-             "cost_usd": ((r.result or {}).get("meta") or {}).get("cost_usd")} for r in rows]
+             "cost_usd": ((r.result or {}).get("meta") or {}).get("cost_usd"),
+             "billing": ((r.result or {}).get("meta") or {}).get("billing")} for r in rows]
 
 
 def _own(db: Session, rid: str, user: User) -> AssistantResult:

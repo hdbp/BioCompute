@@ -114,10 +114,19 @@ export interface ModuleIssue { level: "error" | "warning" | "info"; field?: stri
 export interface ModuleCheck { valid: boolean; issues: ModuleIssue[]; module: ModuleDef | null }
 export interface InstalledTool { exe: string; name: string; category: string; template: string | null; path: string; version: string | null }
 
-export interface AssistantMeta { provider: string; model: string; cost_usd?: number | null; input_tokens?: number | null; output_tokens?: number | null; task?: string }
+export interface AssistantMeta {
+  provider: string; model: string; task?: string; calls?: number;
+  /** what was charged for this answer (API key or cloud provider); null with a Claude subscription */
+  cost_usd?: number | null;
+  /** Claude Code with a subscription: the API-price figure it reports, not a charge */
+  api_equivalent_usd?: number | null;
+  billing?: "subscription" | "api" | "cloud" | "unknown";
+  input_tokens?: number | null; output_tokens?: number | null;
+}
 export interface AssistantStatus {
   provider: "off" | "anthropic" | "openai" | "claude-cli"; model: string; effort: string; enabled: boolean; ready: boolean; privacy: string;
-  providers: Record<string, { label: string; default_model: string; configured: boolean; source: string | null; hint: string | null; note?: string }>;
+  providers: Record<string, { label: string; default_model: string; configured: boolean; source: string | null; hint: string | null; note?: string;
+    auth?: { logged_in: boolean; billing: "subscription" | "api" | "cloud" | "unknown"; method: string | null } }>;
 }
 
 export interface Project {

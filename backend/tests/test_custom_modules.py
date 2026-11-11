@@ -1,5 +1,8 @@
 """User-defined Studio modules and the pipeline assistant (with a stub provider: no network, no cost)."""
 import json
+import os
+
+import pytest
 
 from conftest import wait_for_run
 
@@ -257,3 +260,29 @@ def test_build_creates_and_saves_missing_modules(client, auth, monkeypatch):
     for mid in ("u_proseq_3prime", "u_proseq_3prime_2"):
         client.delete(f"/api/studio/modules/{mid}", headers=auth)
     client.put("/api/assistant/config", headers=auth, json={"provider": "off", "clear_key": True})
+
+
+# --------------------------------------------------------------------------- Claude Code: subscription vs API billing
+@pytest.mark.parametrize("auth,billing,charged", [
+    ({"loggedIn": True, "authMethod": "oauth_token", "apiProvider": "firstParty"}, "subscription", False),
+    ({"loggedIn": True, "authMethod": "api_key", "apiProvider": "firstParty"}, "api", True),
+    ({"loggedIn": True, "authMethod": "api_key", "apiProvider": "bedrock"}, "cloud", True),
+])
+def test_claude_code_cost_is_only_a_charge_without_a_subscription(tmp_path, monkeypatch, auth, billing, charged):
+    fake = tmp_path / "claude"
+    result = {"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.31, "session_id": "s1",
+              "usage": {"input_tokens": 1200, "output_tokens": 300}, "modelUsage": {"claude-opus-5-5": {}},
+              "structured_output": {"ok": True, "model": "claude-opus-5-5"}}
+    fake.write_text("#!/bin/sh\nif [ \"$1\" = auth ]; then echo '" + json.dumps(auth) + "'; else cat >/dev/null; echo '"
+                    + json.dumps(result) + "'; fi\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    ai._auth_cache.update(t=0.0, v=None)
+    obj, meta = ai._run_claude_cli("", "sys", "hi", {"type": "object"})
+    assert obj["ok"] and meta["billing"] == billing
+    if charged:
+        assert meta["cost_usd"] == 0.31 and meta["api_equivalent_usd"] is None
+    else:  # subscription: no per-request charge; the API-price figure is kept only as an estimate
+        assert meta["cost_usd"] is None and meta["api_equivalent_usd"] == 0.31
+    assert meta["input_tokens"] == 1200
+    ai._auth_cache.update(t=0.0, v=None)

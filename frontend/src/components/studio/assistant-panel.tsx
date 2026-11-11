@@ -239,9 +239,11 @@ function Issues({ issues }: { issues: Issue[] }) {
 }
 
 function Meta({ m, extra }: { m: AssistantMeta; extra?: string }) {
-  const parts = [m.model, extra, m.cost_usd != null ? `$${m.cost_usd.toFixed(2)}` : null,
+  const sub = m.billing === "subscription";
+  const parts = [m.model, extra, m.cost_usd != null ? `$${m.cost_usd.toFixed(2)}` : sub ? "included in your subscription" : null,
     m.input_tokens != null ? `${(m.input_tokens + (m.output_tokens ?? 0)).toLocaleString()} tokens` : null].filter(Boolean);
-  return <span className="ml-auto text-[11px] text-muted">{parts.join(" · ")}</span>;
+  const title = sub ? `Claude Code with your subscription: no per-request charge; it counts toward your plan's usage limits.${m.api_equivalent_usd != null ? ` (At API prices this would be about $${m.api_equivalent_usd.toFixed(2)}.)` : ""}` : undefined;
+  return <span className="ml-auto text-[11px] text-muted" title={title}>{parts.join(" · ")}</span>;
 }
 
 const TASK_LABEL: Record<string, string> = { build: "Earlier builds", review: "Earlier reviews", ask: "Earlier questions" };

@@ -27,7 +27,7 @@ export function AssistantSettings({ admin }: { admin: boolean }) {
   });
   const test = useMutation({
     mutationFn: () => api.post<{ ok: boolean; meta: AssistantMeta }>("/api/assistant/test"),
-    onSuccess: (r) => toast.success(`Connected: ${r.meta.model}${r.meta.cost_usd != null ? ` ($${r.meta.cost_usd.toFixed(3)})` : ""}`),
+    onSuccess: (r) => toast.success(`Connected: ${r.meta.model}${r.meta.cost_usd != null ? ` ($${r.meta.cost_usd.toFixed(3)})` : r.meta.billing === "subscription" ? " (included in your subscription)" : ""}`),
     onError: (e) => toast.error(errMsg(e)),
   });
   if (!d || !f) return null;
@@ -74,6 +74,15 @@ export function AssistantSettings({ admin }: { admin: boolean }) {
             )}
             {p.note && <p className="text-[12.5px] text-wait">{p.note}</p>}
             {f.provider === "claude-cli" && !p.configured && <p className="text-[12.5px] text-bad">The claude command was not found on the controller.</p>}
+            {f.provider === "claude-cli" && p.auth && (
+              <p className={`text-[12.5px] ${p.auth.logged_in ? "text-muted" : "text-bad"}`}>
+                {!p.auth.logged_in ? "Claude Code is not signed in for the account running BioCompute: run claude once on the controller and sign in."
+                  : p.auth.billing === "subscription" ? "Signed in with a Claude subscription: requests have no per-request charge and count toward your plan's usage limits."
+                  : p.auth.billing === "api" ? "Signed in with an API key: each request is billed to that key, and the cost is shown with each answer."
+                  : p.auth.billing === "cloud" ? "Uses a cloud provider (Bedrock or Vertex): requests are billed by that provider."
+                  : "Signed in; the billing type could not be determined."}
+              </p>
+            )}
           </>
         )}
         {admin ? (
@@ -92,7 +101,7 @@ export function AssistantSettings({ admin }: { admin: boolean }) {
         <p className="text-muted">{d.privacy}</p>
         <p className="text-muted">
           Requests go from the controller to the provider you choose. Every request is recorded in the audit log with the user,
-          provider, model and (for Claude Code) its cost.
+          provider and model, and the cost when the request is billed per use (API key or cloud provider).
         </p>
         {d.provider === "anthropic" && (
           <p className="text-muted">

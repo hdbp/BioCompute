@@ -146,5 +146,8 @@ Safeguards:
   is declined by the primary model's safety classifier, it is retried on a fallback model. Declines and truncated
   answers are reported as errors, never shown as results.
 
-Cost: a Build request with Claude Code (Opus 5.5) took about 30 s and cost about $0.33 in testing. API usage is billed
-by the provider.
+Cost: with an API key (Anthropic or OpenAI) each request is billed by the provider, and the cost is shown under
+each answer. With **Claude Code signed in to a Claude subscription** nothing is charged per request; requests count
+toward the plan's usage limits, and the panel says *included in your subscription*. Claude Code always reports an
+API-price figure; BioCompute keeps it only as an estimate (in the tooltip), not as a cost. Settings shows how
+Claude Code is signed in (`claude auth status`).

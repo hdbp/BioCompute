@@ -105,7 +105,8 @@ def status(db: Session) -> dict[str, Any]:
         "anthropic": {**PROVIDERS["anthropic"], **key_state("anthropic_api_key", "ANTHROPIC_API_KEY")},
         "openai": {**PROVIDERS["openai"], **key_state("openai_api_key", "OPENAI_API_KEY")},
         "claude-cli": {**PROVIDERS["claude-cli"], "configured": bool(shutil.which("claude")),
-                       "source": shutil.which("claude"), "hint": None},
+                       "source": shutil.which("claude"), "hint": None,
+                       **({"auth": claude_cli_auth()} if c["provider"] == "claude-cli" and shutil.which("claude") else {})},
     }
     if c["provider"] == "anthropic" and not providers["anthropic"]["configured"]:
         providers["anthropic"]["note"] = "No key saved: the SDK will try ANTHROPIC_AUTH_TOKEN or an `ant auth login` profile"
@@ -322,6 +323,42 @@ def _run_openai(model: str, system: str, prompt: str, schema: dict, name: str, k
     return json.loads(msg.content or "{}"), meta
 
 
+_auth_cache: dict[str, Any] = {"t": 0.0, "v": None}
+
+
+def claude_cli_auth(exe: str | None = None, max_age: float = 600) -> dict[str, Any]:
+    """How the Claude Code CLI is signed in, from `claude auth status`.
+
+    billing: "subscription" (claude.ai login: usage counts against the plan's limits, no per-request charge),
+    "api" (API key: billed per request), "cloud" (Bedrock/Vertex: billed by that provider) or "unknown".
+    """
+    import time
+
+    exe = exe or shutil.which("claude")
+    if not exe:
+        return {"logged_in": False, "billing": "unknown", "method": None}
+    if _auth_cache["v"] is not None and time.time() - _auth_cache["t"] < max_age:
+        return _auth_cache["v"]
+    try:
+        p = subprocess.run([exe, "auth", "status"], capture_output=True, text=True, timeout=20)
+        st = json.loads(p.stdout)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        st = {}
+    method = str(st.get("authMethod") or "")
+    provider = str(st.get("apiProvider") or "firstParty")
+    if provider not in ("firstParty", ""):
+        billing = "cloud"
+    elif "oauth" in method or method in ("claude.ai", "subscription"):
+        billing = "subscription"
+    elif "key" in method or "token" in method:
+        billing = "api"
+    else:
+        billing = "unknown"
+    v = {"logged_in": bool(st.get("loggedIn")), "billing": billing, "method": method or None, "provider": provider}
+    _auth_cache.update(t=time.time(), v=v)
+    return v
+
+
 def _run_claude_cli(model: str, system: str, prompt: str, schema: dict) -> tuple[dict, dict]:
     exe = shutil.which("claude")
     if not exe:
@@ -348,7 +385,15 @@ def _run_claude_cli(model: str, system: str, prompt: str, schema: dict) -> tuple
         except json.JSONDecodeError:
             raise AssistantError("Claude Code did not return structured output.") from None
     used = list((d.get("modelUsage") or {}).keys())
-    meta = {"provider": "claude-cli", "model": used[0] if used else (model or "default"), "cost_usd": d.get("total_cost_usd"),
+    usage = d.get("usage") or {}
+    billing = claude_cli_auth(exe)["billing"]
+    cost = d.get("total_cost_usd")
+    # Claude Code always reports an API-price figure. With a subscription nothing is charged per request,
+    # so it is kept only as an estimate ("api_equivalent_usd"), never shown as a cost.
+    meta = {"provider": "claude-cli", "model": used[0] if used else (model or "default"), "billing": billing,
+            "cost_usd": cost if billing in ("api", "cloud") else None,
+            "api_equivalent_usd": cost if billing not in ("api", "cloud") else None,
+            "input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens"),
             "request_id": d.get("session_id")}
     return obj, meta
 
@@ -501,9 +546,10 @@ def _design(db: Session, index: dict[str, dict[str, Any]], ask: str) -> dict[str
 
 def _merge_meta(metas: list[dict[str, Any]]) -> dict[str, Any]:
     out = dict(metas[-1])
-    costs = [m.get("cost_usd") for m in metas if m.get("cost_usd") is not None]
-    if costs:
-        out["cost_usd"] = round(sum(costs), 4)
+    for key in ("cost_usd", "api_equivalent_usd"):
+        vals = [m.get(key) for m in metas if m.get(key) is not None]
+        if vals:
+            out[key] = round(sum(vals), 4)
     for k in ("input_tokens", "output_tokens"):
         vals = [m.get(k) for m in metas if m.get(k) is not None]
         if vals:
