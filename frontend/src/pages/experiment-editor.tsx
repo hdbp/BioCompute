@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, FilePlus2, FlaskConical, Play, Save, Table2, Undo2, Upload } from "lucide-react";
+import { ArrowLeft, Dna, Download, FilePlus2, FlaskConical, Play, Save, Table2, Undo2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
@@ -14,11 +14,12 @@ import { SampleTable } from "@/components/experiment/sample-table";
 import { DesignPanel } from "@/components/experiment/design-panel";
 import { AddFilesFlow, EditFilesDialog, ImportDialog } from "@/components/experiment/file-dialogs";
 import { ValidationPanel, type ValidationResult } from "@/components/experiment/validation";
+import { useReferences } from "@/components/reference-picker";
 import {
   ASSAYS, assayLabel, buildColumns, fromRows, localIssues, runsOf, serverIssueMap, toRows, type CellIssue, type Row,
 } from "@/components/experiment/model";
 
-type MetaPatch = Partial<Pick<ED, "name" | "description" | "assay" | "conditions" | "contrasts" | "custom_columns">>;
+type MetaPatch = Partial<Pick<ED, "name" | "description" | "assay" | "genome" | "conditions" | "contrasts" | "custom_columns">>;
 
 export default function ExperimentEditorPage() {
   const { id = "" } = useParams();
@@ -89,7 +90,7 @@ export default function ExperimentEditorPage() {
 
   const updateMeta = async (patch: MetaPatch) => {
     if (!exp) return;
-    const body = { name: exp.name, description: exp.description, assay: exp.assay, custom_columns: exp.custom_columns,
+    const body = { name: exp.name, description: exp.description, assay: exp.assay, genome: exp.genome ?? null, custom_columns: exp.custom_columns,
       conditions: exp.conditions, contrasts: exp.contrasts, ...patch };
     qc.setQueryData<ExperimentDetail>(["experiment", id], { ...exp, ...patch }); // optimistic
     try {
@@ -153,6 +154,7 @@ export default function ExperimentEditorPage() {
                   {ASSAYS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
                 </Select>
               )}
+              <GenomeSelect value={exp.genome ?? ""} disabled={readOnly} onChange={(g) => updateMeta({ genome: g || null })} />
               <span className="text-xs text-muted">Updated {ago(exp.updated_at)}{exp.created_by ? ` by ${exp.created_by}` : ""}</span>
             </div>
           </div>
@@ -258,4 +260,27 @@ function HeaderText({ value, onSave, disabled, className, multiline, placeholder
   return multiline
     ? <Textarea autoFocus aria-label={label} value={v} onChange={(e) => setV(e.target.value)} onBlur={finish} onKeyDown={keys} rows={2} className="max-w-3xl" />
     : <Input autoFocus aria-label={label} value={v} onChange={(e) => setV(e.target.value)} onBlur={finish} onKeyDown={keys} className="h-10 max-w-xl text-lg font-semibold" />;
+}
+
+/** The reference genome the samples were sequenced against: refgenie genomes on the controller, or any name. */
+function GenomeSelect({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (g: string) => void }) {
+  const { genomes } = useReferences();
+  const names = genomes.map((g) => g.name);
+  const [custom, setCustom] = useState(false);
+  if (disabled) return value ? <Badge><Dna className="size-3" />{value}</Badge> : null;
+  if (custom || (value && !names.includes(value) && !genomes.some((g) => g.aliases.includes(value))) || !names.length) {
+    return (
+      <Input className="h-7 w-40" aria-label="Reference genome" placeholder="Genome, e.g. hg38" defaultValue={value}
+        onBlur={(e) => { if (e.target.value.trim() !== value) onChange(e.target.value.trim()); if (!e.target.value.trim()) setCustom(false); }}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+    );
+  }
+  return (
+    <Select value={value} aria-label="Reference genome" className="h-7 w-auto" title="Reference genome: the launch form fills reference parameters from it"
+      onChange={(e) => e.target.value === "__other" ? setCustom(true) : onChange(e.target.value)}>
+      <option value="">No genome set</option>
+      {genomes.map((g) => <option key={g.digest} value={g.name}>{g.name}</option>)}
+      <option value="__other">Other…</option>
+    </Select>
+  );
 }

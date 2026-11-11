@@ -121,6 +121,16 @@ These limits apply to everything below.
 | Genome browser (igv.js 3.8.10): local FASTA genome + indexed BAM, bigWig and narrowPeak over HTTP range requests | Demonstrated (browser, real pysam/pyBigWig files) |
 | Built-in genomes (igv.org), GenArk accessions, UCSC public hub list, opening hubs, URL tracks | Implemented, **untested**: igv.org, UCSC and hub hosts are not reachable from the dev sandbox. The list API response is parsed defensively and the hub list UI was checked with a canned list |
 
+## Reference genomes (refgenie)
+
+| Feature | Status |
+|---|---|
+| Read an existing refgenie 0.13 setup (Settings, `$REFGENIE`, common paths); genome folder as a read-only data folder; config never written | Demonstrated (`test_references.py` with genomes built by the real refgenie CLI) |
+| `refgenie://genome/asset[.seek][:tag]` resolved at launch, invalid references refused, digests in provenance and `references.json` | Demonstrated (`test_references.py`, real bcflow run) |
+| Asset picker on file/folder parameters and Studio paths, launch-form genome fill, experiment genome, Reference genomes page, refgenie genomes in the genome browser | Demonstrated (browser) |
+| Assistant sees available genomes/assets | Demonstrated (`test_references.py` catalog check; not checked against a live model) |
+| Pulling/building assets from the UI, checking that workers have the genome folder | Not implemented (planned phases 2 and 3) |
+
 ## Milestone 4: advanced distributed execution
 
 | Feature | Status |

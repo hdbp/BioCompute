@@ -1,5 +1,6 @@
 import { Copy, FolderInput, PackagePlus, RotateCcw, Trash2 } from "lucide-react";
 import { PathInput } from "@/components/file-browser";
+import { ReferenceHint, ReferencePicker } from "@/components/reference-picker";
 import type { Issue, ModuleDef, StudioModule } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
@@ -63,7 +64,11 @@ export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, on
                 const mode = p.path_mode === "auto" ? (d.params?.format === "directory-path" ? "dir" : "file") : (p.path_mode ?? "file");
                 return (
                   <Field key={p.name} label={p.name.replace(/_/g, " ")} hint={p.description}>
-                    <PathInput id={`param-${node.id}-${p.name}`} mode={mode} value={String(v ?? "")} onChange={(x) => setParam(p.name, x)} />
+                    <div className="flex gap-1.5">
+                      <div className="min-w-0 flex-1"><PathInput id={`param-${node.id}-${p.name}`} mode={mode} value={String(v ?? "")} onChange={(x) => setParam(p.name, x)} /></div>
+                      <ReferencePicker value={String(v ?? "")} directory={mode === "dir"} onPick={(x) => setParam(p.name, x)} compact />
+                    </div>
+                    <ReferenceHint value={v} />
                   </Field>
                 );
               }

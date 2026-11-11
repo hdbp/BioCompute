@@ -124,6 +124,7 @@ class Experiment(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="")
     # genomics | rnaseq | chipseq | atacseq | proteomics | generic
     assay: Mapped[str] = mapped_column(String(40), default="genomics")
+    genome: Mapped[str | None] = mapped_column(String(120), nullable=True)  # e.g. hg38 (a refgenie genome name)
     custom_columns: Mapped[list[str]] = mapped_column(JSON, default=list)
     conditions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{name,color,description}]
     contrasts: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{id,name,treatment,reference}]

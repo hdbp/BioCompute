@@ -84,6 +84,13 @@ def prepare(db: Session, *, pipeline: Pipeline, version: PipelineVersion, engine
     issues: list[dict[str, Any]] = []
     # effective parameters = schema defaults overlaid with user values (recorded for provenance)
     eff = {**nfschema.defaults(version.schema_json), **{k: v for k, v in params.items() if v not in ("", None)}}
+    # refgenie:// references -> paths; the digests go into provenance
+    from . import refgenie
+    eff, references, ref_issues = refgenie.resolve_params(eff)
+    issues += ref_issues
+    run._references = references  # read by provenance() in the same request
+    if references:
+        (run_dir / "references.json").write_text(json.dumps(references, indent=2))
     # resolve virtual paths in file/directory parameters to absolute paths
     for g in nfschema.normalize(version.schema_json)["groups"]:
         for f in g["fields"]:
@@ -170,6 +177,8 @@ def provenance(db: Session, run: Run, pipeline: Pipeline, version: PipelineVersi
                  "cpus": os.cpu_count()},
         "software": {k: v for k, v in inv.items() if k != "nextflow" and v},
         "params_sha256": hashlib.sha256(json.dumps(run.params, sort_keys=True, default=str).encode()).hexdigest(),
+        # reference genome assets by refgenie digest: the exact reference a result was made with
+        "references": getattr(run, "_references", []),
         "resources": run.resources,
         "placement": run.placement,
         "experiment": {"id": experiment.id, "name": experiment.name, "samples": len(experiment.samples)} if experiment else None,

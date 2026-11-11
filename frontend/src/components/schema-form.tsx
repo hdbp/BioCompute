@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { Badge, Popover, PopoverContent, PopoverTrigger, Switch } from "@/components/ui/misc";
 import { PathInput } from "@/components/file-browser";
+import { ReferenceHint, ReferencePicker } from "@/components/reference-picker";
 
 export type Params = Record<string, unknown>;
 
@@ -114,7 +115,15 @@ function FieldControl({ f, value, def, error, managed, readOnly, onChange }: {
     );
   } else if (f.widget === "file" || f.widget === "directory") {
     control = readOnly ? <Input value={String(v)} readOnly className="font-mono text-[12px]" />
-      : <PathInput id={id} mode={f.widget === "directory" ? "dir" : "file"} value={String(v)} onChange={onChange} invalid={!!error} writableOnly={false} />;
+      : (
+        <>
+          <div className="flex gap-1.5">
+            <div className="min-w-0 flex-1"><PathInput id={id} mode={f.widget === "directory" ? "dir" : "file"} value={String(v)} onChange={onChange} invalid={!!error} writableOnly={false} /></div>
+            <ReferencePicker value={String(v)} directory={f.widget === "directory"} onPick={onChange} compact />
+          </div>
+          <ReferenceHint value={v} />
+        </>
+      );
   } else if (f.widget === "textarea") {
     control = <Textarea id={id} value={String(v)} onChange={(e) => onChange(e.target.value)} readOnly={readOnly} aria-invalid={!!error} />;
   } else {

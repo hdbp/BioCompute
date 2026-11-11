@@ -53,7 +53,7 @@ def experiment_detail(eid: str, _: User = Depends(require_viewer), db: Session =
 @router.put("/{eid}", response_model=ExperimentDetail)
 def update_experiment(eid: str, body: ExperimentIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
     e = get_exp(db, eid)
-    for k, v in body.model_dump().items():
+    for k, v in body.model_dump(exclude_unset=True).items():  # fields a client does not send stay as they are
         setattr(e, k, v)
     db.commit()
     return e

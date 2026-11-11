@@ -435,6 +435,11 @@ per_sample module. "aggregate" modules run once over all samples; inputs marked 
 (for example MultiQC collecting QC files from several steps).
 - Every input must be connected; inputs not marked multiple take exactly one edge. No cycles.
 - Node params are name/value strings for that module's parameters; leave defaults out.
+- Reference genomes: the catalog's reference_genomes lists the genomes and assets (with their seek keys) that the \
+controller's refgenie setup holds. When the user names one of those genomes, set the input_file node's default_path \
+to refgenie://<genome>/<asset>, adding .<seek_key> for a specific file (refgenie://hg38/fasta.fai) and .dir when the \
+node's format is directory-path (refgenie://hg38/bowtie2_index.dir). Use only genomes and assets that are listed; \
+otherwise leave default_path empty and say which asset is missing (it can be added with refgenie pull or refgenie build).
 - Where the data lives is chosen when the pipeline is launched (an experiment, a samplesheet or a FASTQ folder), so never \
 invent file paths. Keep the input nodes generic: label the samplesheet node after the reads (e.g. "PRO-seq reads").
 
@@ -463,7 +468,21 @@ def catalog(index: dict[str, dict[str, Any]]) -> str:
             "tools": tools, "installed_on_controller": all(shutil.which(t) for t in tools) if tools else True,
             "user_defined": bool(m.get("user")),
         })
-    return json.dumps({"port_types": list(PORT_TYPES), "modules": rows}, indent=1)
+    return json.dumps({"port_types": list(PORT_TYPES), "modules": rows, "reference_genomes": _references()}, indent=1)
+
+
+def _references() -> list[dict[str, Any]]:
+    """Genomes and assets of the controller's refgenie setup (empty without one)."""
+    from . import refgenie
+
+    try:
+        if not refgenie.status().get("ok"):
+            return []
+        return [{"genome": g["name"], "aliases": g["aliases"],
+                 "assets": {a["name"]: sorted({k for t in a["tags"] for k in t["seek_keys"]}) for a in g["assets"]}}
+                for g in refgenie.catalog()]
+    except Exception:  # noqa: BLE001 - references are optional context
+        return []
 
 
 def _graph_as_draft(graph: dict[str, Any]) -> dict[str, Any]:

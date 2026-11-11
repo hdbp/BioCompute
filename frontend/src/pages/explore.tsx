@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ChevronRight, Database, Dna, Download, File, FileImage, FileSpreadsheet, FileText, Folder, FolderOpen, Lock, Loader2, Telescope,
+  ChevronRight, Database, Dna, Download, File, FileImage, FileSpreadsheet, FileText, Folder, FolderOpen, Library, Lock, Loader2, Telescope,
 } from "lucide-react";
 import { api, authed, errMsg, qs } from "@/lib/api";
 import type { Project, Run } from "@/lib/types";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { TableView } from "@/components/explore/table-view";
+import { ReferencesView } from "@/components/explore/references-view";
 import { MissingDataHint } from "@/components/missing-data-hint";
 import { AddToProject, ProjectPanel, useProjects } from "@/components/explore/projects";
 import { trackId, useExplorer, type TrackRef } from "@/components/explore/store";
@@ -30,7 +31,8 @@ interface Info {
 export default function ExplorePage() {
   const [params, setParams] = useSearchParams();
   const path = params.get("path");
-  const tab = params.get("tab") === "genome" ? "genome" : "files";
+  const tabParam = params.get("tab");
+  const tab = tabParam === "genome" || tabParam === "references" ? tabParam : "files";
   const roots = useQuery({ queryKey: ["roots"], queryFn: () => api.get<Root[]>("/api/datasets/roots") });
   const dir = params.get("dir") ?? (path ? parentOf(path) : roots.data?.[0] ? `${roots.data[0].name}:` : null);
   const [genomeMounted, setGenomeMounted] = useState(tab === "genome");
@@ -56,8 +58,8 @@ export default function ExplorePage() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-1 border-b border-line bg-surface px-3 pt-2">
           <Telescope className="mr-1 size-4 text-accent" />
-          {([["files", "File viewer", FileText], ["genome", "Genome browser", Dna]] as const).map(([k, l, Icon]) => (
-            <button key={k} onClick={() => go({ tab: k === "files" ? null : "genome" })} aria-pressed={tab === k}
+          {([["files", "File viewer", FileText], ["genome", "Genome browser", Dna], ["references", "Reference genomes", Library]] as const).map(([k, l, Icon]) => (
+            <button key={k} onClick={() => go({ tab: k === "files" ? null : k })} aria-pressed={tab === k}
               className={cn("-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px]", tab === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>
               <Icon className="size-3.5" />{l}{k === "genome" && nTracks > 0 && <span className="rounded bg-raised px-1 text-[11px] tabular-nums">{nTracks}</span>}
             </button>
@@ -67,6 +69,7 @@ export default function ExplorePage() {
           <div className={tab === "files" ? "" : "hidden"}>
             {path ? <FileView path={path} onOpenGenome={() => go({ tab: "genome" })} project={project} projects={projects.data ?? []} /> : <Intro />}
           </div>
+          {tab === "references" && <ReferencesView onOpenGenome={() => go({ tab: "genome" })} onBrowse={(d) => go({ dir: d, path: null, tab: null })} />}
           {genomeMounted && (
             <div className={tab === "genome" ? "" : "hidden"}>
               <Suspense fallback={<p className="flex items-center gap-2 text-[13px] text-muted"><Loader2 className="size-4 animate-spin" />Loading the genome browser…</p>}>

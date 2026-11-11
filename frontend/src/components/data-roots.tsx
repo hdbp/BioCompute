@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
 import { ControllerFolderPicker } from "@/components/folder-picker";
 
-export interface DataRootInfo { name: string; path: string; restricted: boolean; writable: boolean; description: string; exists: boolean; source?: "settings" | "ui" }
+export interface DataRootInfo { name: string; path: string; restricted: boolean; writable: boolean; description: string; exists: boolean; source?: "settings" | "ui" | "refgenie" }
 interface Check {
   path: string; ok: boolean; errors: string[]; warnings: string[]; exists: boolean; readable?: boolean; writable_possible?: boolean;
   entries?: string[]; entry_count?: number; suggested_name?: string;
@@ -42,7 +42,7 @@ export function DataRootsPanel({ roots, admin }: { roots: DataRootInfo[]; admin:
               {r.restricted && <Badge tone="wait"><Lock className="size-3" />restricted</Badge>}
               <Badge>{r.writable ? "writable" : "read-only"}</Badge>
               {!r.exists && <Badge tone="bad">missing on disk</Badge>}
-              <span className="ml-auto text-[11px] text-muted">{r.source === "ui" ? "added here" : "from BIOCOMPUTE_DATA_ROOTS"}</span>
+              <span className="ml-auto text-[11px] text-muted">{r.source === "ui" ? "added here" : r.source === "refgenie" ? "refgenie genome folder (always read-only)" : "from BIOCOMPUTE_DATA_ROOTS"}</span>
             </div>
             <p className="mt-0.5 font-mono text-[12px] text-muted">{r.path}</p>
             {r.description && <p className="text-xs text-muted">{r.description}</p>}

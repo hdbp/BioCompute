@@ -1,0 +1,43 @@
+config_version: 0.4
+genome_folder: @ROOT@/genomes
+genome_servers:
+- http://refgenomes.databio.org
+genomes:
+  dd975ca3c2556c91048bd355d133ddb2b8ffb3eb093c556b:
+    aliases:
+    - toy
+    assets:
+      bowtie2_index:
+        default_tag: v2.5
+        tags:
+          v2.5:
+            asset_digest: 79d568bca24c85ae1c387a939e109309
+            asset_path: @ROOT@/idx
+            seek_keys:
+              bowtie2_index: toy
+      fasta:
+        asset_description: DNA sequences in the FASTA format, indexed FASTA (produced
+          with samtools index) and chromosome sizes file
+        default_tag: default
+        tags:
+          default:
+            asset_digest: fc8edcb7a5f91e31d165406d370f0862
+            asset_parents: []
+            asset_path: fasta
+            seek_keys:
+              chrom_sizes: dd975ca3c2556c91048bd355d133ddb2b8ffb3eb093c556b.chrom.sizes
+              dir: .
+              fai: dd975ca3c2556c91048bd355d133ddb2b8ffb3eb093c556b.fa.fai
+              fasta: dd975ca3c2556c91048bd355d133ddb2b8ffb3eb093c556b.fa
+      gencode_gtf:
+        asset_description: GTF annotation asset which provides access to all annotated
+          transcripts which make up an Ensembl gene set.
+        default_tag: default
+        tags:
+          default:
+            asset_digest: 63f526e4fa943a57ed677d3f6d4b0cff
+            asset_parents: []
+            asset_path: gencode_gtf
+            seek_keys:
+              dir: .
+              gencode_gtf: dd975ca3c2556c91048bd355d133ddb2b8ffb3eb093c556b.gtf.gz

@@ -172,6 +172,7 @@ class ExperimentIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
     assay: Literal["genomics", "rnaseq", "chipseq", "atacseq", "cutandrun", "methylation", "proteomics", "generic"] = "genomics"
+    genome: str | None = Field(default=None, max_length=120)
     custom_columns: list[str] = []
     conditions: list[dict[str, Any]] = []
     contrasts: list[dict[str, Any]] = []
@@ -182,6 +183,7 @@ class ExperimentOut(ORM):
     name: str
     description: str
     assay: str
+    genome: str | None = None
     custom_columns: list[str]
     conditions: list[dict[str, Any]]
     contrasts: list[dict[str, Any]]

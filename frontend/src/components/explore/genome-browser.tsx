@@ -9,6 +9,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { PathInput } from "@/components/file-browser";
 import { GENOMES, genomeLabel, igvGenome, igvTrack, trackId, useExplorer, type GenomeChoice } from "./store";
 import { HubDialog } from "./hub-dialog";
+import { refgenieGenomeChoice, useReferences } from "@/components/reference-picker";
 
 /** igv.js genome browser. Tracks and genome live in the explorer store (persisted), so the view survives navigation. */
 export default function GenomeBrowser({ visible }: { visible: boolean }) {
@@ -162,7 +163,10 @@ function UrlTrackDialog({ open, onOpenChange, onAdd }: { open: boolean; onOpenCh
 }
 
 function GenomeDialog({ open, onOpenChange, onPick }: { open: boolean; onOpenChange: (o: boolean) => void; onPick: (g: GenomeChoice) => void }) {
-  const [mode, setMode] = useState<"fasta" | "genark" | "hub">("fasta");
+  const { genomes: refGenomes } = useReferences();
+  const [mode, setMode] = useState<"refgenie" | "fasta" | "genark" | "hub">("fasta");
+  const [refName, setRefName] = useState("");
+  useEffect(() => { if (open && refGenomes.length) { setMode("refgenie"); setRefName((n) => n || refGenomes[0].name); } }, [open, refGenomes]);
   const [fasta, setFasta] = useState("");
   const [annot, setAnnot] = useState("");
   const [acc, setAcc] = useState("");
@@ -179,15 +183,30 @@ function GenomeDialog({ open, onOpenChange, onPick }: { open: boolean; onOpenCha
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
 
+  const useRef_ = async () => {
+    setBusy(true);
+    try { onPick(await refgenieGenomeChoice(refName)); } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent title="Other genome" description="Use a reference from your data folders (works offline), any NCBI assembly through UCSC GenArk, or an assembly hub.">
         <div className="space-y-4">
           <div className="flex gap-1 rounded-md border border-line p-0.5 text-[13px]" role="group">
-            {([["fasta", "FASTA on the controller"], ["genark", "GenArk accession"], ["hub", "Assembly hub"]] as const).map(([k, l]) => (
+            {([...(refGenomes.length ? [["refgenie", "refgenie"]] as const : []), ["fasta", "FASTA on the controller"], ["genark", "GenArk accession"], ["hub", "Assembly hub"]] as const).map(([k, l]) => (
               <button key={k} onClick={() => setMode(k)} className={`flex-1 rounded px-2 py-1 ${mode === k ? "bg-raised text-text" : "text-muted"}`} aria-pressed={mode === k}>{l}</button>
             ))}
           </div>
+          {mode === "refgenie" && (
+            <>
+              <Field label="Genome from refgenie on the controller" hint="Its FASTA (with .fai) and, if present, a GTF annotation. Works offline.">
+                <Select value={refName} onChange={(e) => setRefName(e.target.value)}>
+                  {refGenomes.map((g) => <option key={g.digest} value={g.name}>{g.name}</option>)}
+                </Select>
+              </Field>
+              <DialogFooter><Button variant="primary" onClick={useRef_} loading={busy} disabled={!refName}>Use this genome</Button></DialogFooter>
+            </>
+          )}
           {mode === "fasta" && (
             <>
               <Field label="Reference FASTA" hint="Needs a samtools faidx index (.fai) next to it"><PathInput mode="file" value={fasta} onChange={setFasta} kinds={["fasta"]} /></Field>

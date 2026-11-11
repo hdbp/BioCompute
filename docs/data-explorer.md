@@ -66,6 +66,12 @@ under *Columns*. *Table & plots* switches back to the generic table.
 
 The statistics are the ones in your file. Nothing is recomputed; the cut-offs only select genes.
 
+## Reference genomes
+
+The *Reference genomes* tab lists the genomes of the controller's refgenie setup with their assets, tags, digests and
+files. *Copy reference* gives a `refgenie://` reference for pipeline parameters; *Open in genome browser* loads the
+genome's FASTA and GTF from the controller. See [reference-genomes.md](reference-genomes.md).
+
 ## Genome browser
 
 The browser is [igv.js](https://github.com/igvteam/igv.js) 3.8. Tracks and genome are remembered in your

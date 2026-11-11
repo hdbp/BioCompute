@@ -226,6 +226,11 @@ open(path, "w").write("\n".join(lines) + "\n")
 PY
 fi
 [ -n "$port" ] && cfg_set BIOCOMPUTE_PORT "$port"
+# refgenie: the service does not see your shell's $REFGENIE, so remember it (read-only use; nothing is written there)
+if [ -n "${REFGENIE:-}" ] && [ -e "$REFGENIE" ] && [ -z "$(cfg_get BIOCOMPUTE_REFGENIE_CONFIG)" ]; then
+  say "Using your refgenie genomes from $REFGENIE (read-only)"
+  cfg_set BIOCOMPUTE_REFGENIE_CONFIG "$REFGENIE"
+fi
 port="$(cfg_get BIOCOMPUTE_PORT)"; port="${port:-8045}"
 state_dir="$(cfg_get BIOCOMPUTE_STATE_DIR)"; state_dir="${state_dir:-$backend/var/state}"
 mkdir -p "$state_dir"

@@ -42,7 +42,8 @@ in step 2 (*Samples*):
 In Studio you can set a default samplesheet or FASTQ folder on the node (Inspector → *samplesheet* /
 *fastq folder*). The node shows `data: …`, and the launch form is pre-filled with it. **Reference / parameter
 file** nodes likewise take a *default path* (an index, a FASTA, a GTF). All paths must be inside a data folder
-(Settings → Data folders).
+(Settings → Data folders), or a refgenie reference such as `refgenie://hg38/bowtie2_index.dir`
+(DNA button next to the path; see [reference-genomes.md](reference-genomes.md)).
 
 ## Module contract
 

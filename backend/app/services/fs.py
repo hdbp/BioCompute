@@ -60,6 +60,14 @@ class Root:
 _ui_roots: dict[str, Root] = {}
 
 
+_extra_roots: dict[str, dict[str, Root]] = {}
+
+
+def set_extra_roots(source: str, items: list[Root]) -> None:
+    """Read-only folders contributed by integrations (e.g. the refgenie genome folder)."""
+    _extra_roots[source] = {r.name: r for r in items}
+
+
 def set_ui_roots(items: list[Root]) -> None:
     """Folders added in Settings (stored in the database); BIOCOMPUTE_DATA_ROOTS wins on a name clash."""
     global _ui_roots
@@ -81,6 +89,9 @@ def roots() -> dict[str, Root]:
         )
     for name, r in _ui_roots.items():
         out.setdefault(name, r)
+    for group in _extra_roots.values():
+        for name, r in group.items():
+            out.setdefault(name, r)
     return out
 
 

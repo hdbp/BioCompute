@@ -94,6 +94,7 @@ sudo cat /var/lib/biocompute/setup_code.txt  # one-time code for the first-run a
 Single-machine install with your own data: [`docs/local-install.md`](docs/local-install.md).
 See [`docs/deployment.md`](docs/deployment.md) for TLS, Nextflow, Apptainer and HTCondor setup,
 backups and upgrades. To add workers, see [`docs/worker-agent.md`](docs/worker-agent.md).
+Reference genomes from an existing refgenie setup: [`docs/reference-genomes.md`](docs/reference-genomes.md).
 
 ## Tests
 

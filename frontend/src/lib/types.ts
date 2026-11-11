@@ -43,7 +43,7 @@ export interface Sample {
   files: Record<string, unknown>; attributes: Record<string, unknown>;
 }
 export interface Experiment {
-  id: string; name: string; description: string; assay: string; custom_columns: string[];
+  id: string; name: string; description: string; assay: string; genome?: string | null; custom_columns: string[];
   conditions: { name: string; color?: string; description?: string }[];
   contrasts: { id?: string; name: string; treatment: string; reference: string }[];
   created_by: string | null; created_at: string; updated_at: string; sample_count: number;

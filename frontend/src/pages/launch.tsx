@@ -13,6 +13,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { PathInput } from "@/components/file-browser";
 import { TailnetTag } from "@/components/source-tag";
 import { formErrors, SchemaForm, type Params } from "@/components/schema-form";
+import { ReferenceGenomeBar } from "@/components/reference-picker";
 
 interface Candidate {
   node_id: string; hostname: string; eligible: boolean; reasons: string[]; warnings: string[]; facts: string[];
@@ -260,6 +261,10 @@ export default function LaunchPage() {
                     <span className="text-muted">Load preset</span>
                     {presets.data!.map((p) => <Button key={p.id} size="sm" variant="secondary" onClick={() => setParams({ ...schema.data!.defaults, ...p.params })}>{p.name}</Button>)}
                   </div>
+                )}
+                {schema.data.form.has_schema && (
+                  <ReferenceGenomeBar fields={groups.flatMap((g) => g.fields)} params={params} initialGenome={usingExperiment ? exp?.genome : null}
+                    onApply={(u) => setParams((p) => ({ ...p, ...u }))} />
                 )}
                 {schema.data.form.has_schema
                   ? <SchemaForm groups={groups} params={params} defaults={schema.data.defaults} onChange={setParams} serverIssues={serverByField} compact

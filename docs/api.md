@@ -77,11 +77,13 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `GET    /api/datasets/preview`
 - `GET    /api/datasets/roots`
 - `GET    /api/datasets/roots/check`
+- `GET    /api/datasets/roots/folders`
 - `GET    /api/datasets/search`
 - `PATCH  /api/datasets/roots/{name}`
 - `POST   /api/datasets`
 - `POST   /api/datasets/mkdir`
 - `POST   /api/datasets/roots`
+- `POST   /api/datasets/roots/folders`
 
 ### explore
 
@@ -191,6 +193,15 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `POST   /api/assistant/review`
 - `POST   /api/assistant/test`
 - `PUT    /api/assistant/config`
+
+### references
+
+- `GET    /api/references/browser-genome`
+- `GET    /api/references/genomes`
+- `GET    /api/references/resolve`
+- `GET    /api/references/status`
+- `POST   /api/references/suggest`
+- `PUT    /api/references/config`
 
 ### system
 

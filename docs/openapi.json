@@ -2602,6 +2602,101 @@
                 }
             }
         },
+        "/api/datasets/roots/folders": {
+            "get": {
+                "tags": [
+                    "data"
+                ],
+                "summary": "Browse Controller Folders",
+                "description": "Folder picker for adding a data folder: sub-folders of a controller folder (no file names).",
+                "operationId": "browse_controller_folders_api_datasets_roots_folders_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "path",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Path"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "data"
+                ],
+                "summary": "Create Controller Folder",
+                "operationId": "create_controller_folder_api_datasets_roots_folders_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FolderIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/datasets/roots/{name}": {
             "patch": {
                 "tags": [
@@ -5773,7 +5868,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/ConfigIn"
+                                "$ref": "#/components/schemas/app__routers__assistant__ConfigIn"
                             }
                         }
                     },
@@ -7275,6 +7370,234 @@
                 }
             }
         },
+        "/api/references/status": {
+            "get": {
+                "tags": [
+                    "references"
+                ],
+                "summary": "Status",
+                "operationId": "status_api_references_status_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/references/config": {
+            "put": {
+                "tags": [
+                    "references"
+                ],
+                "summary": "Set Config",
+                "operationId": "set_config_api_references_config_put",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/app__routers__references__ConfigIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/references/genomes": {
+            "get": {
+                "tags": [
+                    "references"
+                ],
+                "summary": "Genomes",
+                "operationId": "genomes_api_references_genomes_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/references/resolve": {
+            "get": {
+                "tags": [
+                    "references"
+                ],
+                "summary": "Resolve",
+                "operationId": "resolve_api_references_resolve_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "uri",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Uri"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/references/suggest": {
+            "post": {
+                "tags": [
+                    "references"
+                ],
+                "summary": "Suggest",
+                "description": "refgenie:// values for the reference parameters of a pipeline, for one genome.",
+                "operationId": "suggest_api_references_suggest_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SuggestIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/references/browser-genome": {
+            "get": {
+                "tags": [
+                    "references"
+                ],
+                "summary": "Browser Genome",
+                "description": "Data-folder paths of a genome's FASTA (+ .fai) and annotation, for the Data Explorer's genome browser.",
+                "operationId": "browser_genome_api_references_browser_genome_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "genome",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Genome"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/health": {
             "get": {
                 "tags": [
@@ -7877,58 +8200,6 @@
                 ],
                 "title": "BuildIn"
             },
-            "ConfigIn": {
-                "properties": {
-                    "provider": {
-                        "type": "string",
-                        "title": "Provider"
-                    },
-                    "model": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Model"
-                    },
-                    "effort": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Effort",
-                        "default": "high"
-                    },
-                    "api_key": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Api Key"
-                    },
-                    "clear_key": {
-                        "type": "boolean",
-                        "title": "Clear Key",
-                        "default": false
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "provider"
-                ],
-                "title": "ConfigIn"
-            },
             "DESave": {
                 "properties": {
                     "path": {
@@ -8140,6 +8411,17 @@
                         "type": "string",
                         "title": "Assay"
                     },
+                    "genome": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Genome"
+                    },
                     "custom_columns": {
                         "items": {
                             "type": "string"
@@ -8241,6 +8523,18 @@
                         "title": "Assay",
                         "default": "genomics"
                     },
+                    "genome": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 120
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Genome"
+                    },
                     "custom_columns": {
                         "items": {
                             "type": "string"
@@ -8291,6 +8585,17 @@
                     "assay": {
                         "type": "string",
                         "title": "Assay"
+                    },
+                    "genome": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Genome"
                     },
                     "custom_columns": {
                         "items": {
@@ -8398,6 +8703,24 @@
                 },
                 "type": "object",
                 "title": "ExperimentValidateIn"
+            },
+            "FolderIn": {
+                "properties": {
+                    "parent": {
+                        "type": "string",
+                        "title": "Parent"
+                    },
+                    "name": {
+                        "type": "string",
+                        "title": "Name"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "parent",
+                    "name"
+                ],
+                "title": "FolderIn"
             },
             "HTTPValidationError": {
                 "properties": {
@@ -10986,6 +11309,28 @@
                 ],
                 "title": "StudioOut"
             },
+            "SuggestIn": {
+                "properties": {
+                    "genome": {
+                        "type": "string",
+                        "title": "Genome"
+                    },
+                    "fields": {
+                        "items": {
+                            "additionalProperties": true,
+                            "type": "object"
+                        },
+                        "type": "array",
+                        "title": "Fields"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "genome",
+                    "fields"
+                ],
+                "title": "SuggestIn"
+            },
             "TokenCreate": {
                 "properties": {
                     "label": {
@@ -11164,6 +11509,75 @@
                     "visibility"
                 ],
                 "title": "VisibilityIn"
+            },
+            "app__routers__assistant__ConfigIn": {
+                "properties": {
+                    "provider": {
+                        "type": "string",
+                        "title": "Provider"
+                    },
+                    "model": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Model"
+                    },
+                    "effort": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Effort",
+                        "default": "high"
+                    },
+                    "api_key": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Api Key"
+                    },
+                    "clear_key": {
+                        "type": "boolean",
+                        "title": "Clear Key",
+                        "default": false
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "provider"
+                ],
+                "title": "ConfigIn"
+            },
+            "app__routers__references__ConfigIn": {
+                "properties": {
+                    "config": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Config"
+                    }
+                },
+                "type": "object",
+                "title": "ConfigIn"
             }
         },
         "securitySchemes": {

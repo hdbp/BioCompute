@@ -8,6 +8,7 @@ import { can, useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
 import { AssistantSettings } from "@/components/assistant-settings";
 import { DataRootsPanel } from "@/components/data-roots";
+import { ReferencesSettingsPanel } from "@/components/references-settings";
 import { UserOnboarding } from "@/components/user-onboarding";
 import { cn, when } from "@/lib/utils";
 import { KV, PageHeader } from "@/components/page";
@@ -51,6 +52,7 @@ export default function SettingsPage() {
           {d && (
             <div className="grid gap-5 lg:grid-cols-2">
               <DataRootsPanel roots={d.data_roots} admin={admin} />
+              <ReferencesSettingsPanel admin={admin} />
               <Panel className="p-4">
                 <dl>
                   <KV k="Site" v={d.site_name} />

@@ -11,3 +11,4 @@ zeroconf>=0.136
 python-multipart>=0.0.18
 anthropic>=2.8
 openai>=3.49
+refgenconf>=0.13
