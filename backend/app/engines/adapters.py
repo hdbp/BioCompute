@@ -96,6 +96,9 @@ class NextflowAdapter:
         lines += ["process {", f"    resourceLimits = [ cpus: {cpus}, memory: '{mem:g} GB', time: '{int(resources.get('max_time_h') or 240)}h' ]", "}"]
         # a resumed run writes its report and timeline again: without overwrite Nextflow stops with "file already exists"
         lines += ["report { overwrite = true }", "timeline { overwrite = true }"]
+        if cleanup_wanted(resources):
+            # intermediate files in the work folder are deleted when the run succeeds (a failed run keeps them for -resume)
+            lines += ["cleanup = true"]
         lines += ["trace {", "    enabled = true", "    overwrite = true",
                   "    fields = 'task_id,hash,native_id,process,tag,name,status,exit,submit,start,complete,duration,realtime,%cpu,peak_rss,workdir'",
                   "}"]
@@ -125,6 +128,11 @@ class NextflowAdapter:
         return LaunchSpec(argv=argv, env=env, cwd=str(run_dir))
 
 
+def cleanup_wanted(resources: dict[str, Any]) -> bool:
+    """Delete intermediate files of this run once they are no longer needed (unless the run asked to keep them)."""
+    return get_settings().cleanup_intermediates and not resources.get("keep_work")
+
+
 class BcflowAdapter:
     name = "bcflow"
 
@@ -152,6 +160,8 @@ class BcflowAdapter:
             argv += ["--samplesheet", params["input"]]
         if resume_session:
             argv.append("--resume")
+        if cleanup_wanted(resources):
+            argv.append("--cleanup")  # each task's folder goes as soon as nothing needs it any more
         return LaunchSpec(argv=argv, env={}, cwd=str(run_dir))
 
 

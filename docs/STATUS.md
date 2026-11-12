@@ -92,6 +92,16 @@ These limits apply to everything below.
 | New accounts after the first: requests from the sign-in page approved by an admin (role chosen), single-use invite links with role and expiry, on/off switch | Demonstrated (`test_account_requests_and_invites`, three-person browser test) |
 | Per-user pipelines, Studio workflows and modules: private by default, shared with the lab on request; others can view/run/copy but not change; admins see all; per-user favorites; sharing a workflow shares its modules and pipeline | Demonstrated (`test_ownership.py`, two-user browser test); migration keeps existing items shared |
 
+## Storage and intermediate files
+
+| Feature | Status |
+|---|---|
+| Intermediate files deleted during a run: bcflow removes a step's folder once every step that reads it has finished; Nextflow runs get `cleanup = true`; the work folder is removed after a successful run (failed runs keep it for Resume). Opt out per run ("Keep intermediate files") or globally (`BIOCOMPUTE_CLEANUP_INTERMEDIATES=false`) | bcflow and the post-run clean-up demonstrated (`test_storage_cleanup.py`); the Nextflow `cleanup` setting is written to the config but not run with real Nextflow here |
+| Run page: delete intermediate files, delete a run (with its results folder only when BioCompute created it and no other run writes there) | Demonstrated (`test_storage_cleanup.py`) |
+| Settings, Storage (admins): space used by work folders, logs and pipeline versions, free disk per folder, bulk clean-up of finished runs, deleting unused pipeline versions | Demonstrated (`test_storage_cleanup.py`) |
+| Pipeline versions: unchanged files shared by hard links inside the store only, written by replace-on-save; a version no run used can be deleted | Demonstrated (`test_storage_cleanup.py`) |
+| Machine usage samples pruned after `BIOCOMPUTE_METRICS_RETENTION_DAYS` | Implemented, not tested |
+
 ## Installation
 
 | Feature | Status |

@@ -68,7 +68,7 @@ export interface Run {
 }
 export type RunStatus = "pending" | "preflight" | "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "lost";
 export interface RunEvent { id: number; ts: string; kind: string; message: string; data: Record<string, unknown> }
-export interface RunDetail extends Run { provenance: Record<string, unknown>; events: RunEvent[] }
+export interface RunDetail extends Run { provenance: Record<string, unknown>; events: RunEvent[]; work_bytes?: number; results_deletable?: boolean }
 
 export interface Allocation {
   enabled: boolean; max_cpus: number; max_memory_gb: number; gpus_allowed: number; scratch_limit_gb: number;

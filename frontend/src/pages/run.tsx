@@ -2,16 +2,18 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowDownToLine, ArrowLeft, Ban, CheckCircle2, CircleAlert, FileText, FolderOpen, RotateCw, SlidersHorizontal, Telescope } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, Ban, CheckCircle2, CircleAlert, Eraser, FileText, FolderOpen, MoreHorizontal, RotateCw, SlidersHorizontal, Telescope, Trash2 } from "lucide-react";
 import { api, ApiError, authed, errMsg, qs, ensureMediaCookie } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { setLaunchPrefill } from "@/lib/handoff";
 import type { FormSchema, ProcessProgress, RunDetail, Task } from "@/lib/types";
 import { bytes, cn, duration, when } from "@/lib/utils";
 import { Ago, KV, PageHeader, QueryError, usePageTitle } from "@/components/page";
-import { Badge, Empty, Meter, Panel, PanelHeader, Skeleton, Switch, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/misc";
+import { Badge, Checkbox, Empty, Meter, Panel, PanelHeader, Skeleton, Switch, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { confirmDialog } from "@/components/ui/confirm";
+import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/menu";
 import { humanLabel, isChanged } from "@/components/schema-form";
 import { RunStatusBadge } from "@/components/status";
 
@@ -91,10 +93,12 @@ export default function RunPage() {
         actions={<>
           {mayAct && active && <Button variant="danger" loading={cancel.isPending} onClick={askCancel}><Ban />Cancel</Button>}
           {mayAct && !active && r.status !== "completed" && <Button variant="primary" loading={resume.isPending} onClick={() => resume.mutate()} title="Continue from the steps that already finished"><RotateCw />Resume</Button>}
-          {mayAct && !active && r.status === "completed" && <Button variant="secondary" loading={resume.isPending} onClick={() => resume.mutate()} title="Finished steps are reused from the cache; only what changed is computed again"><RotateCw />Run again</Button>}
+          {mayAct && !active && r.status === "completed" && <Button variant="secondary" loading={resume.isPending} onClick={() => resume.mutate()}
+            title={r.work_bytes ? "Finished steps are reused from the kept intermediate files; only what changed is computed again" : "Every step runs again (the intermediate files were removed after the run)"}><RotateCw />Run again</Button>}
           {mayAct && !active && !failed && <Button variant="secondary" onClick={runAgain}><SlidersHorizontal />Change parameters and run again</Button>}
           {!active && r.output_vpath && <Button asChild variant="secondary" title={r.status === "completed" ? undefined : "Results written before the run stopped"}><Link to={exploreUrl(r.output_vpath)}><Telescope />Open in Data Explorer</Link></Button>}
           {!active && <Button asChild variant={r.status === "completed" ? "primary" : "secondary"}><Link to={`/results/${r.id}`}><FolderOpen />{r.status === "completed" ? "Open results" : "Open partial results"}</Link></Button>}
+          {mayAct && !active && <RunCleanupMenu r={r} onChanged={refresh} />}
         </>} />
       {run.isError && <p className="mb-4 text-[13px] text-wait" role="status">This page could not be refreshed ({errMsg(run.error)}); it shows the last known state. <button type="button" className="text-accent hover:underline" onClick={() => run.refetch()}>Try again</button></p>}
 
@@ -555,5 +559,68 @@ function LiveLog({ runId, active, engine }: { runId: string; active: boolean; en
           </pre>
         )}
     </Panel>
+  );
+}
+
+
+/** Free disk space: the run's intermediate files, or the whole run (and the results folder it created). */
+function RunCleanupMenu({ r, onChanged }: { r: RunDetail; onChanged: () => void }) {
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [withResults, setWithResults] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const cleanWork = async () => {
+    if (!(await confirmDialog({
+      title: "Delete the intermediate files?",
+      body: <>The files the steps passed to each other ({bytes(r.work_bytes)}) are deleted. Results and the log are kept. Afterwards, Resume or Run again repeats every step.</>,
+      confirmLabel: "Delete intermediate files", danger: true,
+    }))) return;
+    try {
+      const x = await api.post<{ freed: number }>(`/api/runs/${r.id}/clean-work`);
+      toast.success(`${bytes(x.freed)} freed`);
+      onChanged();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+  const del = async () => {
+    setBusy(true);
+    try {
+      const x = await api.del<{ freed: number; results_deleted: boolean }>(`/api/runs/${r.id}${qs({ results: withResults || undefined })}`);
+      toast.success(`Run deleted${x.results_deleted ? " with its results" : ""}: ${bytes(x.freed)} freed`);
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      nav("/jobs");
+    } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild><Button variant="ghost" aria-label="More actions"><MoreHorizontal /></Button></DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem disabled={!r.work_bytes} onSelect={cleanWork}><Eraser />Delete intermediate files{r.work_bytes ? ` (${bytes(r.work_bytes)})` : " (none left)"}</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem danger onSelect={() => { setWithResults(false); setOpen(true); }}><Trash2 />Delete run…</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent title={`Delete ${r.name}?`} description="Its record, log and intermediate files are deleted. This cannot be undone.">
+          <div className="space-y-3 text-[13.5px]">
+            {r.results_deletable ? (
+              <label className="flex items-start gap-2">
+                <Checkbox className="mt-0.5" checked={withResults} onCheckedChange={(v) => setWithResults(!!v)} />
+                <span>Also delete its results folder <span className="font-mono text-[12px]">{r.output_vpath}</span>
+                  <span className="block text-xs text-muted">The run created this folder. Leave it unticked to keep the results.</span></span>
+              </label>
+            ) : (
+              <p className="text-muted">The results folder <span className="font-mono text-[12px]">{r.output_vpath}</span> is kept: it existed before this run (or another run uses it). Remove it in Data Explorer if you no longer need it.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="danger" loading={busy} onClick={del}>{withResults ? "Delete run and results" : "Delete run"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

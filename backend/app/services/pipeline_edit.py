@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -22,6 +23,34 @@ MAX_FILES = 5000
 MAX_EDIT_BYTES = 1_000_000
 # .git is left out: a copy is no longer that commit, and it would be duplicated on every save
 IGNORE = shutil.ignore_patterns("work", ".nextflow*", "results", ".nf-test", ".git")
+
+
+def link_or_copy(src: str, dst: str) -> str:
+    """copytree helper: a hard link (no extra disk space) where possible, else a copy. Files in pipeline folders are
+    never written in place (see safe_write), so a linked file cannot change another version."""
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+    return dst
+
+
+def copy_version(src: str | Path, dest: Path) -> None:
+    """Copy a version folder. Inside BioCompute's pipeline store unchanged files are hard links (BioCompute never
+    writes them in place). A folder outside the store is copied for real: you might edit it there."""
+    store = get_settings().pipelines_path.resolve()
+    inside = Path(src).resolve().is_relative_to(store)
+    shutil.copytree(src, dest, symlinks=True, ignore=IGNORE, copy_function=link_or_copy if inside else shutil.copy2)
+
+
+def safe_write(target: Path, content: str, mode: int | None = None) -> None:
+    """Write a file in a pipeline folder by replacing its directory entry (temp file + rename): a hard-linked
+    original shared with another version is left exactly as it was."""
+    tmp = target.with_name(f".{target.name}.bc-tmp")
+    tmp.write_text(content, encoding="utf-8")
+    if mode is not None:
+        tmp.chmod(mode)
+    os.replace(tmp, target)
 
 
 def is_copy(p: Pipeline) -> bool:
@@ -108,7 +137,7 @@ def write_version(base: PipelineVersion, dest: Path, changes: dict[str, str | No
     """Copy `base` to the new folder `dest` and apply the changes there (None deletes a file)."""
     if dest.exists():
         raise HTTPException(409, "That version folder already exists")
-    shutil.copytree(base.path, dest, symlinks=True, ignore=IGNORE)
+    copy_version(base.path, dest)
     root = dest.resolve()
     applied = []
     for rel, content in changes.items():
@@ -126,11 +155,7 @@ def write_version(base: PipelineVersion, dest: Path, changes: dict[str, str | No
         if len(content.encode()) > MAX_EDIT_BYTES:
             raise HTTPException(413, f"{rel} is larger than 1 MB")
         target.parent.mkdir(parents=True, exist_ok=True)
-        mode = target.stat().st_mode if target.exists() else None
-        target.write_text(content, encoding="utf-8")
-        if mode is not None:
-            target.chmod(mode)
-        elif rel.startswith("bin/"):
-            target.chmod(0o755)
+        mode = target.stat().st_mode & 0o7777 if target.exists() else (0o755 if rel.startswith("bin/") else 0o644)
+        safe_write(target, content, mode)
         applied.append(rel)
     return applied

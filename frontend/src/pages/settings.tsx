@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { PathInput } from "@/components/file-browser";
 import { useTheme } from "@/hooks/theme";
+import { StoragePanel } from "@/components/storage-panel";
 
 interface SettingsData {
   site_name: string; environment: string; database: string; pipelines_dir: string; runs_dir: string; max_concurrent_runs: number;
@@ -59,6 +60,7 @@ export default function SettingsPage() {
           <TabsTrigger value="assistant">AI assistant</TabsTrigger>
           <TabsTrigger value="preferences">Preferences</TabsTrigger>
           {admin && <TabsTrigger value="users">Users</TabsTrigger>}
+          {admin && <TabsTrigger value="storage">Storage</TabsTrigger>}
           {admin && <TabsTrigger value="audit">Audit log</TabsTrigger>}
         </TabsList>
         <TabsContent value="system">
@@ -137,6 +139,7 @@ export default function SettingsPage() {
           </div>
         </TabsContent>
         {admin && <TabsContent value="users"><UserOnboarding /><Users /></TabsContent>}
+        {admin && <TabsContent value="storage"><StoragePanel /></TabsContent>}
         {admin && <TabsContent value="audit"><Audit /></TabsContent>}
       </Tabs>
     </>

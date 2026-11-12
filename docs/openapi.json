@@ -898,6 +898,49 @@
                 }
             }
         },
+        "/api/auth/media-cookie": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Media Cookie",
+                "description": "Give the browser the cookie that opens files, downloads and live updates (no token in their URLs).",
+                "operationId": "media_cookie_api_auth_media_cookie_post",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Clear Media Cookie",
+                "description": "Sign-out: forget the file cookie.",
+                "operationId": "clear_media_cookie_api_auth_media_cookie_delete",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/pipelines": {
             "get": {
                 "tags": [
@@ -1844,6 +1887,61 @@
                 }
             }
         },
+        "/api/pipelines/{pid}/versions/{version_id}": {
+            "delete": {
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Delete Version",
+                "description": "Delete a version that no run used. Its files are removed only when they are in BioCompute's pipeline store\n(an imported folder of yours is never deleted).",
+                "operationId": "delete_version_api_pipelines__pid__versions__version_id__delete",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "pid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Pid"
+                        }
+                    },
+                    {
+                        "name": "version_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Version Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/pipelines/{pid}/presets": {
             "get": {
                 "tags": [
@@ -2568,6 +2666,7 @@
                     "experiments"
                 ],
                 "summary": "Duplicate Experiment",
+                "description": "Your own copy of an experiment you can see.",
                 "operationId": "duplicate_experiment_api_experiments__eid__duplicate_post",
                 "security": [
                     {
@@ -2964,6 +3063,64 @@
                             "text/plain": {
                                 "schema": {
                                     "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/experiments/{eid}/visibility": {
+            "put": {
+                "tags": [
+                    "experiments"
+                ],
+                "summary": "Set Visibility",
+                "description": "Share an experiment with the lab, or make it private (owner or admin).",
+                "operationId": "set_visibility_api_experiments__eid__visibility_put",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "eid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Eid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/_VisIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ExperimentDetail"
                                 }
                             }
                         }
@@ -3772,6 +3929,16 @@
                             "default": 200,
                             "title": "Limit"
                         }
+                    },
+                    {
+                        "name": "mine",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false,
+                            "title": "Mine"
+                        }
                     }
                 ],
                 "responses": {
@@ -3891,6 +4058,60 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "tags": [
+                    "runs"
+                ],
+                "summary": "Delete Run",
+                "description": "Delete a finished run: its record, log and intermediate files; with results=true also the output folder it created.",
+                "operationId": "delete_run_api_runs__rid__delete",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "rid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Rid"
+                        }
+                    },
+                    {
+                        "name": "results",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false,
+                            "title": "Results"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/runs/{rid}/cancel": {
@@ -3971,6 +4192,52 @@
                                 "schema": {
                                     "$ref": "#/components/schemas/RunOut"
                                 }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/runs/{rid}/clean-work": {
+            "post": {
+                "tags": [
+                    "runs"
+                ],
+                "summary": "Clean Work",
+                "description": "Delete a finished run's intermediate files. Its results are kept; Resume then repeats every step.",
+                "operationId": "clean_work_api_runs__rid__clean_work_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "rid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Rid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
                             }
                         }
                     },
@@ -8395,6 +8662,76 @@
                     }
                 }
             }
+        },
+        "/api/storage": {
+            "get": {
+                "tags": [
+                    "system"
+                ],
+                "summary": "Storage",
+                "description": "What uses disk: run work folders (intermediate files), run logs, pipeline versions; free space per folder.",
+                "operationId": "storage_api_storage_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/storage/clean-work": {
+            "post": {
+                "tags": [
+                    "system"
+                ],
+                "summary": "Clean Work",
+                "description": "Delete the intermediate files of finished runs older than N days (their results and logs stay).",
+                "operationId": "clean_work_api_storage_clean_work_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CleanIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
         }
     },
     "components": {
@@ -8791,6 +9128,32 @@
                 ],
                 "title": "BuildIn"
             },
+            "CleanIn": {
+                "properties": {
+                    "older_than_days": {
+                        "type": "integer",
+                        "maximum": 3650.0,
+                        "minimum": 0.0,
+                        "title": "Older Than Days",
+                        "default": 14
+                    },
+                    "statuses": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "title": "Statuses",
+                        "default": [
+                            "completed",
+                            "failed",
+                            "cancelled",
+                            "lost"
+                        ]
+                    }
+                },
+                "type": "object",
+                "title": "CleanIn"
+            },
             "DESave": {
                 "properties": {
                     "path": {
@@ -9047,6 +9410,16 @@
                         ],
                         "title": "Created By"
                     },
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility",
+                        "default": "lab"
+                    },
+                    "can_edit": {
+                        "type": "boolean",
+                        "title": "Can Edit",
+                        "default": false
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time",
@@ -9125,6 +9498,15 @@
                             }
                         ],
                         "title": "Genome"
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "enum": [
+                            "private",
+                            "lab"
+                        ],
+                        "title": "Visibility",
+                        "default": "lab"
                     },
                     "custom_columns": {
                         "items": {
@@ -9221,6 +9603,16 @@
                             }
                         ],
                         "title": "Created By"
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility",
+                        "default": "lab"
+                    },
+                    "can_edit": {
+                        "type": "boolean",
+                        "title": "Can Edit",
+                        "default": false
                     },
                     "created_at": {
                         "type": "string",
@@ -11238,6 +11630,11 @@
                         ],
                         "title": "Output Vpath"
                     },
+                    "can_edit": {
+                        "type": "boolean",
+                        "title": "Can Edit",
+                        "default": false
+                    },
                     "provenance": {
                         "additionalProperties": true,
                         "type": "object",
@@ -11250,6 +11647,16 @@
                         },
                         "type": "array",
                         "title": "Events"
+                    },
+                    "work_bytes": {
+                        "type": "integer",
+                        "title": "Work Bytes",
+                        "default": 0
+                    },
+                    "results_deletable": {
+                        "type": "boolean",
+                        "title": "Results Deletable",
+                        "default": false
                     }
                 },
                 "type": "object",
@@ -11465,6 +11872,11 @@
                             }
                         ],
                         "title": "Output Vpath"
+                    },
+                    "can_edit": {
+                        "type": "boolean",
+                        "title": "Can Edit",
+                        "default": false
                     }
                 },
                 "type": "object",
@@ -12356,6 +12768,19 @@
                     "visibility"
                 ],
                 "title": "VisibilityIn"
+            },
+            "_VisIn": {
+                "properties": {
+                    "visibility": {
+                        "type": "string",
+                        "title": "Visibility"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "visibility"
+                ],
+                "title": "_VisIn"
             },
             "app__routers__assistant__ConfigIn": {
                 "properties": {

@@ -84,7 +84,8 @@ def test_launch_monitor_results_and_resume(client, auth, tmp_root):
     exp = _make_experiment(client, auth, "launch test")
     body = {"pipeline_id": PID, "engine": "bcflow", "experiment_id": exp["id"], "output_dir": "results:e2e/run1",
             "params": {"min_read_length": 60, "min_mean_quality": 25, "report_title": "E2E QC"},
-            "resources": {"max_cpus": 2, "max_memory_gb": 2}}
+            # keep_work: this run is resumed after it completed, so its finished steps must still be there
+            "resources": {"max_cpus": 2, "max_memory_gb": 2, "keep_work": True}}
     # validation failure surfaces as 422 with issues
     bad = dict(body, params={"min_mean_quality": 500})
     r = client.post("/api/runs", headers=auth, json=bad)

@@ -265,7 +265,7 @@ def fork(pid: str, body: ForkIn, user: User = Depends(require_scientist), db: Se
         return {"kind": "studio", "workflow_id": w.id, "from": f"{p.name} {v.version}"}
     dest = pedit.new_copy_dir(svc.slugify(body.name))
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(v.path, dest, symlinks=True, ignore=pedit.IGNORE)
+    pedit.copy_version(v.path, dest)  # unchanged files are shared with the original (hard links), not duplicated
     newp = svc.register_from_dir(db, dest, source_type="local", source_url=f"{pedit.COPY_PREFIX}{p.slug}@{v.version}",
                                  name=body.name.strip(), category=p.category, version="v1")
     newp.owner, newp.visibility, newp.description = user.username, body.visibility, p.description
@@ -505,6 +505,31 @@ def pipeline_map(pid: str, version_id: str | None = None, user: User = Depends(r
 
 
 # --------------------------------------------------------------------------- versions
+@router.delete("/{pid}/versions/{version_id}")
+def delete_version(pid: str, version_id: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Delete a version that no run used. Its files are removed only when they are in BioCompute's pipeline store
+    (an imported folder of yours is never deleted)."""
+    p = get_pipeline(db, pid, user, edit=True)
+    v = get_version(p, version_id)
+    if len(p.versions) <= 1:
+        raise HTTPException(409, "This is the only version: delete the pipeline instead")
+    if v.pinned:
+        raise HTTPException(409, "This is the default version: choose another default first")
+    used = db.query(Run).filter(Run.pipeline_version_id == v.id).count()
+    if used:
+        raise HTTPException(409, f"{used} run{'s' if used != 1 else ''} used this version; it is kept so they stay reproducible")
+    path = Path(v.path).resolve()
+    removed = False
+    if path.is_relative_to(get_settings().pipelines_path.resolve()) and path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+        removed = True
+    audit(db, user.username, "pipeline.version_delete", p.slug, version=v.version, files_removed=removed)
+    p.versions.remove(v)
+    db.commit()
+    return {"ok": True, "files_removed": removed}
+
+
+
 @versions_router.post("/{version_id}/pin")
 def pin_version(version_id: str, pinned: bool = True, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
     v = db.get(PipelineVersion, version_id)
@@ -564,7 +589,7 @@ def author_schema(pid: str, body: SchemaAuthorIn, user: User = Depends(require_s
         managed = get_settings().pipelines_path
         if not Path(v.path).resolve().is_relative_to(managed):
             raise HTTPException(403, "Only pipelines in the managed pipeline store can be written to")
-        (Path(v.path) / "nextflow_schema.json").write_text(json.dumps(schema, indent=2))
+        pedit.safe_write(Path(v.path) / "nextflow_schema.json", json.dumps(schema, indent=2))  # never into a linked file
     audit(db, user.username, "pipeline.schema_authored", p.slug)
     db.commit()
     return {"ok": True, "schema": schema}

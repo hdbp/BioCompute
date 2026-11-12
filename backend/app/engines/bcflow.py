@@ -51,6 +51,7 @@ class Task:
         self.outputs: dict[str, Path] = {}
         self.workdir: Path | None = None
         self.status = "PENDING"
+        self.consumers: list[Task] = []   # tasks that read this task's outputs
 
 
 def load_samples(path: str | None) -> list[dict]:
@@ -139,6 +140,7 @@ class Engine:
         self.procs: dict[int, subprocess.Popen] = {}
         self.max_cpus = max(1, a.max_cpus)
         self.manifest_digest = hashlib.sha1(Path(a.manifest).read_bytes()).hexdigest()
+        self.freed = 0
 
     # ------------------------------------------------------------------ graph
     def build(self) -> list[Task]:
@@ -170,7 +172,32 @@ class Engine:
                 lst = [t]
             by_step[s["id"]] = lst
             tasks.extend(lst)
+        for t in tasks:
+            for d in t.deps:
+                d.consumers.append(t)
         return tasks
+
+    # ------------------------------------------------------------------ eager cleanup
+    def _remove_workdir(self, t: Task) -> None:
+        """Delete a finished task's working folder: its results that are kept have been copied to the output
+        folder already, and every task that reads its outputs has finished."""
+        if not t.workdir or not t.workdir.exists():
+            return
+        try:
+            t.workdir.resolve().relative_to(self.workdir)
+        except ValueError:
+            return  # never outside this run's work folder
+        size = sum(f.stat().st_size for f in t.workdir.rglob("*") if f.is_file() and not f.is_symlink())
+        shutil.rmtree(t.workdir, ignore_errors=True)
+        self.freed += size
+
+    def release(self, t: Task) -> None:
+        """Called when task t completed: free what is no longer needed."""
+        if not self.a.cleanup:
+            return
+        for d in [*t.deps, t]:
+            if d.status == "COMPLETED" and all(c.status == "COMPLETED" for c in d.consumers):
+                self._remove_workdir(d)
 
     def context(self, t: Task) -> dict:
         ctx = {
@@ -351,12 +378,20 @@ class Engine:
                     t.status = "COMPLETED" if rc == 0 else "FAILED"
                     if rc != 0:
                         failed = True  # stop scheduling new tasks; let running ones finish
+                    else:
+                        self.release(t)
         if STOP.is_set():
             log("bcflow ~ execution aborted by signal")
             return 143
         if failed or pending:
             log(f"bcflow ~ workflow failed ({sum(t.status == 'FAILED' for t in tasks)} failed task(s))")
             return 1
+        if self.a.cleanup:
+            merged = self.workdir / "merged_lanes"
+            if merged.exists():
+                self.freed += sum(f.stat().st_size for f in merged.rglob("*") if f.is_file())
+                shutil.rmtree(merged, ignore_errors=True)
+            log(f"bcflow ~ intermediate files removed as soon as they were no longer needed: {self.freed / 2**20:.1f} MB")
         log(f"bcflow ~ workflow completed successfully: {len(tasks)} task(s); results in {self.outdir}")
         return 0
 
@@ -380,6 +415,8 @@ def main() -> int:
     ap.add_argument("--trace", required=True)
     ap.add_argument("--max-cpus", type=int, default=os.cpu_count() or 1)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--cleanup", action="store_true",
+                    help="delete each task's working folder once every task reading its outputs has finished")
     a = ap.parse_args()
     eng = Engine(a)
     signal.signal(signal.SIGTERM, eng.terminate)

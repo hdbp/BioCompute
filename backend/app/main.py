@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 import sys
 import threading
 import time
@@ -17,7 +18,7 @@ from . import __version__
 from .config import get_settings
 from .db import Base, SessionLocal, get_engine
 from .models import Node, Pipeline, User
-from .routers import assistant, auth, cluster, data, experiments, explore, pipelines, projects, references, runs, studio, system
+from .routers import assistant, auth, cluster, data, experiments, explore, pipelines, projects, references, runs, storage, studio, system
 from .security import hash_secret
 from .services import cluster as cluster_svc
 from .services import data_roots
@@ -81,6 +82,7 @@ def bootstrap() -> None:
 
 
 def _controller_sampler(interval: float = 30.0) -> None:
+    last_prune = 0.0
     while True:
         try:
             db = SessionLocal()
@@ -92,6 +94,12 @@ def _controller_sampler(interval: float = 30.0) -> None:
                 n.last_seen = cluster_svc.now()
                 cluster_svc.record_metrics(db, n)
                 db.commit()
+            if time.time() - last_prune > 3600:
+                from .models import NodeMetric
+                cutoff = cluster_svc.now() - timedelta(days=max(1, get_settings().metrics_retention_days))
+                db.query(NodeMetric).filter(NodeMetric.ts < cutoff).delete()
+                db.commit()
+                last_prune = time.time()
             db.close()
         except Exception as exc:  # pragma: no cover
             print(f"[biocompute] sampler error: {exc}", file=sys.stderr)
@@ -138,7 +146,8 @@ async def security_headers(request: Request, call_next):
 for r in (auth.router, pipelines.router, pipelines.versions_router, pipelines.schemas_router, experiments.router,
           experiments.samples_router, data.router, runs.router, runs.jobs_router, runs.results_router,
           cluster.nodes_router, cluster.discovery_router, cluster.alloc_router, cluster.agent_router,
-          studio.router, assistant.router, explore.router, projects.router, references.router, system.router):
+          studio.router, assistant.router, explore.router, projects.router, references.router, system.router,
+          storage.router):
     app.include_router(r)
 
 

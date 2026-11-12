@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..db import SessionLocal, get_db
 from ..models import Experiment, Node, Pipeline, PipelineVersion, Run, RunEvent, User
 from ..schemas import RunCreate, RunDetail, RunOut
@@ -58,6 +59,8 @@ def clean_resources(raw: dict) -> dict:
         out[k] = v
     if raw.get("requires_gpu"):
         out["requires_gpu"] = True
+    if raw.get("keep_work"):
+        out["keep_work"] = True  # keep intermediate files (debugging); they are deleted otherwise
     prof = raw.get("profile")
     if prof:
         if not isinstance(prof, str) or not re.fullmatch(r"[A-Za-z0-9_.,-]{1,200}", prof):
@@ -270,7 +273,10 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
 
 def _detail(db: Session, r: Run, user: User | None = None) -> RunDetail:
     evs = db.query(RunEvent).filter(RunEvent.run_id == r.id).order_by(RunEvent.id).all() if r.id else []
-    return _out(db, r, RunDetail, user=user, provenance=r.provenance or {},
+    w = runner._own_work_dir(r) if r.id else None
+    extra = {"work_bytes": runner.dir_size(w, limit=200_000) if w is not None and w.exists() else 0,
+             "results_deletable": bool(r.id) and _deletable_results(r) is not None}
+    return _out(db, r, RunDetail, user=user, provenance=r.provenance or {}, **extra,
                 events=[{"id": e.id, "ts": e.ts, "kind": e.kind, "message": e.message, "data": e.data} for e in evs])
 
 
@@ -295,6 +301,63 @@ def resume_run(rid: str, user: User = Depends(require_scientist), db: Session = 
     audit(db, user.username, "run.resume", r.id, attempt=r.attempt)
     db.commit()
     return _out(db, r, user=user)
+
+
+@router.post("/{rid}/clean-work")
+def clean_work(rid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Delete a finished run's intermediate files. Its results are kept; Resume then repeats every step."""
+    r = get_run(db, rid, user, edit=True)
+    if r.status not in runner.TERMINAL:
+        raise HTTPException(409, "The run is still active")
+    freed = runner.remove_work_dir(r)
+    runner.add_event(db, r, "cleanup", f"Intermediate files removed by {user.username}: {freed / 2**20:.1f} MB freed")
+    audit(db, user.username, "run.clean_work", r.id, freed=freed)
+    db.commit()
+    return {"freed": freed}
+
+
+def _deletable_results(r: Run) -> Path | None:
+    """The run's output folder, when deleting the run may also delete it: BioCompute created it for this run, it is
+    inside a writable data folder, and no other run writes there."""
+    if not (r.provenance or {}).get("output_dir_created"):
+        return None
+    out = Path(r.output_dir).resolve()
+    root = fs.root_of(out)
+    if root is None or not root.writable or out == root.path.resolve():
+        return None
+    return out
+
+
+@router.delete("/{rid}")
+def delete_run(rid: str, results: bool = False, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Delete a finished run: its record, log and intermediate files; with results=true also the output folder it created."""
+    r = get_run(db, rid, user, edit=True)
+    if r.status not in runner.TERMINAL:
+        raise HTTPException(409, "Cancel the run first")
+    out = _deletable_results(r) if results else None
+    if results and out is None:
+        raise HTTPException(409, "The results folder was not created by this run (or is shared with others); it is kept. "
+                                 "Delete the run without its results, or remove the folder in Data Explorer.")
+    if out is not None and db.query(Run).filter(Run.output_dir == r.output_dir, Run.id != r.id).count():
+        raise HTTPException(409, "Another run writes to the same results folder; it is kept")
+    freed = runner.remove_work_dir(r)
+    rd = Path(r.run_dir).resolve()
+    if rd.is_relative_to(get_settings().runs_path.resolve()) and rd.exists():
+        freed += runner.dir_size(rd)
+        shutil.rmtree(rd, ignore_errors=True)
+    if out is not None and out.exists():
+        freed += runner.dir_size(out)
+        shutil.rmtree(out, ignore_errors=True)
+    from ..models import Project
+    for proj in db.query(Project).all():  # the run disappears from projects that listed it
+        items = [i for i in (proj.items or []) if not (i.get("kind") == "run" and i.get("ref") == r.id)]
+        if len(items) != len(proj.items or []):
+            proj.items = items
+    db.query(RunEvent).filter(RunEvent.run_id == r.id).delete()
+    audit(db, user.username, "run.delete", r.id, name=r.name, with_results=out is not None, freed=freed)
+    db.delete(r)
+    db.commit()
+    return {"ok": True, "freed": freed, "results_deleted": out is not None}
 
 
 @router.get("/{rid}/log")

@@ -39,10 +39,11 @@ interface LaunchForm {
   engine: string; params: Params; outdir: string; projectId: string; name: string; profile: string;
   cpus: number; mem: number; nodeIds: string[];
   needMem: string; needDisk: string; needGpu: boolean;   // hard requirements (empty = none / estimated)
+  keepWork: boolean;   // keep intermediate files after the run (they are deleted otherwise)
 }
 const BLANK: LaunchForm = {
   pid: "", versionId: "", experimentId: "", source: "experiment", inputPath: "", engine: "", params: {}, outdir: "", projectId: "",
-  name: "", profile: "", cpus: 0, mem: 0, nodeIds: [], needMem: "", needDisk: "", needGpu: false,
+  name: "", profile: "", cpus: 0, mem: 0, nodeIds: [], needMem: "", needDisk: "", needGpu: false, keepWork: false,
 };
 
 const DRAFT = "biocompute.launch.draft.";
@@ -101,7 +102,7 @@ export default function LaunchPage() {
     setTouched(true);
     setForm((f) => ({ ...f, params: typeof next === "function" ? next(f.params) : next }));
   };
-  const { versionId, experimentId, source, inputPath, engine, params, outdir, projectId, name, profile, cpus, mem, nodeIds, needMem, needDisk, needGpu } = form;
+  const { versionId, experimentId, source, inputPath, engine, params, outdir, projectId, name, profile, cpus, mem, nodeIds, needMem, needDisk, needGpu, keepWork } = form;
 
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => api.get<Pipeline[]>("/api/pipelines") });
   const experiments = useQuery({ queryKey: ["experiments"], queryFn: () => api.get<Experiment[]>("/api/experiments") });
@@ -254,7 +255,7 @@ export default function LaunchPage() {
     experiment_id: usingExperiment ? experimentId || null : null, node_ids: nodeIds, dry_run: dry, project_id: projectId || null,
     resources: { max_cpus: cpus, max_memory_gb: mem, profile: profile || undefined,
       ...(Number(needMem) ? { min_memory_gb: Number(needMem) } : {}), ...(needDisk ? { min_disk_gb: Number(needDisk) } : {}),
-      ...(needGpu ? { requires_gpu: true } : {}) },
+      ...(needGpu ? { requires_gpu: true } : {}), ...(keepWork ? { keep_work: true } : {}) },
   });
   const launch = useMutation({
     mutationFn: (dry: boolean) => api.post<RunDetail>("/api/runs", body(dry)),
@@ -287,7 +288,7 @@ export default function LaunchPage() {
     setForm((f) => ({ ...f, pid: "", versionId: "" }));   // entries are attached to the new pipeline once its parameters have loaded
     if (!id) { loaded.current = { pid: "", vid: "", defaults: {} }; setNote(null); }
   };
-  const advancedChanges = [!!profile, !!controller && cpus > 0 && cpus !== capC, !!controller && mem > 0 && mem !== capM, !!needMem, !!needDisk, needGpu, nodeIds.length > 0].filter(Boolean).length;
+  const advancedChanges = [!!profile, !!controller && cpus > 0 && cpus !== capC, !!controller && mem > 0 && mem !== capM, !!needMem, !!needDisk, needGpu, nodeIds.length > 0, keepWork].filter(Boolean).length;
 
   return (
     <>
@@ -517,6 +518,12 @@ export default function LaunchPage() {
                       <Input type="number" min={0} value={needDisk} placeholder={placement.data ? `~${placement.data.requested_disk_gb} (estimate)` : "estimate"} onChange={(e) => edit({ needDisk: e.target.value })} />
                     </Field>
                     <label className="flex items-center gap-2 self-center text-[13px]"><Checkbox checked={needGpu} onCheckedChange={(v) => edit({ needGpu: !!v })} />Needs a GPU</label>
+                    <label className="flex items-start gap-2 text-[13px] sm:col-span-2">
+                      <Checkbox className="mt-0.5" checked={keepWork} onCheckedChange={(v) => edit({ keepWork: !!v })} />
+                      <span>Keep intermediate files
+                        <span className="block text-xs text-muted">Normally files that steps pass to each other are deleted as soon as nothing needs them; the results are kept either way. Keep them to inspect or debug a step. A failed run always keeps them, so Resume can continue.</span>
+                      </span>
+                    </label>
                   </div>
                   <NodePicker placement={placement.data} nodes={nodes.data ?? []} selected={nodeIds} onChange={(ids) => edit({ nodeIds: ids })} />
                 </div>

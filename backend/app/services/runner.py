@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import signal
 import subprocess
 import sys
@@ -68,11 +69,17 @@ def prepare(db: Session, *, pipeline: Pipeline, version: PipelineVersion, engine
     if engine == "bcflow" and not get_settings().enable_demo_engine:
         raise HTTPException(400, "The BioCompute native engine is disabled by configuration")
     root, out_abs = fs.resolve(output_vpath, must_exist=False, for_write=True)
+    # whether BioCompute creates this output folder: only then may deleting the run also delete its results
+    try:
+        created_here = not out_abs.exists() or (out_abs.is_dir() and not any(out_abs.iterdir()))
+    except OSError:
+        created_here = False
     s = get_settings()
     run = Run(name=name or f"{pipeline.slug}-{now():%Y%m%d-%H%M%S}", pipeline_id=pipeline.id,
               pipeline_version_id=version.id, experiment_id=experiment.id if experiment else None,
               engine=engine, status="pending", params={}, resources=resources, placement=placement or {},
               output_dir=str(out_abs), run_dir="", created_by=user)
+    run._output_dir_created = created_here
     db.add(run)
     db.flush()
     run_dir = s.runs_path / run.id
@@ -167,6 +174,7 @@ def provenance(db: Session, run: Run, pipeline: Pipeline, version: PipelineVersi
     inv = tools.inventory()
     return {
         "biocompute_run_id": run.id,
+        "output_dir_created": bool(getattr(run, "_output_dir_created", False)),
         "created_by": run.created_by,
         "created_at": now().isoformat(),
         "pipeline": {"name": pipeline.name, "slug": pipeline.slug, "source": pipeline.source_url,
@@ -319,6 +327,10 @@ def _poll_run(db: Session, run: Run) -> None:
             set_status(db, run, "cancelled", f"Run cancelled (engine exit code {rc})")
         elif rc == 0:
             set_status(db, run, "completed", "Pipeline completed successfully")
+            if cleanup_after_success(run):
+                freed = remove_work_dir(run)
+                if freed:
+                    add_event(db, run, "cleanup", f"Intermediate files removed: {freed / 2**20:.1f} MB freed")
         else:
             run.error = _error_excerpt(rd) or f"Engine exited with code {rc}"
             set_status(db, run, "failed", f"Pipeline failed (exit code {rc})")
@@ -389,6 +401,58 @@ def _poll_once() -> None:
                     db.rollback()
     finally:
         db.close()
+
+
+# --------------------------------------------------------------------------- storage
+def dir_size(p: Path, limit: int = 2_000_000) -> int:
+    """Bytes of the files under p (stops counting after `limit` entries)."""
+    total, n = 0, 0
+    stack = [p]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    n += 1
+                    if n > limit:
+                        return total
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(Path(e.path))
+                        elif e.is_file(follow_symlinks=False):
+                            total += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return total
+
+
+def _own_work_dir(run: Run) -> Path | None:
+    """The run's work folder, only when it is inside BioCompute's own runs folder (never a user folder)."""
+    if not run.work_dir:
+        return None
+    w = Path(run.work_dir).resolve()
+    try:
+        w.relative_to(get_settings().runs_path.resolve())
+    except ValueError:
+        return None
+    return w
+
+
+def cleanup_after_success(run: Run) -> bool:
+    return get_settings().cleanup_intermediates and not (run.resources or {}).get("keep_work")
+
+
+def remove_work_dir(run: Run) -> int:
+    """Delete a run's intermediate files (its work folder). Results in the output folder are not touched.
+    Afterwards Resume cannot reuse finished steps. Returns the bytes freed."""
+    w = _own_work_dir(run)
+    if w is None or not w.exists():
+        return 0
+    size = dir_size(w)
+    shutil.rmtree(w, ignore_errors=True)
+    return size
 
 
 def _error_excerpt(rd: Path) -> str | None:

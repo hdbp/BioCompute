@@ -9,6 +9,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 ### auth
 
 - `DELETE /api/auth/invites/{invite_id}`
+- `DELETE /api/auth/media-cookie`
 - `DELETE /api/auth/requests/{user_id}`
 - `DELETE /api/auth/users/{user_id}`
 - `GET    /api/auth/account-settings`
@@ -24,6 +25,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `POST   /api/auth/invites`
 - `POST   /api/auth/invites/accept`
 - `POST   /api/auth/login`
+- `POST   /api/auth/media-cookie`
 - `POST   /api/auth/password`
 - `POST   /api/auth/request-account`
 - `POST   /api/auth/requests/{user_id}/approve`
@@ -36,6 +38,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 
 - `DELETE /api/pipelines/{pid}`
 - `DELETE /api/pipelines/{pid}/presets/{preset_id}`
+- `DELETE /api/pipelines/{pid}/versions/{version_id}`
 - `GET    /api/pipeline-schemas/{pid}`
 - `GET    /api/pipelines`
 - `GET    /api/pipelines/{pid}`
@@ -77,6 +80,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `POST   /api/experiments/{eid}/validate`
 - `PUT    /api/experiments/{eid}`
 - `PUT    /api/experiments/{eid}/samples`
+- `PUT    /api/experiments/{eid}/visibility`
 
 ### data
 
@@ -119,6 +123,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 
 ### runs
 
+- `DELETE /api/runs/{rid}`
 - `GET    /api/jobs`
 - `GET    /api/runs`
 - `GET    /api/runs/{rid}`
@@ -127,6 +132,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `GET    /api/runs/{rid}/stream`
 - `POST   /api/runs`
 - `POST   /api/runs/{rid}/cancel`
+- `POST   /api/runs/{rid}/clean-work`
 - `POST   /api/runs/{rid}/resume`
 
 ### results
@@ -220,5 +226,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `GET    /api/events`
 - `GET    /api/health`
 - `GET    /api/settings`
+- `GET    /api/storage`
 - `POST   /api/settings/refresh-tools`
+- `POST   /api/storage/clean-work`
 - `PUT    /api/settings/ui`

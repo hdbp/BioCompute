@@ -269,6 +269,8 @@ class RunOut(ORM):
 class RunDetail(RunOut):
     provenance: dict[str, Any]
     events: list[dict[str, Any]]
+    work_bytes: int = 0             # intermediate files still on disk
+    results_deletable: bool = False  # deleting the run may also delete its results folder (it created it)
 
 
 # --------------------------------------------------------------------------- cluster

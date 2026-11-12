@@ -80,6 +80,11 @@ export default function PipelineDetailPage() {
     onSuccess: (_r, v) => { toast.success(`${v.version} is now the default version: new runs use it`); refresh(); },
     onError: (e) => toast.error(`The default version was not changed: ${errMsg(e)}`),
   });
+  const delVersion = useMutation({
+    mutationFn: (v: { id: string; version: string }) => api.del(`/api/pipelines/${id}/versions/${v.id}`),
+    onSuccess: (_r, v) => { toast.success(`Deleted version ${v.version}`); refresh(); },
+    onError: (e) => toast.error(`The version was not deleted: ${errMsg(e)}`),
+  });
   const del = useMutation({
     mutationFn: () => api.del(`/api/pipelines/${id}`),
     onSuccess: () => { toast.success(`Deleted ${p.data?.name ?? "the pipeline"}`); refresh(); nav("/pipelines"); },
@@ -275,6 +280,13 @@ export default function PipelineDetailPage() {
                   {sci && d.can_edit && !v.pinned && (
                     <Button size="sm" variant="ghost" loading={pin.isPending && pin.variables?.id === v.id} onClick={() => pin.mutate(v)}
                       title="New runs will use this version, also when newer versions are added. A different version can still be picked when launching a run."><Pin />Use by default</Button>
+                  )}
+                  {sci && d.can_edit && !v.pinned && (d.versions?.length ?? 0) > 1 && (
+                    <Button size="icon" variant="ghost" aria-label={`Delete version ${v.version}`} title="Delete this version (only when no run used it)"
+                      loading={delVersion.isPending && delVersion.variables?.id === v.id}
+                      onClick={async () => { if (await confirmDialog({ title: `Delete version ${v.version}?`, body: "Only possible when no run used it, so every run stays reproducible. Files in BioCompute's pipeline store are deleted; a folder you imported from is never touched.", confirmLabel: "Delete version", danger: true })) delVersion.mutate(v); }}>
+                      <Trash2 />
+                    </Button>
                   )}
                 </div>
               ))}
