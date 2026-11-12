@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/misc";
 import { applyTransform, DensityScatter, fmt, Histogram, TRANSFORM_LABEL, type Transform } from "./plots";
 import { DEView, looksLikeDE } from "./de-view";
 import type { Project } from "@/lib/types";
+import { QueryError } from "@/components/page";
 
 interface Column { name: string; type: "number" | "string"; missing: number; min?: number; max?: number; mean?: number; distinct?: number }
 interface TablePage {
@@ -32,7 +33,7 @@ export function TableView({ path, projects = [], project }: { path: string; proj
     placeholderData: keepPreviousData,
   });
   const d = t.data;
-  if (t.isError) return <p className="p-4 text-[13px] text-bad">{errMsg(t.error)}</p>;
+  if (t.isError) return <QueryError error={t.error} onRetry={() => t.refetch()} what="this table" />;
   if (!d) return <p className="p-4 text-[13px] text-muted">Reading table…</p>;
 
   const isDE = looksLikeDE(d.columns);

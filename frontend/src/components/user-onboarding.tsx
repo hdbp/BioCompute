@@ -3,10 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Check, Copy, Link2, Trash2, UserCheck, X } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
-import { ago, cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Badge, Panel, PanelHeader, Switch } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
+import { confirmDialog } from "@/components/ui/confirm";
+import { Ago } from "@/components/page";
 
 interface Req { id: string; username: string; requested_at: string | null; note: string }
 interface Invite { id: string; role: string; note: string; created_by: string; created_at: string; expires_at: string; used_by: string | null; used_at: string | null; status: "open" | "used" | "expired" }
@@ -55,13 +57,19 @@ export function UserOnboarding() {
             <div key={r.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-[13px]">
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{r.username}</p>
-                <p className="truncate text-xs text-muted">{r.note || "No note"}{r.requested_at ? ` · ${ago(r.requested_at)}` : ""}</p>
+                <p className="truncate text-xs text-muted">{r.note || "No note"}{r.requested_at && <> · <Ago ts={r.requested_at} /></>}</p>
               </div>
               <Select aria-label={`Role for ${r.username}`} className="h-8 w-32" value={roles[r.id] ?? "scientist"} onChange={(e) => setRoles({ ...roles, [r.id]: e.target.value })}>
                 <option value="viewer">Viewer</option><option value="scientist">Scientist</option><option value="admin">Admin</option>
               </Select>
               <Button size="sm" variant="primary" onClick={() => approve.mutate(r)} loading={approve.isPending && approve.variables?.id === r.id}><Check />Approve</Button>
-              <Button size="sm" variant="ghost" onClick={() => window.confirm(`Decline and delete the request from ${r.username}?`) && decline.mutate(r)} aria-label={`Decline ${r.username}`}><X />Decline</Button>
+              <Button size="sm" variant="ghost" onClick={async () => {
+                if (await confirmDialog({
+                  title: `Decline the request from ${r.username}?`,
+                  body: "The request is deleted and the username becomes free again. The person is not notified; they can send a new request.",
+                  confirmLabel: "Decline request", danger: true,
+                })) decline.mutate(r);
+              }} aria-label={`Decline ${r.username}`}><X />Decline</Button>
             </div>
           ))}
         </div>
@@ -109,7 +117,10 @@ export function UserOnboarding() {
                 <Badge tone={i.status === "open" ? "accent" : "neutral"}>{i.status}</Badge>
                 <span className="min-w-0 flex-1 truncate">{i.role}{i.note ? ` · ${i.note}` : ""}
                   <span className={cn("ml-1 text-muted")}>{i.status === "used" ? `· joined as ${i.used_by}` : i.status === "open" ? `· until ${new Date(i.expires_at).toLocaleDateString()}` : ""}</span></span>
-                {i.status === "open" && <Button size="icon" variant="ghost" onClick={() => revoke.mutate(i.id)} aria-label="Revoke invite"><Trash2 /></Button>}
+                {i.status === "open" && <Button size="icon" variant="ghost" aria-label="Revoke invite" title="Revoke: the link stops working"
+                  onClick={async () => {
+                    if (await confirmDialog({ title: "Revoke this invite link?", body: `The ${i.role} link${i.note ? ` for ${i.note}` : ""} stops working; whoever has it can no longer create an account with it.`, confirmLabel: "Revoke link", danger: true })) revoke.mutate(i.id);
+                  }}><Trash2 /></Button>}
                 {i.status === "used" && <UserCheck className="size-4 text-ok" />}
               </li>
             ))}

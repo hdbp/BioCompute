@@ -11,6 +11,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { PathInput } from "@/components/file-browser";
 import { cssColor, drawAxes, extent, fmt, PAD, setupCanvas, useSize } from "./plots";
+import { QueryError } from "@/components/page";
 
 interface DEData {
   mapping: Record<"lfc" | "padj" | "p" | "mean" | "id" | "label", string | null>;
@@ -86,7 +87,7 @@ export function DEView({ path, projects, defaultProject }: { path: string; proje
   }, [d, cls, dir, find, use]);
   useEffect(() => setPage(0), [dir, find, pCut, lfcCut, meanCut]);
 
-  if (q.isError) return <p className="text-[13px] text-bad">{errMsg(q.error)}</p>;
+  if (q.isError) return <QueryError error={q.error} onRetry={() => q.refetch()} what="these results" />;
   if (!d) return <p className="py-10 text-center text-[13px] text-muted">Reading results…</p>;
 
   const exportParams = { path, use, p_cut: pCut, lfc_cut: lfcCut, mean_cut: meanCut ?? undefined, direction: dir, ...mapping };

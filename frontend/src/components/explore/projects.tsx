@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/menu";
 import { ShareButton, SharingBadge } from "@/components/sharing";
+import { confirmDialog } from "@/components/ui/confirm";
 
 export const useProjects = () => useQuery({ queryKey: ["projects"], queryFn: () => api.get<Project[]>("/api/projects") });
 
@@ -52,6 +53,7 @@ export function ProjectPanel({ projectId, onSelect, currentDir, onOpenDir, onOpe
         </Select>
         {projectId && <Button size="icon" variant="ghost" className="size-8" onClick={() => onSelect(null)} aria-label="Leave project"><X /></Button>}
       </div>
+      {list.isError && <p role="alert" className="text-[12px] text-bad">Could not load the projects: {errMsg(list.error)} <button className="underline underline-offset-2" onClick={() => list.refetch()}>Try again</button></p>}
       {d && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -89,7 +91,11 @@ export function ProjectPanel({ projectId, onSelect, currentDir, onOpenDir, onOpe
           )}
           {d.can_edit && (
             <button className="text-[11.5px] text-muted hover:text-bad" onClick={async () => {
-              if (!window.confirm(`Delete the project “${d.name}”? Its folders and files stay on disk.`)) return;
+              if (!(await confirmDialog({
+                title: `Delete the project “${d.name}”?`,
+                body: `The project and its list of ${d.items.length} item${d.items.length === 1 ? "" : "s"} are deleted${d.visibility === "lab" ? " for everyone in the lab" : ""}. The folders, files and runs themselves stay where they are${d.home ? `, including the project folder ${d.home}` : ""}.`,
+                confirmLabel: "Delete project", danger: true,
+              }))) return;
               try { await api.del(`/api/projects/${d.id}`); onSelect(null); refresh(); } catch (e) { toast.error(errMsg(e)); }
             }}><Trash2 className="mr-1 inline size-3" />Delete project</button>
           )}

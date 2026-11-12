@@ -20,6 +20,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `GET    /api/auth/setup`
 - `GET    /api/auth/signup`
 - `GET    /api/auth/users`
+- `PATCH  /api/auth/users/{user_id}`
 - `POST   /api/auth/invites`
 - `POST   /api/auth/invites/accept`
 - `POST   /api/auth/login`
@@ -28,6 +29,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `POST   /api/auth/requests/{user_id}/approve`
 - `POST   /api/auth/setup`
 - `POST   /api/auth/users`
+- `POST   /api/auth/users/{user_id}/reset-password`
 - `PUT    /api/auth/account-settings`
 
 ### pipelines

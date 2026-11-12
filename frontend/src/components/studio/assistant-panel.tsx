@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -6,7 +6,8 @@ import { AlertTriangle, CheckCircle2, History, Lightbulb, Sparkles, Wand2, X } f
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { AssistantMeta, AssistantStatus, Issue } from "@/lib/types";
-import { ago, cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { Ago } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Badge, Checkbox, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/misc";
@@ -29,8 +30,8 @@ interface AskResult { answer: string; suggestions: string[]; meta: AssistantMeta
 
 const VERDICT = { sound: { tone: "ok", label: "Looks sound" }, needs_changes: { tone: "wait", label: "Needs changes" }, invalid: { tone: "bad", label: "Will not work as is" } } as const;
 
-export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNode, onDraftModule, nodeLabel }: {
-  getGraph: () => RawGraph; hasNodes: boolean; onClose: () => void;
+export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNode, onDraftModule, nodeLabel, className }: {
+  getGraph: () => RawGraph; hasNodes: boolean; onClose: () => void; className?: string;
   onLoad: (r: { graph: RawGraph; name: string; description: string; result_id?: string }) => void;
   onSelectNode: (id: string) => void; onDraftModule: (tool: string, reason: string) => void; nodeLabel: (id: string) => string | null;
 }) {
@@ -47,6 +48,8 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
   const [review, setReview] = useState<ReviewResult | null>(null);
   const [question, setQuestion] = useState("");
   const [answers, setAnswers] = useState<{ q: string; a: AskResult }[]>([]);
+  const [tab, setTab] = useState("build");
+  const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const run = async <T,>(kind: "build" | "review" | "ask", fn: () => Promise<T>) => {
     setBusy(kind);
@@ -77,7 +80,7 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
 
   const st = status.data;
   return (
-    <aside className="flex w-[22rem] shrink-0 flex-col border-l border-line bg-surface" aria-label="Pipeline assistant">
+    <aside className={cn("flex w-[22rem] max-w-full shrink-0 flex-col border-l border-line bg-surface", className)} aria-label="Pipeline assistant">
       <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
         <Sparkles className="size-4 text-accent" />
         <p className="flex-1 text-sm font-semibold">Assistant</p>
@@ -92,7 +95,7 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
             : <p className="text-muted">Ask an administrator to enable it in Settings.</p>}
         </div>
       ) : (
-        <Tabs defaultValue="build" className="flex min-h-0 flex-1 flex-col">
+        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
           <TabsList className="mx-3 mt-3">
             <TabsTrigger value="build">Build</TabsTrigger>
             <TabsTrigger value="review">Review</TabsTrigger>
@@ -100,7 +103,7 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
           </TabsList>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 text-[13px]">
             <TabsContent value="build" className="space-y-3">
-              <Textarea rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Describe the pipeline"
+              <Textarea ref={promptRef} rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Describe the pipeline"
                 placeholder="e.g. ATAC-seq, paired-end, mouse: trimming, Bowtie2, remove chrM and duplicates, call peaks, MultiQC" />
               <label className="flex items-center gap-2 text-[12.5px] text-muted">
                 <Checkbox checked={modify && hasNodes} disabled={!hasNodes} onCheckedChange={(c) => setModify(!!c)} />Change the pipeline on the canvas instead of starting over
@@ -110,7 +113,7 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
                 <span>Create and save modules for software that has none yet, then use them (one extra request per module)</span>
               </label>
               <Button size="sm" variant="primary" onClick={doBuild} loading={busy === "build"} disabled={prompt.trim().length < 3}><Wand2 />Build pipeline</Button>
-              {busy === "build" && <p className="text-xs text-muted">Designing and checking the graph. This usually takes 20 to 60 seconds.</p>}
+              {busy === "build" && <p className="text-xs text-muted">Designing and checking the pipeline. This usually takes 20 to 60 seconds.</p>}
               {build && (
                 <div className="space-y-3 rounded-lg border border-line p-3">
                   <div className="flex items-center gap-2">
@@ -189,7 +192,13 @@ export function AssistantPanel({ getGraph, hasNodes, onClose, onLoad, onSelectNo
                   {review.recommendations.length > 0 && <Section title="Recommendations"><ul className="list-disc space-y-1 pl-4">{review.recommendations.map((r, i) => <li key={i}>{r}</li>)}</ul></Section>}
                   <div className="flex items-center gap-2">
                     {review.recommendations.length > 0 && (
-                      <Button size="sm" variant="secondary" onClick={() => { setPrompt(`Apply these recommendations:\n- ${review.recommendations.join("\n- ")}`); setModify(true); toast.message("Recommendations copied to the Build tab"); }}>
+                      <Button size="sm" variant="secondary" onClick={() => {
+                        setPrompt(`Apply these recommendations:\n- ${review.recommendations.join("\n- ")}`);
+                        setModify(true);
+                        setTab("build");
+                        setTimeout(() => promptRef.current?.focus(), 50);
+                        toast.message("The recommendations are in the Build box", { description: "Edit them if you like, then press Build pipeline." });
+                      }}>
                         Apply with Build
                       </Button>
                     )}
@@ -265,7 +274,7 @@ function Recent({ task, onOpen }: { task: string; onOpen: (r: HistoryRow) => voi
                 <span className="truncate font-medium">{r.name || r.request || "(no description)"}</span>
                 {r.workflow_id ? <Badge tone="ok">saved</Badge> : task === "build" ? <Badge tone="wait">not saved</Badge> : null}
               </p>
-              <p className="truncate text-[11.5px] text-muted">{ago(r.created_at)}{r.model ? ` · ${r.model}` : ""}{r.cost_usd != null ? ` · $${r.cost_usd.toFixed(2)}` : ""}</p>
+              <p className="truncate text-[11.5px] text-muted"><Ago ts={r.created_at} />{r.model ? ` · ${r.model}` : ""}{r.cost_usd != null ? ` · $${r.cost_usd.toFixed(2)}` : ""}</p>
             </button>
           </li>
         ))}

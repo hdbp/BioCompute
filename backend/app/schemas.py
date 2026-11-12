@@ -426,3 +426,22 @@ class StudioCompileIn(BaseModel):
 
 
 TokenOut.model_rebuild()
+
+
+# --------------------------------------------------------------------------- user administration
+class UserUpdate(BaseModel):
+    """What an administrator may change on an existing account; fields left out stay as they are."""
+    role: Literal["admin", "scientist", "viewer"] | None = None
+    is_active: bool | None = None
+
+
+class PasswordReset(BaseModel):
+    """A temporary password chosen by the administrator; leave it out to have one generated."""
+    password: str | None = Field(default=None, min_length=10, max_length=200)
+
+
+class PasswordResetOut(BaseModel):
+    ok: bool = True
+    username: str
+    generated: bool
+    password: str | None = None  # only a generated password is returned, once; it is never stored in clear or logged

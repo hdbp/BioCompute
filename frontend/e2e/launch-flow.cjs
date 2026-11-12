@@ -17,7 +17,7 @@ const fs = require('fs'); fs.mkdirSync('shots', { recursive: true });
   await p.goto(`${BASE}/jobs/new?pipeline=biocompute-fastq-qc&experiment=${eid}`); await p.waitForTimeout(2500);
   await p.screenshot({ path: 'shots/e2e_2_launch.png', fullPage: true });
   await p.getByRole('button', { name: 'Validate' }).click(); await p.waitForTimeout(1500);
-  await p.getByRole('button', { name: 'Launch' }).click();
+  await p.getByRole('button', { name: 'Start run' }).click();
   await p.waitForURL(/\/runs\//, { timeout: 15000 });
   await p.waitForTimeout(1500);
   await p.screenshot({ path: 'shots/e2e_3_run_live.png' });

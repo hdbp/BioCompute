@@ -6,9 +6,9 @@ import { Rocket, Workflow } from "lucide-react";
 import { api, ApiError, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Pipeline, StudioWorkflow } from "@/lib/types";
-import { ago } from "@/lib/utils";
 import { Badge, Panel } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
+import { Ago } from "@/components/page";
 
 /** Publish state of a saved Studio workflow, from the pipeline it was published as (if any). */
 export function publishState(w: StudioWorkflow, pipelines: Pipeline[]) {
@@ -63,7 +63,7 @@ export function StudioDrafts({ query }: { query: string }) {
                 <Link to={`/studio/${w.id}`} className="truncate hover:underline">{w.name}</Link>
                 {s.changed ? <Badge tone="wait">changed since {s.version}</Badge> : <Badge>draft</Badge>}
               </p>
-              <p className="truncate text-xs text-muted">{w.graph.nodes.length} steps · saved {ago(w.updated_at)}{w.created_by ? ` by ${w.created_by}` : ""}{w.description ? ` · ${w.description}` : ""}</p>
+              <p className="truncate text-xs text-muted">{w.graph.nodes.length} steps · saved <Ago ts={w.updated_at} />{w.created_by ? ` by ${w.created_by}` : ""}{w.description ? ` · ${w.description}` : ""}</p>
             </div>
             <Button asChild size="sm" variant="ghost"><Link to={`/studio/${w.id}`}>Open in Studio</Link></Button>
             {can(user, "scientist") && (

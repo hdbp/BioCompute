@@ -26,6 +26,9 @@ export function SampleTable({ exp, rows, onChange, columns, issues, readOnly, on
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
+  const after = useRef<HTMLSpanElement>(null);
+  // Tab moves between cells; after Esc the next Tab leaves the table instead (so that the keyboard is not trapped)
+  const [released, setReleased] = useState(false);
 
   // keep selection consistent with rows
   useEffect(() => {
@@ -108,9 +111,19 @@ export function SampleTable({ exp, rows, onChange, columns, issues, readOnly, on
   function onKeyDown(e: React.KeyboardEvent) {
     if (edit !== null) return; // the editor handles its own keys
     if (!rows.length) return;
+    const target = e.target as HTMLElement;
+    // keys pressed in a row menu (rendered outside the table) or on a button inside it belong to that control, not to the grid
+    if (!e.currentTarget.contains(target)) return;
+    const onControl = target !== e.currentTarget && !!target.closest("button, a, input, select, textarea");
     const a = active ?? { r: 0, c: 0 };
     const mod = e.ctrlKey || e.metaKey;
     const go = (p: Pos) => { e.preventDefault(); setActive(clamp(p)); };
+    if (e.key === "Tab" && released) {
+      // let the browser move on from the edge of the table: before it (Shift+Tab) or after it (Tab)
+      (e.shiftKey ? wrap.current : after.current)?.focus({ preventScroll: true });
+      return;
+    }
+    if (released && e.key !== "Escape" && e.key !== "Shift") setReleased(false);
     switch (e.key) {
       case "ArrowDown": return go({ r: a.r + 1, c: a.c });
       case "ArrowUp": return go({ r: a.r - 1, c: a.c });
@@ -119,14 +132,14 @@ export function SampleTable({ exp, rows, onChange, columns, issues, readOnly, on
       case "Tab": return go(e.shiftKey ? { r: a.r, c: a.c - 1 } : { r: a.r, c: a.c + 1 });
       case "Home": return go({ r: a.r, c: 0 });
       case "End": return go({ r: a.r, c: columns.length - 1 });
-      case "Enter": case "F2": e.preventDefault(); return startEdit(a);
-      case " ": if (columns[a.c]?.kind === "check") { e.preventDefault(); return startEdit(a); } break;
+      case "Enter": case "F2": if (onControl) return; e.preventDefault(); return startEdit(a);
+      case " ": if (onControl) return; if (columns[a.c]?.kind === "check") { e.preventDefault(); return startEdit(a); } break;
       case "Delete": case "Backspace": e.preventDefault(); return clearCells();
-      case "Escape": setSelected(new Set()); return;
+      case "Escape": setSelected(new Set()); setReleased(true); return;
     }
     if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); fillDown(); return; }
     if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); setSelected(new Set(rows.map((r) => r._k))); return; }
-    if (!mod && !e.altKey && e.key.length === 1 && active) {
+    if (!mod && !e.altKey && e.key.length === 1 && active && !onControl) {
       const col = columns[a.c];
       if (["text", "int", "path"].includes(col.kind) && editable(col)) { e.preventDefault(); startEdit(a, e.key); }
     }
@@ -216,6 +229,8 @@ export function SampleTable({ exp, rows, onChange, columns, issues, readOnly, on
           onDuplicate={() => duplicate([...selected])} onDelete={() => remove([...selected])} onClear={() => setSelected(new Set())} />
       )}
       <div ref={wrap} tabIndex={0} onKeyDown={onKeyDown} onPaste={onPaste} onCopy={onCopy}
+        onMouseDown={() => released && setReleased(false)} onBlur={(e) => { if (released && !e.currentTarget.contains(e.relatedTarget)) setReleased(false); }}
+        aria-describedby="sample-table-keys"
         className="relative overflow-auto rounded-lg border border-line bg-surface max-h-[62vh] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
         role="grid" aria-label="Samples" aria-rowcount={rows.length + 1}>
         <table className="border-separate border-spacing-0 text-[13px]" style={{ minWidth: "100%" }}>
@@ -297,17 +312,22 @@ export function SampleTable({ exp, rows, onChange, columns, issues, readOnly, on
           </tbody>
         </table>
       </div>
+      <span ref={after} tabIndex={-1} className="sr-only" />
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
         {!readOnly ? (
           <Button size="sm" variant="ghost" onClick={() => { onChange([...rows, blankRow()]); setActive({ r: rows.length, c: 0 }); focusGrid(); }}>
             <Plus />Add blank row
           </Button>
         ) : <span />}
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p id="sample-table-keys" className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span><Kbd>Enter</Kbd> edit</span>
           <span><Kbd>Ctrl</Kbd>+<Kbd>D</Kbd> fill down</span>
           <span><Kbd>Ctrl</Kbd>+<Kbd>V</Kbd> paste from a spreadsheet</span>
+          {!readOnly && <span><Kbd>Ctrl</Kbd>+<Kbd>Z</Kbd> undo</span>}
           <span><Kbd>Shift</Kbd>+click to select a range</span>
+          <span className={cn(released && "text-accent")} aria-live="polite">
+            {released ? <>Press <Kbd>Tab</Kbd> to leave the table</> : <><Kbd>Tab</Kbd> next cell, <Kbd>Esc</Kbd> then <Kbd>Tab</Kbd> to leave the table</>}
+          </span>
         </p>
       </div>
     </div>

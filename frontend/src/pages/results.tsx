@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDownToLine, ChevronRight, ExternalLink, File, FileText, Folder, FolderOutput } from "lucide-react";
-import { api, authed, qs } from "@/lib/api";
+import { ArrowDownToLine, ChevronRight, ExternalLink, File, FileText, Folder, FolderOutput, Telescope } from "lucide-react";
+import { api, authed, errMsg, qs } from "@/lib/api";
+import { can, useAuth } from "@/lib/auth";
 import type { Run } from "@/lib/types";
-import { ago, bytes, cn } from "@/lib/utils";
-import { PageHeader } from "@/components/page";
+import { bytes, cn } from "@/lib/utils";
+import { Ago, PageHeader, QueryError, usePageTitle } from "@/components/page";
 import { Empty, Panel, Skeleton } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { RunStatusBadge } from "@/components/status";
@@ -16,14 +17,18 @@ interface Entry { name: string; path: string; type: "dir" | "file"; kind: string
 export default function ResultsPage() {
   const { id } = useParams();
   const nav = useNavigate();
+  const user = useAuth((s) => s.user);
+  usePageTitle("Results");
   const runs = useQuery({ queryKey: ["runs", "results"], queryFn: () => api.get<ResultRun[]>("/api/results") });
   useEffect(() => { if (!id && runs.data?.length) nav(`/results/${runs.data[0].id}`, { replace: true }); }, [id, runs.data, nav]);
 
   return (
     <>
-      <PageHeader title="Results" description="Outputs of finished runs, read directly from each run's output folder." />
-      {runs.data && runs.data.length === 0 ? (
-        <Panel><Empty icon={<FolderOutput />} title="No finished runs yet" action={<Button asChild variant="primary"><Link to="/jobs/new">Launch analysis</Link></Button>}>Completed, failed and cancelled runs appear here with their output files and provenance.</Empty></Panel>
+      <PageHeader title="Results" description="The files each finished run produced, read directly from the run's output folder." />
+      {runs.isError && !runs.data ? (
+        <QueryError error={runs.error} what="the results" onRetry={() => runs.refetch()} />
+      ) : runs.data && runs.data.length === 0 ? (
+        <Panel><Empty icon={<FolderOutput />} title="No finished runs yet" action={can(user, "scientist") && <Button asChild variant="primary"><Link to="/jobs/new">New run</Link></Button>}>Completed, failed and cancelled runs appear here with the files they produced.</Empty></Panel>
       ) : (
         <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
           <Panel className="self-start max-h-[75vh] overflow-y-auto divide-y divide-line/60">
@@ -31,7 +36,7 @@ export default function ResultsPage() {
             {runs.data?.map((r) => (
               <Link key={r.id} to={`/results/${r.id}`} className={cn("block px-4 py-3 hover:bg-raised/50", r.id === id && "bg-raised")}>
                 <div className="flex items-center justify-between gap-2"><span className="truncate text-[13.5px] font-medium">{r.name}</span><RunStatusBadge status={r.status} /></div>
-                <p className="mt-0.5 text-xs text-muted truncate">{r.pipeline_name}, {r.output_count} files, {bytes(r.output_bytes)}, {ago(r.finished_at)}</p>
+                <p className="mt-0.5 text-xs text-muted truncate">{r.pipeline_name}, {r.output_count} files, {bytes(r.output_bytes)}, <Ago ts={r.finished_at} /></p>
               </Link>
             ))}
           </Panel>
@@ -48,6 +53,8 @@ function RunOutputs({ runId, run }: { runId: string; run?: ResultRun }) {
   useEffect(() => { setPath(""); setFile(null); }, [runId]);
   const listing = useQuery({ queryKey: ["results", runId, path], queryFn: () => api.get<{ entries: Entry[]; missing: boolean; base: string; vpath: string | null }>(`/api/results/${runId}${qs({ path })}`) });
   const crumbs = path ? path.split("/") : [];
+  // the folder as a data-folder path ("results:runs/…"); absent when the output folder lies outside every data folder
+  const vpath = listing.data?.vpath ?? (listing.data ? null : run?.output_vpath ?? null);
   return (
     <div className="min-w-0 space-y-4">
       <Panel>
@@ -59,10 +66,18 @@ function RunOutputs({ runId, run }: { runId: string; run?: ResultRun }) {
                 <button className="rounded px-1 hover:bg-raised" onClick={() => { setPath(crumbs.slice(0, i + 1).join("/")); setFile(null); }}>{c}</button></span>
             ))}
           </div>
+          {vpath && (
+            <Button asChild size="sm" variant="secondary" title="Browse this folder with the Data Explorer: previews, genome browser and project tools">
+              <Link to={`/explore${qs({ dir: path ? `${vpath.replace(/\/$/, "")}${vpath.endsWith(":") ? "" : "/"}${path}` : vpath })}`}><Telescope />Open in Data Explorer</Link>
+            </Button>
+          )}
           <Button asChild size="sm" variant="ghost"><Link to={`/runs/${runId}`}>Run details</Link></Button>
         </div>
-        <p className="px-4 pt-2 font-mono text-[11.5px] text-muted break-all">{listing.data?.vpath ?? listing.data?.base}</p>
+        <p className="px-4 pt-2 font-mono text-[11.5px] text-muted break-all">{vpath ?? listing.data?.base}</p>
+        {listing.isLoading && <div className="space-y-2 p-4">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-6" />)}</div>}
+        {listing.isError && <div className="p-4"><QueryError error={listing.error} what="the files of this run" onRetry={() => listing.refetch()} /></div>}
         {listing.data?.missing && <p className="p-4 text-[13px] text-muted">The output folder does not exist (the run may have failed before writing results).</p>}
+        {listing.data && !listing.data.missing && listing.data.entries.length === 0 && <p className="p-4 text-[13px] text-muted">This folder is empty.</p>}
         <ul className="py-1">
           {listing.data?.entries.map((e) => (
             <li key={e.path}>
@@ -107,6 +122,7 @@ function Preview({ runId, entry }: { runId: string; entry: Entry }) {
       {isPdf && <iframe title={entry.name} src={authed(url)} className="h-[70vh] w-full" />}
       {isImg && <img src={authed(url)} alt={entry.name} className="max-h-[70vh] mx-auto p-4" />}
       {text.isLoading && <Skeleton className="m-4 h-40" />}
+      {text.isError && <p className="p-4 text-[13px] text-bad">This file could not be shown: {errMsg(text.error)}</p>}
       {text.data?.binary && <p className="p-4 text-[13px] text-muted">Binary file ({bytes(text.data.size)}). Download it to open in a dedicated viewer (e.g. IGV for BAM/bigWig).</p>}
       {table ? (
         <div className="max-h-[60vh] overflow-auto">

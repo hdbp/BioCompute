@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, CircleAlert, CircleDashed, Copy, KeyRound, Laptop, Loader2, MinusCircle, Plus, Radar, Server, ShieldCheck, Terminal, Trash2 } from "lucide-react";
+import { Check, CheckCircle2, CircleAlert, CircleDashed, Copy, KeyRound, Laptop, Loader2, MinusCircle, Plus, Radar, Server, ShieldCheck, Terminal, Trash2 } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Allocation, ClusterNode } from "@/lib/types";
 import { ago, bytes, cn, gb } from "@/lib/utils";
-import { KV, PageHeader } from "@/components/page";
+import { Ago, KV, PageHeader, QueryError, usePageTitle } from "@/components/page";
+import { confirmDialog } from "@/components/ui/confirm";
 import { Badge, Checkbox, Empty, Panel, Skeleton, Slider, Switch, Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -69,6 +70,28 @@ export default function NodesPage() {
     onError: (e) => toast.error(errMsg(e)),
   });
   const current = nodes.data?.find((n) => n.is_controller)?.allocation?.preset;
+  usePageTitle("Nodes");
+
+  async function choosePreset(id: string) {
+    const p = presets.data?.[id];
+    const affected = (nodes.data ?? []).filter((n) => !["discovered", "candidate"].includes(n.state));
+    const custom = affected.filter((n) => n.allocation?.preset === "custom").length;
+    const ok = await confirmDialog({
+      title: `Apply the ${p?.label ?? id} preset to ${affected.length === 1 ? "1 node" : `all ${affected.length} enrolled nodes`}?`,
+      body: (
+        <div className="space-y-2">
+          {p?.description && <p>{p.description}</p>}
+          <p>
+            This replaces the CPU, memory and GPU limits, idle rules, allowed hours and power rules of every enrolled node
+            {custom ? `, including the ${custom === 1 ? "1 node" : `${custom} nodes`} with custom settings` : ""}. Whether a node participates is not changed.
+          </p>
+          <p className="text-muted">The previous per-node settings are not kept. Work that is already running continues.</p>
+        </div>
+      ),
+      confirmLabel: `Apply to ${affected.length === 1 ? "1 node" : `${affected.length} nodes`}`,
+    });
+    if (ok) applyPreset.mutate(id);
+  }
 
   return (
     <>
@@ -90,7 +113,7 @@ export default function NodesPage() {
             {Object.entries(presets.data ?? {}).map(([id, p]) => (
               <Tip key={id} content={p.description}>
                 <button role="radio" aria-checked={current === id} disabled={!admin || applyPreset.isPending}
-                  onClick={() => applyPreset.mutate(id)}
+                  onClick={() => choosePreset(id)}
                   className={cn("rounded-md border px-3 py-1.5 text-[13px] disabled:opacity-60", current === id ? "border-accent bg-accent/10 text-accent" : "border-line hover:bg-raised")}>
                   {p.label}
                 </button>
@@ -131,6 +154,7 @@ export default function NodesPage() {
       </Tabs>
 
       {nodes.isLoading && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-48" />)}</div>}
+      {nodes.isError && <QueryError error={nodes.error} onRetry={() => nodes.refetch()} what="the nodes" className="mb-4" />}
       {nodes.data && list.length === 0 && (
         <Panel><Empty icon={<Radar />} title={!nodes.data.length ? "No computers known yet" : "No computers match these filters"}
           action={admin && !nodes.data.length ? <Button variant="primary" onClick={() => setScanOpen(true)}>Discover computers</Button> : undefined}>
@@ -183,11 +207,11 @@ function NodeCard({ n, onOpen }: { n: ClusterNode; onOpen: () => void }) {
       {participating && n.cpu_logical ? <CapacityLine cap={n.capacity} controller={n.is_controller} /> : null}
       <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
         {participating && (n.eligibility.eligible
-          ? <Badge tone="ok">Accepting work</Badge>
-          : <Tip content={n.eligibility.reasons.join("; ")}><span><Badge tone="wait">Not eligible: {n.eligibility.reasons[0]}</Badge></span></Tip>)}
+          ? <Badge tone="ok"><CheckCircle2 className="size-3" aria-hidden />Accepting work</Badge>
+          : <Tip content={n.eligibility.reasons.join("; ")}><span><Badge tone="wait"><CircleAlert className="size-3" aria-hidden />Not accepting work: {n.eligibility.reasons[0]}</Badge></span></Tip>)}
         <TailnetTag tailnet={n.tailnet} />
         {n.discovery_sources.map((s) => <SourceTag key={s} source={s} />)}
-        {n.last_seen && !n.is_controller && <span className="text-muted ml-auto">seen {ago(n.last_seen)}</span>}
+        {n.last_seen && !n.is_controller && <span className="text-muted ml-auto">seen <Ago ts={n.last_seen} /></span>}
       </div>
     </button>
   );
@@ -213,17 +237,47 @@ function CapacityLine({ cap, controller }: { cap: ClusterNode["capacity"]; contr
   );
 }
 
+const TRANSITION_DONE: Record<string, (name: string) => string> = {
+  authorize: (n) => `${n} is authorized for enrollment`,
+  drain: (n) => `${n} is draining: running work finishes, nothing new starts`,
+  undrain: (n) => `${n} resumed and accepts work again`,
+  enable: (n) => `${n} enabled`,
+  disable: (n) => `${n} disabled`,
+  revoke: (n) => `Authorization of ${n} revoked`,
+  remove: (n) => `${n} removed`,
+};
+
 function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; admin: boolean; onClose: () => void; onEnroll: () => void }) {
   const qc = useQueryClient();
   const refresh = () => { qc.invalidateQueries({ queryKey: ["nodes"] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); };
+  const name = n.display_name || n.hostname;
   const transition = useMutation({
     mutationFn: (action: string) => api.post<ClusterNode>(`/api/nodes/${n.id}/transition`, { action }),
-    onSuccess: (_, a) => { toast.success(`Node ${a === "remove" ? "removed" : a + "d"}`.replace("ed d", "ed")); refresh(); if (a === "remove") onClose(); },
+    onSuccess: (_, a) => { toast.success(TRANSITION_DONE[a]?.(name) ?? `${name} updated`); refresh(); if (a === "remove") onClose(); },
     onError: (e) => toast.error(errMsg(e)),
   });
   const condor = useQuery({ queryKey: ["condor", n.id, n.allocation], queryFn: () => api.get<string>(`/api/nodes/${n.id}/condor-config`), enabled: !!n.allocation });
   const metrics = useQuery({ queryKey: ["metrics", n.id], queryFn: () => api.get<{ cpu: number }[]>(`/api/nodes/${n.id}/metrics?minutes=60`) });
   const participating = !["discovered", "candidate"].includes(n.state);
+
+  /** Disable, revoke and remove take a machine out of the cluster: say what happens and ask first. */
+  async function ask(action: "disable" | "revoke" | "remove") {
+    const c = {
+      disable: {
+        title: `Disable ${name}?`, confirmLabel: "Disable node",
+        body: "The scheduler stops placing work on this computer until an administrator re-enables it. Its enrollment and resource limits are kept. To let running work finish first, drain it instead.",
+      },
+      revoke: {
+        title: `Revoke the authorization of ${name}?`, confirmLabel: "Revoke authorization",
+        body: "Its agent token stops working and the computer goes back to Discovered: it no longer runs work, and it must be authorized and enrolled again (a new enrollment token on that machine) before it can.",
+      },
+      remove: {
+        title: `Remove ${name} from BioCompute?`, confirmLabel: "Remove node",
+        body: "The computer, its resource limits and its history in this list are deleted. Nothing is uninstalled on the machine itself; it can show up again when discovery finds it.",
+      },
+    }[action];
+    if (await confirmDialog({ ...c, danger: true })) transition.mutate(action);
+  }
 
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()} title={n.display_name || n.hostname} description={nodeStateHelp(n.state)} width="max-w-2xl">
@@ -237,7 +291,7 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
           <TabsContent value="allocation" className="py-4">
             {!n.eligibility.eligible && (
               <div className="mb-4 rounded-md border border-wait/30 bg-wait/10 px-3 py-2 text-[13px]">
-                <p className="font-medium text-wait">Not accepting work right now</p>
+                <p className="flex items-center gap-1.5 font-medium text-wait"><CircleAlert className="size-4" aria-hidden />Not accepting work right now</p>
                 <ul className="mt-1 list-disc pl-5 text-muted">{n.eligibility.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
               </div>
             )}
@@ -276,7 +330,7 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
             <KV k="Power" v={n.utilization.power?.has_battery ? `battery ${n.utilization.power.percent ?? "?"}%, ${n.utilization.power.on_ac ? "on AC" : "on battery"}` : "mains"} />
             <KV k="Load" v={n.utilization.load?.map((l) => l.toFixed(2)).join(" / ")} />
             <KV k="Samples (1 h)" v={metrics.data ? `${metrics.data.length} utilization samples` : null} />
-            <KV k="Last seen" v={n.last_seen ? ago(n.last_seen) : "never"} />
+            <KV k="Last seen" v={n.last_seen ? <Ago ts={n.last_seen} /> : "never"} />
           </dl>
           {n.notes && <p className="mt-3 whitespace-pre-wrap text-xs text-muted">{n.notes}</p>}
         </TabsContent>
@@ -295,9 +349,9 @@ function NodeSheet({ node: n, admin, onClose, onEnroll }: { node: ClusterNode; a
           {participating && n.state !== "disabled" && (n.allocation?.draining
             ? <Button onClick={() => transition.mutate("undrain")}>Resume accepting work</Button>
             : <Button onClick={() => transition.mutate("drain")}>Drain for maintenance</Button>)}
-          {participating && (n.state === "disabled" ? <Button onClick={() => transition.mutate("enable")}>Re-enable</Button> : <Button variant="danger" onClick={() => transition.mutate("disable")}>Disable</Button>)}
-          {n.state !== "discovered" && <Button variant="ghost" onClick={() => transition.mutate("revoke")}>Revoke authorization</Button>}
-          <Button variant="ghost" className="ml-auto text-bad" onClick={() => confirm(`Remove ${n.hostname} from BioCompute?`) && transition.mutate("remove")}><Trash2 />Remove</Button>
+          {participating && (n.state === "disabled" ? <Button onClick={() => transition.mutate("enable")}>Re-enable</Button> : <Button variant="danger" onClick={() => ask("disable")}>Disable</Button>)}
+          {n.state !== "discovered" && <Button variant="ghost" onClick={() => ask("revoke")}>Revoke authorization</Button>}
+          <Button variant="ghost" className="ml-auto text-bad" onClick={() => ask("remove")}><Trash2 />Remove</Button>
         </div>
       )}
     </Sheet>
@@ -333,7 +387,7 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
   useEffect(() => {
     const isRunning = st?.state === "running";
     if (running && !isRunning && st) {
-      if (st.state === "done") toast.success(`${n.hostname} enrolled${st.enable_participation ? " and accepting jobs" : ""}`);
+      if (st.state === "done") toast.success(`${n.hostname} enrolled${st.enable_participation ? " and accepting work" : ""}`);
       else if (st.state === "warning") toast.warning(`${n.hostname} enrolled, but no heartbeat from its service yet`);
       else {
         toast.error(`Enrollment of ${n.hostname} failed`);
@@ -402,7 +456,7 @@ function SshEnroll({ node: n }: { node: ClusterNode }) {
           </div>
           <label className="mt-3 flex items-center gap-2 text-[13px]">
             <Checkbox checked={f.enable_participation} onCheckedChange={(v) => setF({ ...f, enable_participation: !!v })} />
-            Start using it for jobs right away <span className="text-muted">(Balanced preset; laptops only when idle and on power)</span>
+            Start running work on it right away <span className="text-muted">(Balanced preset; laptops only when idle and on power)</span>
           </label>
           <p className="mt-2 text-xs text-muted">
             BioCompute connects over SSH through your tailnet{f.password ? ", installs its own SSH key with the password (used once, never stored)" : ""},
@@ -570,7 +624,8 @@ function EnrollSteps({ node: n, admin, onEnroll, manualOnly }: { node: ClusterNo
         {steps.map(([title, body], i) => (
           <li key={title} className="flex gap-3">
             <span className={cn("grid size-6 shrink-0 place-items-center rounded-full border text-xs font-semibold",
-              i + 1 < step ? "border-ok/50 bg-ok/15 text-ok" : i + 1 === step ? "border-accent text-accent" : "border-line text-muted")}>{i + 1}</span>
+              i + 1 < step ? "border-ok/50 bg-ok/15 text-ok" : i + 1 === step ? "border-accent text-accent" : "border-line text-muted")}
+              aria-label={`Step ${i + 1}${i + 1 < step ? ", done" : i + 1 === step ? ", next" : ""}`}>{i + 1 < step ? <Check className="size-3.5" strokeWidth={3} /> : i + 1}</span>
             <div className="min-w-0 text-[13px]"><p className="font-medium">{title}</p><div className="mt-1 text-muted">{body}</div></div>
           </li>
         ))}
@@ -609,13 +664,13 @@ function AllocationForm({ node, disabled, onSaved }: { node: ClusterNode; disabl
         <Field label={`Maximum memory: ${f.max_memory_gb} GB of ${memMax}`}>
           <Slider min={1} max={memMax} step={1} value={[f.max_memory_gb]} onValueChange={([v]) => set("max_memory_gb", v)} aria-label="Maximum memory" />
         </Field>
-        <Field label="GPUs available to jobs" hint={`${node.gpus.length} detected`}>
+        <Field label="GPUs available to runs" hint={`${node.gpus.length} detected`}>
           <Input type="number" min={0} max={node.gpus.length} value={f.gpus_allowed} onChange={(e) => set("gpus_allowed", +e.target.value)} />
         </Field>
         <Field label="Scratch storage limit (GB)">
           <Input type="number" min={0} value={f.scratch_limit_gb} onChange={(e) => set("scratch_limit_gb", +e.target.value)} />
         </Field>
-        <Field label="Maximum concurrent jobs">
+        <Field label="Maximum concurrent tasks" hint="How many pipeline tasks may run on this node at the same time.">
           <Input type="number" min={1} value={f.max_concurrent_jobs} onChange={(e) => set("max_concurrent_jobs", +e.target.value)} />
         </Field>
         <Field label={`Execution priority: ${f.priority}`} hint="Higher priority nodes are preferred when several are eligible.">
@@ -634,7 +689,7 @@ function AllocationForm({ node, disabled, onSaved }: { node: ClusterNode; disabl
       </div>
       <div className="space-y-2.5">
         {[
-          ["idle_only", "Only when idle", "Wait until nobody is using the keyboard and load is low; suspend jobs when the user returns."],
+          ["idle_only", "Only when idle", "Wait until nobody is using the keyboard and load is low; suspend running tasks when the user returns."],
           ["require_ac_power", "Only on AC power", "Laptops stop accepting work on battery."],
           ["draining", "Draining", "Finish running work, accept nothing new (before maintenance)."],
         ].map(([k, label, help]) => (

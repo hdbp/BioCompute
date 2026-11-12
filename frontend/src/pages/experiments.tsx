@@ -6,13 +6,12 @@ import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Experiment, ExperimentDetail } from "@/lib/types";
-import { ago } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Badge, Empty, Skeleton } from "@/components/ui/misc";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/menu";
-import { PageHeader } from "@/components/page";
+import { Ago, PageHeader, QueryError, usePageTitle } from "@/components/page";
 import { ASSAYS, assayLabel, CONDITION_COLORS } from "@/components/experiment/model";
 
 export default function ExperimentsPage() {
@@ -25,6 +24,7 @@ export default function ExperimentsPage() {
   const [toDelete, setToDelete] = useState<Experiment | null>(null);
   const [filter, setFilter] = useState("");
   const [assay, setAssay] = useState("");
+  usePageTitle("Experiments");
 
   const items = useMemo(() => {
     const f = filter.toLowerCase();
@@ -63,7 +63,7 @@ export default function ExperimentsPage() {
       )}
 
       {q.isLoading && <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}</div>}
-      {q.isError && <p className="text-bad text-[13px]">{errMsg(q.error)}</p>}
+      {q.isError && !q.data && <QueryError error={q.error} onRetry={() => q.refetch()} what="the experiments" />}
       {q.data?.length === 0 && (
         <div className="rounded-lg border border-dashed border-line bg-surface">
           <Empty icon={<FlaskConical />} title="No experiments yet"
@@ -108,7 +108,7 @@ export default function ExperimentsPage() {
                       {e.conditions.length > 4 && <span className="text-xs text-muted">+{e.conditions.length - 4} more</span>}
                     </div>
                   </td>
-                  <td className="px-3 py-2.5 text-muted whitespace-nowrap">{ago(e.updated_at)}</td>
+                  <td className="px-3 py-2.5 text-muted whitespace-nowrap"><Ago ts={e.updated_at} /></td>
                   <td className="px-2 py-2.5">
                     <DropdownMenu>
                       <DropdownMenuTrigger className="rounded p-1 text-muted hover:bg-raised hover:text-text" aria-label={`Actions for ${e.name}`}>

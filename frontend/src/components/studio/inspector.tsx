@@ -1,4 +1,5 @@
-import { Copy, FolderInput, PackagePlus, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, FolderInput, PackagePlus, RotateCcw, Trash2, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { PathInput } from "@/components/file-browser";
 import { ReferenceHint, ReferencePicker } from "@/components/reference-picker";
 import type { Issue, ModuleDef, StudioModule } from "@/lib/types";
@@ -8,10 +9,10 @@ import { Badge, Switch } from "@/components/ui/misc";
 import { IssueList } from "@/components/page";
 import { effective, type ModuleData, type Port, type PortTypes, type StudioNode } from "./model";
 
-export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, onDuplicate, onSaveAsModule }: {
+export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, onDuplicate, onSaveAsModule, onClose, className }: {
   node: StudioNode; mod: StudioModule | undefined; portTypes: PortTypes; issues: Issue[];
   onChange: (patch: Partial<ModuleData>) => void; onDelete: () => void; onDuplicate: () => void;
-  onSaveAsModule?: (def: ModuleDef) => void;
+  onSaveAsModule?: (def: ModuleDef) => void; onClose?: () => void; className?: string;
 }) {
   const d = node.data;
   const spec = effective(mod, d);
@@ -27,15 +28,16 @@ export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, on
   };
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-line bg-surface" aria-label="Node inspector">
+    <aside className={cn("flex w-80 max-w-full shrink-0 flex-col border-l border-line bg-surface", className)} aria-label="Step settings">
       <div className="flex items-start justify-between gap-2 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold truncate">{d.label}</p>
           <p className="text-xs text-muted">{mod?.name ?? d.module}{mod?.category ? `, ${mod.category.toLowerCase()}` : ""}</p>
         </div>
         <div className="flex gap-1">
-          <Button size="icon" variant="ghost" onClick={onDuplicate} aria-label="Duplicate node" title="Duplicate"><Copy /></Button>
-          <Button size="icon" variant="ghost" onClick={onDelete} aria-label="Delete node" title="Delete"><Trash2 /></Button>
+          <Button size="icon" variant="ghost" onClick={onDuplicate} aria-label="Duplicate step" title="Duplicate step"><Copy /></Button>
+          <Button size="icon" variant="ghost" onClick={onDelete} aria-label="Delete step" title="Delete step"><Trash2 /></Button>
+          {onClose && <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close step settings" title="Close (the step stays on the canvas)"><X /></Button>}
         </div>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -212,8 +214,8 @@ export function Inspector({ node, mod, portTypes, issues, onChange, onDelete, on
             <ul className="space-y-1 text-[12px]">
               {spec.outputs.map((o) => (
                 <li key={o.name} className="flex items-center gap-2">
-                  <span className="size-2 rounded-full" style={{ background: portTypes[o.type]?.color }} />
-                  <span>{o.name}</span><span className="ml-auto font-mono text-[11px] text-muted truncate">{o.pattern}</span>
+                  <span className="size-2 shrink-0 rounded-full" style={{ background: portTypes[o.type]?.color }} aria-hidden />
+                  <span>{o.name}</span><span className="text-muted">{portTypes[o.type]?.label ?? o.type}</span><span className="ml-auto font-mono text-[11px] text-muted truncate">{o.pattern}</span>
                 </li>
               ))}
             </ul>

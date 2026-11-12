@@ -11,6 +11,7 @@ function ModuleNodeImpl({ id, data, selected }: NodeProps<StudioNode>) {
   const issues = issuesByNode[id] ?? [];
   const errors = issues.filter((i) => i.level === "error");
   const color = (t: string) => portTypes[t]?.color ?? "#94a3b8";
+  const typeName = (t: string) => portTypes[t]?.label ?? t;
   const Icon = mod?.kind === "source" ? (mod.id === "input_file" ? Database : FileInput) : mod?.kind === "sink" ? FolderOutput : mod?.custom ? Code2 : Layers;
   const rows = Math.max(spec.inputs.length, spec.outputs.length);
 
@@ -44,15 +45,16 @@ function ModuleNodeImpl({ id, data, selected }: NodeProps<StudioNode>) {
               {inp ? (
                 <>
                   <Handle type="target" position={Position.Left} id={`in:${inp.name}`} style={{ background: color(inp.type), left: -6 }}
-                    title={`${inp.name}: ${portTypes[inp.type]?.label ?? inp.type}${inp.multiple ? " (accepts several)" : ""}`} />
-                  <span className="truncate text-muted">{inp.name}{inp.multiple && <span className="text-muted/60"> +</span>}</span>
+                    title={`Input ${inp.name}: ${typeName(inp.type)}${inp.multiple ? " (accepts several)" : ""}`}
+                    aria-label={`Input ${inp.name}, type ${typeName(inp.type)}${inp.multiple ? ", accepts several connections" : ""}`} />
+                  <span className="truncate text-muted" title={`${inp.name}: ${typeName(inp.type)}`}>{inp.name}{inp.multiple && <span className="text-muted/60"> +</span>}</span>
                 </>
               ) : <span />}
               {out ? (
                 <>
-                  <span className="truncate text-right text-muted">{out.name}</span>
+                  <span className="truncate text-right text-muted" title={`${out.name}: ${typeName(out.type)}`}>{out.name}</span>
                   <Handle type="source" position={Position.Right} id={`out:${out.name}`} style={{ background: color(out.type), right: -6 }}
-                    title={`${out.name}: ${portTypes[out.type]?.label ?? out.type}`} />
+                    title={`Output ${out.name}: ${typeName(out.type)}`} aria-label={`Output ${out.name}, type ${typeName(out.type)}`} />
                 </>
               ) : <span />}
             </div>

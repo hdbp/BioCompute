@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Download, Layers, Lock, PackagePlus, Pencil, Puzzle, Search, Trash2, Users } from "lucide-react";
+import { Download, Layers, Lock, PackagePlus, PanelLeftClose, Pencil, Puzzle, Search, Trash2, Users } from "lucide-react";
 import type { StudioModule, StudioWorkflow } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,12 @@ export const DND_SUBWORKFLOW = "application/x-biocompute-subworkflow";
 
 const CATEGORY_ORDER = ["Inputs", "Quality control", "Preprocessing", "Alignment", "Peak calling", "Quantification", "Visualization", "Reporting", "Outputs", "My modules", "Custom code"];
 
-export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd, onInsertSub, onDeleteSub, onAddSoftware, onEditModule, onExportModule, onDeleteModule, onShareModule }: {
+export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd, onInsertSub, onDeleteSub, onAddSoftware, onEditModule, onExportModule, onDeleteModule, onShareModule, onCollapse }: {
   modules: StudioModule[]; portTypes: PortTypes; customAllowed: boolean; subworkflows: StudioWorkflow[];
   onAdd: (m: StudioModule) => void; onInsertSub: (w: StudioWorkflow) => void; onDeleteSub: (w: StudioWorkflow) => void;
   onAddSoftware: () => void; onEditModule: (m: StudioModule) => void; onExportModule: (m: StudioModule) => void; onDeleteModule: (m: StudioModule) => void;
   onShareModule?: (m: StudioModule, visibility: "private" | "lab") => void;
+  onCollapse?: () => void;
 }) {
   const [q, setQ] = useState("");
   const groups = useMemo(() => {
@@ -30,6 +31,14 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-surface" aria-label="Module library">
       <div className="border-b border-line p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-[13px] font-semibold">Modules</h3>
+          {onCollapse && (
+            <button onClick={onCollapse} className="rounded p-1 text-muted hover:bg-raised hover:text-text" aria-label="Hide the module library" title="Hide the module library (more room for the canvas)">
+              <PanelLeftClose className="size-4" />
+            </button>
+          )}
+        </div>
         <div className="relative">
           <Search className="absolute left-2 top-2.5 size-3.5 text-muted" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search modules or tools" className="pl-7 h-8" aria-label="Search modules" />
@@ -48,7 +57,8 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
             <ul className="space-y-1">
               {mods.map((m) => {
                 const disabled = !!(m.custom || m.user) && !customAllowed;
-                const ports = [...m.inputs.map((p) => p.type), ...m.outputs.map((p) => p.type)];
+                const ports = [...new Set([...m.inputs.map((p) => p.type), ...m.outputs.map((p) => p.type)])];
+                const typeNames = ports.map((t) => portTypes[t]?.label ?? t);
                 return (
                   <li key={m.id} className={cn(m.user && "group/mod relative")}>
                     <Tip side="right" content={<div className="space-y-1"><p>{m.description}</p>{m.tools?.length ? <p className="text-muted">Requires: {m.tools.join(", ")}</p> : null}{m.user && <p className="text-muted">{m.can_edit === false ? `Shared by ${m.owner} (${m.id}); read-only` : `Your module (${m.id}), ${m.visibility === "lab" ? "shared with the lab" : "private"}`}</p>}{disabled && <p className="text-wait">Custom code is disabled by the administrator.</p>}</div>}>
@@ -60,10 +70,11 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
                         className={cn("group flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-[13px] hover:border-line hover:bg-raised/70 cursor-grab active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40")}
                       >
                         <span className="flex-1 truncate">{m.name}</span>
-                        <span className="flex gap-0.5" aria-hidden>
-                          {[...new Set(ports)].slice(0, 4).map((t) => (
-                            <span key={t} className="size-2 rounded-full" style={{ background: portTypes[t]?.color ?? "#94a3b8" }} />
+                        <span className="flex gap-0.5" title={`Data types: ${typeNames.join(", ")}`}>
+                          {ports.slice(0, 4).map((t) => (
+                            <span key={t} className="size-2 rounded-full" style={{ background: portTypes[t]?.color ?? "#94a3b8" }} aria-hidden />
                           ))}
+                          {ports.length > 0 && <span className="sr-only">, data types: {typeNames.join(", ")}</span>}
                         </span>
                       </button>
                     </Tip>
@@ -91,7 +102,7 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
         <section className="mb-3 border-t border-line pt-3">
           <h4 className="flex items-center gap-1.5 px-1.5 pb-1 text-xs font-medium text-muted"><Puzzle className="size-3.5" />Saved subworkflows</h4>
           {subworkflows.length === 0 ? (
-            <p className="px-1.5 text-[12px] text-muted">Select several nodes and choose “Save selection as subworkflow” to reuse them here.</p>
+            <p className="px-1.5 text-[12px] text-muted">Select several steps on the canvas and choose “Save as subworkflow” to reuse them here.</p>
           ) : (
             <ul className="space-y-1">
               {subworkflows.map((w) => (
@@ -101,7 +112,7 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
                     className="flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-raised/70 cursor-grab">
                     <Layers className="size-3.5 text-accent" />
                     <span className="flex-1 truncate">{w.name}</span>
-                    <span className="text-[11px] text-muted tabular-nums">{w.graph.nodes.length}</span>
+                    <span className="text-[11px] text-muted tabular-nums" title={`${w.graph.nodes.length} steps`}>{w.graph.nodes.length}</span>
                   </button>
                   <button onClick={() => onDeleteSub(w)} className="rounded p-1 text-muted opacity-0 hover:text-bad group-hover:opacity-100 focus:opacity-100" aria-label={`Delete subworkflow ${w.name}`}>
                     <Trash2 className="size-3.5" />
@@ -113,10 +124,10 @@ export function Palette({ modules, portTypes, customAllowed, subworkflows, onAdd
         </section>
 
         <section className="border-t border-line pt-3 px-1.5">
-          <h4 className="pb-1.5 text-xs font-medium text-muted">Port types</h4>
+          <h4 className="pb-1.5 text-xs font-medium text-muted">Data types (colour of the connection points)</h4>
           <ul className="grid grid-cols-1 gap-1 text-[12px] text-muted">
             {Object.entries(portTypes).map(([k, v]) => (
-              <li key={k} className="flex items-center gap-2"><span className="size-2.5 rounded-full" style={{ background: v.color }} />{v.label}</li>
+              <li key={k} className="flex items-center gap-2"><span className="size-2.5 rounded-full" style={{ background: v.color }} aria-hidden />{v.label}</li>
             ))}
           </ul>
         </section>

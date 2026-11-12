@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Panel, PanelHeader, Popover, PopoverContent, PopoverTrigger } from "@/components/ui/misc";
+import { confirmDialog } from "@/components/ui/confirm";
 import { CONDITION_COLORS, conditionColor, type Row } from "./model";
 
 type Meta = Pick<ExperimentDetail, "conditions" | "contrasts" | "custom_columns">;
@@ -27,7 +28,28 @@ export function DesignPanel({ exp, rows, readOnly, onMeta, onRenameCondition }: 
     onMeta({ conditions: [...exp.conditions, { name: n, color: CONDITION_COLORS[exp.conditions.length % CONDITION_COLORS.length] }] });
     setNewCond("");
   };
-  const removeCondition = (name: string) => {
+  const removeCondition = async (name: string) => {
+    const used = exp.contrasts.filter((c) => c.treatment === name || c.reference === name);
+    const n = counts.get(name) ?? 0;
+    const ok = await confirmDialog({
+      title: `Remove the condition “${name}”?`,
+      body: (
+        <div className="space-y-2">
+          {used.length > 0 && (
+            <p>
+              {used.length === 1 ? "This comparison uses it and is removed too:" : `These ${used.length} comparisons use it and are removed too:`}{" "}
+              <span className="font-medium">{used.map((c) => `${c.treatment} vs ${c.reference}`).join(", ")}</span>.
+            </p>
+          )}
+          {n > 0 && <p>{n === 1 ? "1 sample loses" : `${n} samples lose`} this condition in the table (you can undo that until you save the rows).</p>}
+          {!used.length && !n && <p>No sample or comparison uses it.</p>}
+          <p className="text-muted">The design is saved immediately, so removing the condition{used.length ? " and its comparisons" : ""} cannot be undone.</p>
+        </div>
+      ),
+      confirmLabel: used.length ? `Remove condition and ${used.length === 1 ? "1 comparison" : `${used.length} comparisons`}` : "Remove condition",
+      danger: true,
+    });
+    if (!ok) return;
     onMeta({ conditions: exp.conditions.filter((c) => c.name !== name), contrasts: exp.contrasts.filter((c) => c.treatment !== name && c.reference !== name) });
     if (counts.get(name)) onRenameCondition(name, null);
   };
@@ -59,7 +81,7 @@ export function DesignPanel({ exp, rows, readOnly, onMeta, onRenameCondition }: 
 
   return (
     <Panel>
-      <PanelHeader title="Design" description="Conditions, comparisons and metadata columns for this experiment." />
+      <PanelHeader title="Design" description={`Conditions, comparisons and metadata columns for this experiment.${readOnly ? "" : " Changes here are saved automatically."}`} />
       <div className="divide-y divide-line">
         <section className="p-4 space-y-2.5" aria-label="Conditions">
           <h4 className="text-[13px] font-medium">Conditions</h4>

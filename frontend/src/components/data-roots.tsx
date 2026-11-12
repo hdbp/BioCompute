@@ -7,6 +7,7 @@ import { Badge, Panel, PanelHeader, Switch } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
+import { confirmDialog } from "@/components/ui/confirm";
 import { ControllerFolderPicker } from "@/components/folder-picker";
 
 export interface DataRootInfo { name: string; path: string; restricted: boolean; writable: boolean; description: string; exists: boolean; source?: "settings" | "ui" | "refgenie" }
@@ -34,7 +35,7 @@ export function DataRootsPanel({ roots, admin }: { roots: DataRootInfo[]; admin:
         description="The only folders BioCompute can browse, read and write: pick pipeline inputs from them and send results to them. Restricted folders never leave this controller's site."
         actions={admin && <Button size="sm" variant="primary" onClick={() => setOpen(true)}><FolderPlus />Add folder</Button>} />
       <div className="divide-y divide-line/60">
-        {roots.length === 0 && <p className="p-4 text-[13px] text-bad">No data folders yet. Add the folders that hold your sequencing data.</p>}
+        {roots.length === 0 && <p className="p-4 text-[13px] text-bad">No data folders yet. {admin ? "Add the folders that hold your sequencing data." : "Ask an administrator to add the folders that hold your data."}</p>}
         {roots.map((r) => (
           <div key={r.name} className="px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -42,7 +43,7 @@ export function DataRootsPanel({ roots, admin }: { roots: DataRootInfo[]; admin:
               {r.restricted && <Badge tone="wait"><Lock className="size-3" />restricted</Badge>}
               <Badge>{r.writable ? "writable" : "read-only"}</Badge>
               {!r.exists && <Badge tone="bad">missing on disk</Badge>}
-              <span className="ml-auto text-[11px] text-muted">{r.source === "ui" ? "added here" : r.source === "refgenie" ? "refgenie genome folder (always read-only)" : "from BIOCOMPUTE_DATA_ROOTS"}</span>
+              <span className="ml-auto text-[11px] text-muted">{r.source === "ui" ? "added here" : r.source === "refgenie" ? "refgenie genome folder (always read-only)" : "set in the controller's environment file"}</span>
             </div>
             <p className="mt-0.5 font-mono text-[12px] text-muted">{r.path}</p>
             {r.description && <p className="text-xs text-muted">{r.description}</p>}
@@ -50,7 +51,13 @@ export function DataRootsPanel({ roots, admin }: { roots: DataRootInfo[]; admin:
               <div className="mt-2 flex flex-wrap items-center gap-4 text-[12.5px]">
                 <label className="flex items-center gap-2"><Switch checked={r.restricted} onCheckedChange={(v) => patch.mutate({ name: r.name, body: { restricted: v } })} />Restricted</label>
                 <label className="flex items-center gap-2"><Switch checked={r.writable} onCheckedChange={(v) => patch.mutate({ name: r.name, body: { writable: v } })} />Results can be written here</label>
-                <Button size="sm" variant="ghost" className="ml-auto" onClick={() => window.confirm(`Remove “${r.name}” from BioCompute? The folder and its files stay on disk; experiments that point into it will stop finding their files.`) && del.mutate(r.name)}>
+                <Button size="sm" variant="ghost" className="ml-auto" onClick={async () => {
+                  if (await confirmDialog({
+                    title: `Remove the data folder “${r.name}”?`,
+                    body: "The folder and its files stay on disk. BioCompute can no longer browse it: experiments, saved launches and Data Explorer projects that point into it stop finding their files until the folder is added again under the same name.",
+                    confirmLabel: "Remove data folder", danger: true,
+                  })) del.mutate(r.name);
+                }}>
                   <Trash2 />Remove
                 </Button>
               </div>

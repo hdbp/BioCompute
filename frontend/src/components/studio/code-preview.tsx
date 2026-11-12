@@ -27,7 +27,7 @@ export function CodePreview({ open, onOpenChange, files }: { open: boolean; onOp
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent wide className="max-w-5xl" title="Generated pipeline"
-        description="Nextflow DSL2 for the supported graph subset, its parameter schema, and the equivalent native-engine manifest. Read-only: edit the graph and regenerate.">
+        description="The Nextflow pipeline generated from this workflow, its parameter schema, and the manifest BioCompute's own engine runs. Read-only: change the workflow and open this again.">
         <div className="flex min-h-[60vh] gap-3">
           <nav className="w-52 shrink-0 space-y-0.5" aria-label="Generated files">
             {names.map((n) => (

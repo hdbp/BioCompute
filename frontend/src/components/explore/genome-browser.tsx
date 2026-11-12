@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Dna, Globe2, Link2, Loader2, Trash2 } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { confirmDialog } from "@/components/ui/confirm";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/input";
 import { PathInput } from "@/components/file-browser";
@@ -100,7 +101,13 @@ export default function GenomeBrowser({ visible }: { visible: boolean }) {
         <Button size="sm" variant="secondary" onClick={() => setDlg("url")}><Link2 />Track from URL</Button>
         <span className="ml-auto text-xs text-muted tabular-nums">{tracks.length} track{tracks.length === 1 ? "" : "s"}{locus ? ` · ${locus}` : ""}</span>
         {tracks.length > 0 && (
-          <Button size="sm" variant="ghost" onClick={() => window.confirm("Remove all tracks?") && clearTracks()}><Trash2 />Clear</Button>
+          <Button size="sm" variant="ghost" onClick={async () => {
+            if (await confirmDialog({
+              title: `Remove all ${tracks.length} tracks from the genome browser?`,
+              body: "The files themselves are not touched; you can add the tracks again from the file viewer or the track hubs.",
+              confirmLabel: "Remove tracks", danger: true,
+            })) clearTracks();
+          }}><Trash2 />Clear</Button>
         )}
       </div>
       {state === "loading" && <p className="flex items-center gap-2 text-[13px] text-muted"><Loader2 className="size-4 animate-spin" />Loading {genomeLabel(genome)}…</p>}

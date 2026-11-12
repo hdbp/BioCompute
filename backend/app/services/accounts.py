@@ -179,3 +179,63 @@ def accept_invite(db: Session, token: str, username: str, password: str) -> User
     _save_invites(db, items)
     db.flush()
     return u
+
+
+# --------------------------------------------------------------------------- administration of existing accounts
+def _account(db: Session, user_id: str) -> User:
+    u = db.get(User, user_id)
+    if not u or is_pending(u):  # a pending request is approved or declined, not edited
+        raise HTTPException(404, "No such user")
+    return u
+
+
+def active_admins(db: Session) -> int:
+    return sum(1 for u in db.query(User).filter(User.role == "admin", User.is_active.is_(True)).all() if not is_pending(u))
+
+
+def _keep_one_admin(db: Session, u: User, what: str) -> None:
+    """BioCompute must always keep one administrator who can sign in."""
+    if u.role == "admin" and u.is_active and active_admins(db) <= 1:
+        raise HTTPException(409, f"{u.username} is the last active administrator and cannot be {what}. Make someone else an administrator first.")
+
+
+def set_role(db: Session, actor: User, user_id: str, role: str) -> tuple[User, str]:
+    """Change a user's role; returns the user and the previous role."""
+    u = _account(db, user_id)
+    if role not in ROLES:
+        raise HTTPException(400, "Unknown role")
+    if u.id == actor.id:
+        raise HTTPException(400, "You cannot change your own role. Ask another administrator.")
+    old = u.role
+    if role != "admin":
+        _keep_one_admin(db, u, "demoted")
+    u.role = role
+    db.flush()
+    return u, old
+
+
+def set_active(db: Session, actor: User, user_id: str, active: bool) -> User:
+    """Deactivate (the account stays, sign-in is refused) or reactivate a user."""
+    u = _account(db, user_id)
+    if not active:
+        if u.id == actor.id:
+            raise HTTPException(400, "You cannot deactivate yourself")
+        _keep_one_admin(db, u, "deactivated")
+    u.is_active = bool(active)
+    db.flush()
+    return u
+
+
+def reset_password(db: Session, actor: User, user_id: str, password: str | None) -> tuple[User, str | None]:
+    """Set a temporary password, or generate one. Returns the user and the generated password (None when one was given)."""
+    u = _account(db, user_id)
+    if u.id == actor.id:
+        raise HTTPException(400, "To change your own password use Settings, Preferences: it asks for the current one.")
+    generated = None
+    if password is None:
+        generated = password = secrets.token_urlsafe(12)
+    elif len(password) < 10:
+        raise HTTPException(400, "Password: at least 10 characters")
+    u.password_hash = hash_secret(password)
+    db.flush()
+    return u, generated

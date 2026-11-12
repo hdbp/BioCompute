@@ -293,6 +293,120 @@
                         }
                     }
                 }
+            },
+            "patch": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Update User",
+                "description": "Change a user's role and/or deactivate or reactivate the account (administrators only).",
+                "operationId": "update_user_api_auth_users__user_id__patch",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "User Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UserUpdate"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/users/{user_id}/reset-password": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Reset User Password",
+                "description": "Give a user a temporary password. A generated one is returned once, here; only its hash is stored.",
+                "operationId": "reset_user_password_api_auth_users__user_id__reset_password_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "User Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PasswordReset"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PasswordResetOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/auth/audit": {
@@ -9934,6 +10048,60 @@
                 ],
                 "title": "PasswordChange"
             },
+            "PasswordReset": {
+                "properties": {
+                    "password": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 200,
+                                "minLength": 10
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Password"
+                    }
+                },
+                "type": "object",
+                "title": "PasswordReset",
+                "description": "A temporary password chosen by the administrator; leave it out to have one generated."
+            },
+            "PasswordResetOut": {
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "title": "Ok",
+                        "default": true
+                    },
+                    "username": {
+                        "type": "string",
+                        "title": "Username"
+                    },
+                    "generated": {
+                        "type": "boolean",
+                        "title": "Generated"
+                    },
+                    "password": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Password"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "username",
+                    "generated"
+                ],
+                "title": "PasswordResetOut"
+            },
             "PipelineDetail": {
                 "properties": {
                     "id": {
@@ -12101,6 +12269,40 @@
                     "is_active"
                 ],
                 "title": "UserOut"
+            },
+            "UserUpdate": {
+                "properties": {
+                    "role": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "admin",
+                                    "scientist",
+                                    "viewer"
+                                ]
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Role"
+                    },
+                    "is_active": {
+                        "anyOf": [
+                            {
+                                "type": "boolean"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Is Active"
+                    }
+                },
+                "type": "object",
+                "title": "UserUpdate",
+                "description": "What an administrator may change on an existing account; fields left out stay as they are."
             },
             "ValidationError": {
                 "properties": {

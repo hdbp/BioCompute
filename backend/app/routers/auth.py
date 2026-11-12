@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import AuditEvent, User
-from ..schemas import LoginIn, PasswordChange, TokenOut, UserCreate, UserOut
+from ..schemas import LoginIn, PasswordChange, PasswordReset, PasswordResetOut, TokenOut, UserCreate, UserOut, UserUpdate
 from ..security import audit, create_access_token, get_current_user, hash_secret, require_admin, verify_secret
 from ..services import accounts
 from ..services import setup as setup_svc
@@ -96,15 +96,35 @@ def create_user(body: UserCreate, admin: User = Depends(require_admin), db: Sess
 
 @router.delete("/users/{user_id}")
 def deactivate_user(user_id: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    u = db.get(User, user_id)
-    if not u:
-        raise HTTPException(404)
-    if u.id == admin.id:
-        raise HTTPException(400, "You cannot deactivate yourself")
-    u.is_active = False
+    u = accounts.set_active(db, admin, user_id, False)
     audit(db, admin.username, "user.deactivate", u.username)
     db.commit()
     return {"ok": True}
+
+
+@router.patch("/users/{user_id}", response_model=UserOut)
+def update_user(user_id: str, body: UserUpdate, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Change a user's role and/or deactivate or reactivate the account (administrators only)."""
+    if body.role is None and body.is_active is None:
+        raise HTTPException(400, "Nothing to change")
+    u = db.get(User, user_id)
+    if body.role is not None and (not u or u.role != body.role):
+        u, old = accounts.set_role(db, admin, user_id, body.role)
+        audit(db, admin.username, "user.role_changed", u.username, role=u.role, previous=old)
+    if body.is_active is not None and (not u or u.is_active != body.is_active):
+        u = accounts.set_active(db, admin, user_id, body.is_active)
+        audit(db, admin.username, "user.reactivate" if u.is_active else "user.deactivate", u.username)
+    db.commit()
+    return u
+
+
+@router.post("/users/{user_id}/reset-password", response_model=PasswordResetOut)
+def reset_user_password(user_id: str, body: PasswordReset, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Give a user a temporary password. A generated one is returned once, here; only its hash is stored."""
+    u, generated = accounts.reset_password(db, admin, user_id, body.password)
+    audit(db, admin.username, "user.password_reset", u.username, generated=generated is not None)
+    db.commit()
+    return PasswordResetOut(username=u.username, generated=generated is not None, password=generated)
 
 
 @router.get("/audit")

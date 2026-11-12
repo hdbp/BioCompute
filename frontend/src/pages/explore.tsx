@@ -3,7 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ChevronRight, Database, Dna, Download, File, FileImage, FileSpreadsheet, FileText, Folder, FolderOpen, Library, Lock, Loader2, Telescope,
+  ChevronRight, Database, Dna, Download, File, FileImage, FileSpreadsheet, FileText, Folder, FolderOpen, Library, Lock, Loader2, PanelLeftClose,
+  PanelLeftOpen, Telescope,
 } from "lucide-react";
 import { api, authed, errMsg, qs } from "@/lib/api";
 import type { Project, Run } from "@/lib/types";
@@ -11,6 +12,8 @@ import { bytes, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
+import { confirmDialog } from "@/components/ui/confirm";
+import { QueryError, usePageTitle } from "@/components/page";
 import { TableView } from "@/components/explore/table-view";
 import { ReferencesView } from "@/components/explore/references-view";
 import { MissingDataHint } from "@/components/missing-data-hint";
@@ -47,20 +50,55 @@ export default function ExplorePage() {
     setParams(n, { replace: false });
   };
 
+  // The file list: beside the viewer from md up (shown or hidden as last chosen, remembered in this browser);
+  // below md a drawer over the viewer that closes when a file is picked.
+  const narrow = useNarrow();
+  const [pinned, setPinned] = useState(() => { try { return localStorage.getItem(FILES_KEY) !== "0"; } catch { return true; } });
+  const [drawer, setDrawer] = useState(() => !path && tab === "files");
+  const filesOpen = narrow ? drawer : pinned;
+  const setFilesOpen = (open: boolean) => {
+    if (narrow) setDrawer(open);
+    else { setPinned(open); try { localStorage.setItem(FILES_KEY, open ? "1" : "0"); } catch { /* ignore */ } }
+  };
+  const openFile = (p: string) => { go({ path: p, dir: parentOf(p), tab: null }); if (narrow) setDrawer(false); };
+  useEffect(() => {
+    if (!narrow || !drawer) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector('[role="dialog"]')) setDrawer(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [narrow, drawer]);
+  usePageTitle(tab === "genome" ? "Genome browser" : tab === "references" ? "Reference genomes" : path ? path.split(/[:/]/).filter(Boolean).pop() ?? "Data Explorer" : "Data Explorer",
+    tab !== "files" || path ? [{ label: "Data Explorer", to: "/explore" }] : []);
+
   return (
-    <div className="flex h-full min-h-0">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface" aria-label="Files">
+    <div className="relative flex h-full min-h-0">
+      {filesOpen && narrow && <div className="absolute inset-0 z-20 bg-black/45" onClick={() => setDrawer(false)} aria-hidden />}
+      <aside id="explore-files" hidden={!filesOpen} aria-label="Files"
+        className={cn("w-72 max-w-[85vw] shrink-0 flex-col border-r border-line bg-surface", filesOpen ? "flex" : "hidden",
+          narrow && "absolute inset-y-0 left-0 z-30 shadow-2xl shadow-black/40")}>
+        <div className="flex items-center justify-between border-b border-line py-1.5 pl-3 pr-1.5">
+          <h2 className="text-[13px] font-semibold">Files</h2>
+          <button onClick={() => setFilesOpen(false)} className="rounded p-1 text-muted hover:bg-raised hover:text-text" aria-label="Hide the file list" title="Hide the file list">
+            <PanelLeftClose className="size-4" />
+          </button>
+        </div>
+        {roots.isError && <QueryError error={roots.error} onRetry={() => roots.refetch()} what="the data folders" className="m-3" />}
         <ProjectPanel projectId={project} onSelect={(id) => go({ project: id })} currentDir={dir}
-          onOpenDir={(d) => go({ dir: d, path: null, tab: null })} onOpenFile={(p) => go({ path: p, dir: parentOf(p), tab: null })} />
-        <FileTree roots={roots.data ?? []} dir={dir} selected={path} onDir={(d) => go({ dir: d, tab: null })}
-          onFile={(p) => go({ path: p, dir: parentOf(p), tab: null })} />
+          onOpenDir={(d) => go({ dir: d, path: null, tab: null })} onOpenFile={openFile} />
+        <FileTree roots={roots.data ?? []} loaded={!!roots.data} dir={dir} selected={path} onDir={(d) => go({ dir: d, tab: null })} onFile={openFile} />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-1 border-b border-line bg-surface px-3 pt-2">
-          <Telescope className="mr-1 size-4 text-accent" />
+        <div className="flex items-center gap-1 overflow-x-auto border-b border-line bg-surface px-3 pt-2">
+          {!filesOpen && (
+            <button onClick={() => setFilesOpen(true)} aria-expanded={false} aria-controls="explore-files" title="Show the file list"
+              className="mb-1.5 mr-1 inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line px-2 py-1 text-[12.5px] text-muted hover:bg-raised hover:text-text">
+              <PanelLeftOpen className="size-3.5" />Files
+            </button>
+          )}
+          <Telescope className="mr-1 size-4 shrink-0 text-accent" />
           {([["files", "File viewer", FileText], ["genome", "Genome browser", Dna], ["references", "Reference genomes", Library]] as const).map(([k, l, Icon]) => (
             <button key={k} onClick={() => go({ tab: k === "files" ? null : k })} aria-pressed={tab === k}
-              className={cn("-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px]", tab === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>
+              className={cn("-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-[13px]", tab === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>
               <Icon className="size-3.5" />{l}{k === "genome" && nTracks > 0 && <span className="rounded bg-raised px-1 text-[11px] tabular-nums">{nTracks}</span>}
             </button>
           ))}
@@ -81,6 +119,23 @@ export default function ExplorePage() {
       </div>
     </div>
   );
+}
+
+const FILES_KEY = "bc-explore-files";
+
+/** True below the md breakpoint, where the file list becomes a drawer. */
+function useNarrow() {
+  const query = "(max-width: 767.98px)";
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return;
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return narrow;
 }
 
 const parentOf = (p: string) => {
@@ -106,8 +161,8 @@ function Intro() {
 // ---------------------------------------------------------------- file tree
 const ICON: Record<string, typeof File> = { table: FileSpreadsheet, image: FileImage, report: FileText, bed: Dna, bam: Dna, bigwig: Dna, vcf: Dna, fasta: Dna };
 
-function FileTree({ roots, dir, selected, onDir, onFile }: {
-  roots: Root[]; dir: string | null; selected: string | null; onDir: (d: string) => void; onFile: (p: string) => void;
+function FileTree({ roots, loaded, dir, selected, onDir, onFile }: {
+  roots: Root[]; loaded: boolean; dir: string | null; selected: string | null; onDir: (d: string) => void; onFile: (p: string) => void;
 }) {
   const ls = useQuery({ queryKey: ["browse", dir], queryFn: () => api.get<Listing>(`/api/datasets/browse${qs({ path: dir })}`), enabled: !!dir });
   const runs = useQuery({ queryKey: ["results"], queryFn: () => api.get<Run[]>("/api/results") });
@@ -141,7 +196,8 @@ function FileTree({ roots, dir, selected, onDir, onFile }: {
       </div>
       <ul className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {ls.isLoading && <li className="p-3 text-[13px] text-muted">Loading…</li>}
-        {ls.isError && <li className="p-3 text-[13px] text-bad">{errMsg(ls.error)}</li>}
+        {ls.isError && <li><QueryError error={ls.error} onRetry={() => ls.refetch()} what="this folder" className="m-1.5" /></li>}
+        {loaded && roots.length === 0 && <li className="p-3 text-[13px] text-muted">No data folders yet.</li>}
         {ls.data?.entries.length === 0 && <li className="p-3 text-[13px] text-muted">Empty folder.</li>}
         {ls.data?.entries.map((e) => {
           const Icon = e.type === "dir" ? Folder : ICON[e.kind] ?? File;
@@ -166,15 +222,19 @@ function FileTree({ roots, dir, selected, onDir, onFile }: {
 function FileView({ path, onOpenGenome, project, projects }: { path: string; onOpenGenome: () => void; project: string | null; projects: Project[] }) {
   const info = useQuery({ queryKey: ["explore-info", path], queryFn: () => api.get<Info>(`/api/explore/info${qs({ path })}`) });
   const { tracks, addTracks, setGenome } = useExplorer();
-  if (info.isError) return <p className="text-[13px] text-bad">{errMsg(info.error)}</p>;
+  if (info.isError) return <QueryError error={info.error} onRetry={() => info.refetch()} what={path.split(/[:/]/).filter(Boolean).pop() ?? "this file"} />;
   const d = info.data;
   if (!d) return <p className="flex items-center gap-2 text-[13px] text-muted"><Loader2 className="size-4 animate-spin" />Opening…</p>;
   const tr = d.track;
   const onBrowser = tracks.some((t) => t.path === d.path);
-  const addTrack = () => {
+  const addTrack = async () => {
     if (!tr) return;
     if (tr.needs_index && !tr.indexed) { toast.error(`${d.name} has no index next to it. Create one (samtools index / tabix) and try again.`); return; }
-    if (tr.too_big_unindexed && !window.confirm(`${d.name} is ${bytes(d.size)} and not indexed, so the genome browser must read all of it. Continue?`)) return;
+    if (tr.too_big_unindexed && !(await confirmDialog({
+      title: `Add ${d.name} without an index?`,
+      body: `It is ${bytes(d.size)} and not indexed, so the genome browser has to read the whole file every time you move. This can be slow and can make the page unresponsive.`,
+      confirmLabel: "Add anyway",
+    }))) return;
     const ref: TrackRef = { id: trackId("file"), source: "file", name: d.name, type: tr.type, format: tr.format, path: d.path, index: tr.index };
     addTracks([ref]);
     toast.success(`Added ${d.name} to the genome browser`, { action: { label: "Show", onClick: onOpenGenome } });
@@ -230,7 +290,8 @@ function FileView({ path, onOpenGenome, project, projects }: { path: string; onO
 
 function TextView({ path }: { path: string }) {
   const q = useQuery({ queryKey: ["preview", path], queryFn: () => api.get<{ content: string | null; truncated: boolean; binary: boolean }>(`/api/datasets/preview${qs({ path })}`) });
-  if (!q.data) return <p className="text-[13px] text-muted">{q.isError ? errMsg(q.error) : "Loading…"}</p>;
+  if (q.isError) return <QueryError error={q.error} onRetry={() => q.refetch()} what="this file" />;
+  if (!q.data) return <p className="text-[13px] text-muted">Loading…</p>;
   return (
     <div className="space-y-1">
       <pre className="max-h-[75vh] overflow-auto rounded-lg border border-line bg-surface p-3 font-mono text-[12px] leading-relaxed">{q.data.content}</pre>

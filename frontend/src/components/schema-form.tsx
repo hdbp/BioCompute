@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ChevronDown, CircleHelp, RotateCcw } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronDown, CircleHelp, RotateCcw, Search, X } from "lucide-react";
 import type { FormField, FormGroup } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -34,6 +34,32 @@ export function formErrors(groups: FormGroup[], params: Params, skip: string[] =
   return out;
 }
 
+const ACRONYMS: Record<string, string> = {
+  fasta: "FASTA", fastq: "FASTQ", fastqc: "FastQC", multiqc: "MultiQC", gtf: "GTF", gff: "GFF", bam: "BAM", cram: "CRAM", sam: "SAM",
+  bed: "BED", vcf: "VCF", rna: "RNA", dna: "DNA", rrna: "rRNA", umi: "UMI", qc: "QC", id: "ID", url: "URL", cpus: "CPUs", cpu: "CPU",
+  gpu: "GPU", igenomes: "iGenomes", star: "STAR", bwa: "BWA", pca: "PCA", tsv: "TSV", csv: "CSV", html: "HTML", pe: "PE", se: "SE",
+  s3: "S3", aws: "AWS", ncbi: "NCBI", sra: "SRA", gc: "GC", snp: "SNP", indel: "indel", bp: "bp", tss: "TSS", macs: "MACS",
+};
+
+/** A readable label for a parameter name: `save_trimmed_fastq` becomes "Save trimmed FASTQ". The raw name stays visible next to it. */
+export function humanLabel(name: string): string {
+  const words = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[_\-.\s]+/).filter(Boolean);
+  if (!words.length) return name;
+  const out = words.map((w) => ACRONYMS[w.toLowerCase()] ?? w.toLowerCase());
+  if (out[0] === out[0].toLowerCase()) out[0] = out[0].charAt(0).toUpperCase() + out[0].slice(1);
+  return out.join(" ");
+}
+
+/** True when a value was set to something other than the pipeline default. */
+export function isChanged(value: unknown, def: unknown): boolean {
+  if (value === undefined) return false;
+  if (value === "" && (def === undefined || def === null || def === "")) return false;
+  return JSON.stringify(value) !== JSON.stringify(def ?? undefined);
+}
+
+const matches = (f: FormField, q: string) =>
+  [f.name, f.name.replace(/[_\-.]+/g, " "), humanLabel(f.name), f.description, f.help].some((t) => (t ?? "").toLowerCase().includes(q));
+
 const coerce = (f: FormField, raw: string): unknown => {
   if (raw === "") return "";
   if (f.type === "integer") return Number.isNaN(parseInt(raw)) ? raw : parseInt(raw);
@@ -41,33 +67,93 @@ const coerce = (f: FormField, raw: string): unknown => {
   return raw;
 };
 
-export function SchemaForm({ groups, params, defaults, onChange, managed = [], serverIssues = {}, readOnly, compact }: {
+export function SchemaForm({ groups, params, defaults, onChange, managed = [], serverIssues = {}, readOnly, compact, toolbar = true, reveal }: {
   groups: FormGroup[]; params: Params; defaults: Params; onChange: (p: Params) => void;
   /** params filled in by BioCompute (e.g. input samplesheet, outdir) and therefore not editable here */
   managed?: { name: string; note: string }[];
   serverIssues?: Record<string, string>; readOnly?: boolean; compact?: boolean;
+  /** search box and "Changed only" filter above the groups (default on) */
+  toolbar?: boolean;
+  /** show this parameter: clears the filters, opens its group and scrolls to it (pass a new object to repeat) */
+  reveal?: { name: string } | null;
 }) {
+  const uid = useId();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [query, setQuery] = useState("");
+  const [changedOnly, setChangedOnly] = useState(false);
   const hiddenCount = useMemo(() => groups.reduce((n, g) => n + g.fields.filter((f) => f.hidden).length, 0), [groups]);
+  const totalCount = useMemo(() => groups.reduce((n, g) => n + g.fields.length, 0), [groups]);
   const set = (k: string, v: unknown) => onChange({ ...params, [k]: v });
+  const isManaged = (name: string) => managed.some((m) => m.name === name);
+  const changedOf = (f: FormField) => !isManaged(f.name) && isChanged(params[f.name], defaults[f.name]);
+  const changedTotal = groups.reduce((n, g) => n + g.fields.filter(changedOf).length, 0);
+  // "Changed only" keeps a field on screen once it was listed, so it does not vanish while its value is typed back to the default
+  const listed = useRef(new Set<string>());
+  if (!changedOnly) listed.current.clear();
+  else groups.forEach((g) => g.fields.forEach((f) => { if (changedOf(f)) listed.current.add(f.name); }));
+  const q = query.trim().toLowerCase();
+  const filtering = !!q || changedOnly;
+  // a search or "Changed only" looks through every parameter, advanced ones included, and opens the groups that match
+  const visible = groups.map((g) => ({
+    g, fields: g.fields.filter((f) => (filtering || showAdvanced || !f.hidden) && (!q || matches(f, q)) && (!changedOnly || listed.current.has(f.name))),
+  })).filter((x) => x.fields.length > 0);
+  const shown = visible.reduce((n, x) => n + x.fields.length, 0);
+  useEffect(() => {
+    if (!reveal) return;
+    const g = groups.find((x) => x.fields.some((f) => f.name === reveal.name));
+    if (!g) return;
+    setQuery(""); setChangedOnly(false);
+    if (g.fields.find((f) => f.name === reveal.name)?.hidden) setShowAdvanced(true);
+    setCollapsed((c) => ({ ...c, [g.id]: false }));
+    const t = setTimeout(() => {   // after the group has opened
+      const el = document.getElementById(`p-${reveal.name}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
+    }, 60);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal]);
 
   return (
     <div className="space-y-4">
-      {hiddenCount > 0 && (
-        <div className="flex items-center justify-end gap-2 text-[13px] text-muted">
-          <label htmlFor="adv" className="cursor-pointer">Show {hiddenCount} advanced parameter{hiddenCount === 1 ? "" : "s"}</label>
-          <Switch id="adv" checked={showAdvanced} onCheckedChange={setShowAdvanced} />
+      {(toolbar || hiddenCount > 0) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted">
+          {toolbar && (
+            <>
+              <div className="relative min-w-48 flex-1 sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted" />
+                <Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a parameter" aria-label="Find a parameter by name or description" className="pl-8 pr-7" />
+                {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="absolute right-2 top-2.5 text-muted hover:text-text"><X className="size-4" /></button>}
+              </div>
+              <span className="flex items-center gap-2">
+                <label htmlFor={`${uid}-chg`} className="cursor-pointer">Changed only{changedTotal > 0 ? ` (${changedTotal})` : ""}</label>
+                <Switch id={`${uid}-chg`} checked={changedOnly} onCheckedChange={setChangedOnly} />
+              </span>
+            </>
+          )}
+          {hiddenCount > 0 && (
+            <span className={cn("flex items-center gap-2", toolbar ? "sm:ml-auto" : "ml-auto")}>
+              <label htmlFor={`${uid}-adv`} className="cursor-pointer">Show {hiddenCount} advanced parameter{hiddenCount === 1 ? "" : "s"}</label>
+              <Switch id={`${uid}-adv`} checked={showAdvanced || filtering} disabled={filtering} onCheckedChange={setShowAdvanced} />
+            </span>
+          )}
         </div>
       )}
-      {groups.map((g) => {
-        const fields = g.fields.filter((f) => showAdvanced || !f.hidden);
-        if (!fields.length) return null;
-        const isCollapsed = collapsed[g.id] ?? (g.advanced && !showAdvanced);
-        const changed = fields.filter((f) => !managed.some((m) => m.name === f.name) && params[f.name] !== undefined && JSON.stringify(params[f.name]) !== JSON.stringify(defaults[f.name] ?? undefined) && params[f.name] !== "").length;
+      {filtering && (
+        <p className="text-xs text-muted" role="status">
+          {shown === 0
+            ? (changedOnly && !q ? "No parameter differs from its default." : `No parameter matches${q ? ` "${query.trim()}"` : ""}${changedOnly ? " among the changed ones" : ""}.`)
+            : `Showing ${shown} of ${totalCount} parameters.`}{" "}
+          <button type="button" className="text-accent hover:underline" onClick={() => { setQuery(""); setChangedOnly(false); }}>Show all</button>
+        </p>
+      )}
+      {visible.map(({ g, fields }) => {
+        const isCollapsed = filtering ? false : collapsed[g.id] ?? (g.advanced && !showAdvanced);
+        const changed = g.fields.filter(changedOf).length;
         return (
           <section key={g.id} className="rounded-lg border border-line bg-surface">
-            <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left" onClick={() => setCollapsed({ ...collapsed, [g.id]: !isCollapsed })} aria-expanded={!isCollapsed}>
+            <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left" onClick={() => setCollapsed({ ...collapsed, [g.id]: !isCollapsed })} aria-expanded={!isCollapsed} disabled={filtering}>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold">{g.title}</p>
                 {g.description && <p className="text-xs text-muted truncate">{g.description}</p>}
@@ -136,9 +222,10 @@ function FieldControl({ f, value, def, error, managed, readOnly, onChange }: {
   }
   return (
     <div className={cn("min-w-0 space-y-1.5", wide && "lg:col-span-2 md:col-span-2")}>
-      <div className="flex items-center gap-1.5">
-        <label htmlFor={id} className="font-mono text-[12.5px] text-text">{f.name}</label>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <label htmlFor={id} className="min-w-0 truncate text-[13px] font-medium text-text" title={`Parameter --${f.name}`}>{humanLabel(f.name)}</label>
         {f.required && <span className="text-bad text-xs" aria-label="required">*</span>}
+        <code className="min-w-0 shrink truncate select-all font-mono text-[11.5px] text-muted" title="Parameter name, as used in scripts and on the command line (click to select)">{f.name}</code>
         {f.hidden && <Badge className="text-[10.5px]">advanced</Badge>}
         {f.help && (
           <Popover>
@@ -147,7 +234,7 @@ function FieldControl({ f, value, def, error, managed, readOnly, onChange }: {
           </Popover>
         )}
         {!managed && !readOnly && !isDefault && def !== undefined && (
-          <button type="button" onClick={() => onChange(def)} className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted hover:text-text" title={`Restore default (${String(def)})`}>
+          <button type="button" onClick={() => onChange(def)} className="ml-auto inline-flex shrink-0 items-center gap-1 text-[11px] text-muted hover:text-text" title={`Restore default (${String(def)})`}>
             <RotateCcw className="size-3" />default
           </button>
         )}
@@ -175,10 +262,10 @@ export function GenericParamEditor({ params, onChange }: { params: Params; onCha
           <Input value={k} className="w-56 font-mono text-[12px]" aria-label="Parameter name"
             onChange={(e) => { const n = Object.fromEntries(rows.map(([kk, vv], j) => (j === i ? [e.target.value, vv] : [kk, vv]))); onChange(n); }} />
           <Input value={String(v)} aria-label="Value" onChange={(e) => onChange({ ...params, [k]: parse(e.target.value) })} />
-          <button className="px-2 text-muted hover:text-bad" onClick={() => { const n = { ...params }; delete n[k]; onChange(n); }} aria-label={`Remove ${k}`}>×</button>
+          <button type="button" className="px-2 text-muted hover:text-bad" onClick={() => { const n = { ...params }; delete n[k]; onChange(n); }} aria-label={`Remove ${k}`}>×</button>
         </div>
       ))}
-      <button className="text-[13px] text-accent hover:underline" onClick={() => onChange({ ...params, [`param_${rows.length + 1}`]: "" })}>Add parameter</button>
+      <button type="button" className="text-[13px] text-accent hover:underline" onClick={() => onChange({ ...params, [`param_${rows.length + 1}`]: "" })}>Add parameter</button>
     </div>
   );
 }

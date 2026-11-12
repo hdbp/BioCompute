@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Dna, Download, FilePlus2, FlaskConical, Play, Save, Table2, Undo2, Upload } from "lucide-react";
+import { ArrowLeft, Check, Dna, Download, FilePlus2, FlaskConical, Play, Redo2, Save, Table2, Undo2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { ExperimentDetail, ExperimentDetail as ED } from "@/lib/types";
-import { ago, cn, download } from "@/lib/utils";
+import { cn, download } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { Badge, Empty, Skeleton } from "@/components/ui/misc";
+import { confirmDialog } from "@/components/ui/confirm";
+import { Ago, QueryError, usePageTitle } from "@/components/page";
+import { useUnsavedGuard } from "@/hooks/unsaved";
 import { SampleTable } from "@/components/experiment/sample-table";
 import { DesignPanel } from "@/components/experiment/design-panel";
 import { AddFilesFlow, EditFilesDialog, ImportDialog } from "@/components/experiment/file-dialogs";
@@ -23,7 +26,6 @@ type MetaPatch = Partial<Pick<ED, "name" | "description" | "assay" | "genome" | 
 
 export default function ExperimentEditorPage() {
   const { id = "" } = useParams();
-  const nav = useNavigate();
   const qc = useQueryClient();
   const user = useAuth((s) => s.user);
   const readOnly = !can(user, "scientist");
@@ -43,22 +45,83 @@ export default function ExperimentEditorPage() {
   const dirty = serialized !== baseline;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const baselineRef = useRef(baseline);
+  baselineRef.current = baseline;
 
+  // Undo history of the sample table: every edit, paste, fill-down, added or deleted row is one step.
+  const history = useRef<{ undo: Row[][]; redo: Row[][] }>({ undo: [], redo: [] });
+  const [steps, setSteps] = useState({ undo: 0, redo: 0 });
+  const syncSteps = () => setSteps({ undo: history.current.undo.length, redo: history.current.redo.length });
+
+  const undo = useCallback(() => {
+    const prev = history.current.undo.pop();
+    if (!prev) return;
+    history.current.redo.push(rowsRef.current);
+    rowsRef.current = prev;
+    setRows(prev);
+    syncSteps();
+  }, []);
+  const redo = useCallback(() => {
+    const next = history.current.redo.pop();
+    if (!next) return;
+    history.current.undo.push(rowsRef.current);
+    rowsRef.current = next;
+    setRows(next);
+    syncSteps();
+  }, []);
+
+  /** Every change to the sample rows goes through here so that it can be undone. */
+  const changeRows = useCallback((next: Row[], opts: { quiet?: boolean } = {}) => {
+    const prev = rowsRef.current;
+    if (next === prev) return;
+    history.current.undo.push(prev);
+    if (history.current.undo.length > 200) history.current.undo.shift();
+    history.current.redo = [];
+    rowsRef.current = next;
+    setRows(next);
+    syncSteps();
+    const kept = new Set(next.map((r) => r._k));
+    const removed = prev.map((row, i) => ({ row, i })).filter(({ row }) => !kept.has(row._k));
+    // rows with nothing in them (a blank row that was added and removed again) are not worth a message
+    const lost = removed.filter(({ row }) => row.sample_id || Object.keys(row.files ?? {}).length);
+    if (lost.length && !opts.quiet) {
+      toast(lost.length === 1 ? `Sample ${lost[0].row.sample_id || "row"} deleted` : `${lost.length} samples deleted`, {
+        description: "Not final until you save the table.",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            // nothing else happened since: a plain undo; otherwise put the rows back where they were
+            if (rowsRef.current === next && history.current.undo[history.current.undo.length - 1] === prev) { undo(); return; }
+            const out = [...rowsRef.current];
+            removed.forEach(({ row, i }) => { if (!out.some((r) => r._k === row._k)) out.splice(Math.min(i, out.length), 0, row); });
+            changeRows(out);
+          },
+        },
+      });
+    }
+  }, [undo]);
+
+  /** Replace the table with what the server has (after loading, saving or importing); the undo history starts over. */
   const reset = useCallback((e: ExperimentDetail) => {
     const r = toRows(e.samples);
+    history.current = { undo: [], redo: [] };
+    syncSteps();
+    rowsRef.current = r;
     setRows(r);
     setBaseline(JSON.stringify(fromRows(r)));
   }, []);
 
   // load server samples into the table whenever they change, unless the user has unsaved edits
-  useEffect(() => { if (exp && !dirtyRef.current) reset(exp); }, [exp, reset]);
-
+  // (a change of name, assay, genome or design returns the same samples and must not clear the undo history)
   useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
-    window.addEventListener("beforeunload", h);
-    return () => window.removeEventListener("beforeunload", h);
-  }, [dirty]);
+    if (!exp || dirtyRef.current) return;
+    if (JSON.stringify(fromRows(toRows(exp.samples))) !== baselineRef.current) reset(exp);
+  }, [exp, reset]);
+
+  useUnsavedGuard(dirty, "sample changes");
+  usePageTitle(exp?.name, [{ label: "Experiments", to: "/experiments" }]);
 
   const save = useCallback(async (): Promise<boolean> => {
     if (!exp) return false;
@@ -82,11 +145,18 @@ export default function ExperimentEditorPage() {
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); if (dirtyRef.current && !readOnly) save(); }
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); if (dirtyRef.current && !readOnly) save(); return; }
+      // undo/redo of the table; inside a text field the browser's own undo of the typed text applies
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+      if (readOnly || typing || !mod || e.altKey || document.querySelector('[role="dialog"]')) return;
+      if (e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      else if (e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [save, readOnly]);
+  }, [save, readOnly, undo, redo]);
 
   const updateMeta = async (patch: MetaPatch) => {
     if (!exp) return;
@@ -118,6 +188,7 @@ export default function ExperimentEditorPage() {
   const localErrors = [...local.values()].reduce((n, m) => n + [...m.values()].filter((i) => i.level === "error").length, 0);
 
   if (q.isLoading) return <div className="space-y-4"><Skeleton className="h-10 w-80" /><Skeleton className="h-96" /></div>;
+  if (q.isError && (q.error as { status?: number } | null)?.status !== 404) return <QueryError error={q.error} onRetry={() => q.refetch()} what="this experiment" />;
   if (q.isError || !exp) return <Empty icon={<FlaskConical />} title="Experiment not found" action={<Button asChild><Link to="/experiments">Back to experiments</Link></Button>}>{q.error ? errMsg(q.error) : null}</Empty>;
 
   const proteomics = exp.assay === "proteomics";
@@ -126,17 +197,12 @@ export default function ExperimentEditorPage() {
   const multiLane = rows.filter((r) => runsOf(r).length > 1).length;
   const controls = rows.filter((r) => r.is_control).length;
 
-  const leave = (to: string) => {
-    if (dirty && !window.confirm("You have unsaved sample changes. Leave without saving?")) return;
-    nav(to);
-  };
-
   return (
     <div className="space-y-5">
       <div>
-        <button onClick={() => leave("/experiments")} className="mb-3 inline-flex items-center gap-1 text-[13px] text-muted hover:text-text">
+        <Link to="/experiments" className="mb-3 inline-flex items-center gap-1 text-[13px] text-muted hover:text-text">
           <ArrowLeft className="size-3.5" />Experiments
-        </button>
+        </Link>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-[16rem] flex-1 space-y-1">
             <HeaderText value={exp.name} disabled={readOnly} className="text-[22px] font-semibold leading-tight"
@@ -146,24 +212,36 @@ export default function ExperimentEditorPage() {
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {readOnly ? <Badge tone="accent">{assayLabel(exp.assay)}</Badge> : (
                 <Select value={exp.assay} aria-label="Assay" className="h-7 w-auto"
-                  onChange={(e) => {
-                    const switching = (e.target.value === "proteomics") !== proteomics;
-                    if (switching && rows.length && !window.confirm("Switching between sequencing and proteomics changes which file columns are shown. Existing file assignments are kept but hidden. Continue?")) return;
-                    updateMeta({ assay: e.target.value });
+                  onChange={async (e) => {
+                    const assay = e.target.value;
+                    const switching = (assay === "proteomics") !== proteomics;
+                    if (switching && rows.length && !(await confirmDialog({
+                      title: `Change the assay to ${assayLabel(assay)}?`,
+                      body: "Switching between sequencing and proteomics changes which file columns are shown. Existing file assignments are kept but hidden.",
+                      confirmLabel: "Change assay",
+                    }))) return;
+                    updateMeta({ assay });
                   }}>
                   {ASSAYS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
                 </Select>
               )}
               <GenomeSelect value={exp.genome ?? ""} disabled={readOnly} onChange={(g) => updateMeta({ genome: g || null })} />
-              <span className="text-xs text-muted">Updated {ago(exp.updated_at)}{exp.created_by ? ` by ${exp.created_by}` : ""}</span>
+              <span className="text-xs text-muted">Updated <Ago ts={exp.updated_at} />{exp.created_by ? ` by ${exp.created_by}` : ""}</span>
             </div>
+            {!readOnly && (
+              <p className="flex items-center gap-1 pt-0.5 text-xs text-muted">
+                <Check className="size-3 text-ok" />Name, description, assay, genome and the design are saved automatically. Sample rows are saved with the Save button.
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="ghost" onClick={async () => {
               try { download(`${exp.name.replace(/\W+/g, "_")}_metadata.tsv`, await api.get<string>(`/api/experiments/${id}/export`), "text/tab-separated-values"); }
               catch (e) { toast.error(errMsg(e)); }
             }}><Download />Export metadata</Button>
-            <Button variant="primary" disabled={!rows.length} onClick={() => leave(`/jobs/new?experiment=${id}`)}><Play />Run analysis</Button>
+            {rows.length
+              ? <Button variant="primary" asChild><Link to={`/jobs/new?experiment=${id}`}><Play />Run analysis</Link></Button>
+              : <Button variant="primary" disabled><Play />Run analysis</Button>}
           </div>
         </div>
       </div>
@@ -185,9 +263,15 @@ export default function ExperimentEditorPage() {
               <Button onClick={() => setImportOpen(true)}><Upload />Import table</Button>
             </>}
             <div className="ml-auto flex items-center gap-2">
-              {dirty && <span className="inline-flex items-center gap-1.5 text-[13px] text-wait"><span className="size-1.5 rounded-full bg-wait" />Unsaved changes</span>}
-              {dirty && <Button variant="ghost" onClick={() => exp && reset(exp)}><Undo2 />Discard</Button>}
-              {!readOnly && <Button variant="primary" disabled={!dirty} loading={saving} onClick={save}><Save />Save</Button>}
+              {!readOnly && <>
+                <Button variant="ghost" disabled={!steps.undo} onClick={undo} title="Undo the last change to the sample table (Ctrl+Z)"><Undo2 />Undo</Button>
+                <Button variant="ghost" size="icon" disabled={!steps.redo} onClick={redo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Redo2 /></Button>
+              </>}
+              {!readOnly && (dirty
+                ? <span role="status" className="inline-flex items-center gap-1.5 text-[13px] text-wait"><span className="size-1.5 rounded-full bg-wait" />Unsaved rows</span>
+                : <span className="inline-flex items-center gap-1 text-xs text-muted"><Check className="size-3 text-ok" />All rows saved</span>)}
+              {dirty && <Button variant="ghost" onClick={() => exp && changeRows(toRows(exp.samples), { quiet: true })} title="Go back to the last saved table (can be undone)"><X />Discard</Button>}
+              {!readOnly && <Button variant="primary" disabled={!dirty} loading={saving} onClick={save} title="Save the sample rows (Ctrl+S)"><Save />Save rows</Button>}
             </div>
           </div>
           {rows.length === 0 ? (
@@ -198,12 +282,12 @@ export default function ExperimentEditorPage() {
                   <Button onClick={() => setImportOpen(true)}><Upload />Import a samplesheet</Button>
                 </div>}>
                 {proteomics
-                  ? "Pick instrument raw files from a data root, or import an existing design table. Fractions, labels and acquisition batches are edited in the table."
+                  ? "Pick instrument raw files from a data folder, or import an existing design table. Fractions, labels and acquisition batches are edited in the table."
                   : "Pick FASTQ files or scan a run folder; read pairs and lanes are matched automatically and sample names are suggested from file names. You can also paste rows from a spreadsheet."}
               </Empty>
             </div>
           ) : (
-            <SampleTable exp={exp} rows={rows} onChange={setRows} columns={columns} issues={merged} readOnly={readOnly}
+            <SampleTable exp={exp} rows={rows} onChange={changeRows} columns={columns} issues={merged} readOnly={readOnly}
               onEditFiles={(k) => (proteomics ? undefined : setFilesFor(k))} />
           )}
         </div>
@@ -213,14 +297,14 @@ export default function ExperimentEditorPage() {
           <DesignPanel exp={exp} rows={rows} readOnly={readOnly} onMeta={updateMeta}
             onRenameCondition={(from, to) => {
               if (!rows.some((r) => r.condition === from)) return;
-              setRows(rows.map((r) => (r.condition === from ? { ...r, condition: to } : r)));
+              changeRows(rows.map((r) => (r.condition === from ? { ...r, condition: to } : r)));
               toast.info(to ? `Samples in "${from}" moved to "${to}". Save the table to keep this.` : `Samples in "${from}" no longer have a condition. Save the table to keep this.`);
             }} />
         </aside>
       </div>
 
       <AddFilesFlow open={addOpen} onOpenChange={setAddOpen} rows={rows} proteomics={proteomics}
-        onAdd={(nr) => setRows([...rows.filter((r) => r.sample_id || Object.keys(r.files).length), ...nr])} />
+        onAdd={(nr) => changeRows([...rows.filter((r) => r.sample_id || Object.keys(r.files).length), ...nr])} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} dirty={dirty}
         onImport={async (content, mode) => {
           try {
@@ -234,7 +318,7 @@ export default function ExperimentEditorPage() {
           }
         }} />
       <EditFilesDialog row={rows.find((r) => r._k === filesFor) ?? null} onClose={() => setFilesFor(null)}
-        onSave={(files) => setRows(rows.map((r) => (r._k === filesFor ? { ...r, files } : r)))} />
+        onSave={(files) => changeRows(rows.map((r) => (r._k === filesFor ? { ...r, files } : r)))} />
     </div>
   );
 }

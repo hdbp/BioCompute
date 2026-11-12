@@ -98,6 +98,15 @@ These limits apply to everything below.
 |---|---|
 | `./install.sh`: prerequisites, venv, UI build, config, `--data` folders, systemd service as the user, health check, `tailscale serve` + public URL, re-run updates, `--uninstall` | Tested end to end as a normal user with `systemctl`/`sudo`/`tailscale` stand-ins (no systemd in the dev sandbox); generated unit passes `systemd-analyze verify`. **Not yet run on a real systemd host or a real tailnet.** |
 
+## Interface review (independent) applied
+
+| Feature | Status |
+|---|---|
+| Navigation in analysis order (Home, Experiments, Pipelines, Studio, Runs, Results, Data Explorer; System: Nodes, Settings), foldable sidebar, breadcrumbs, page titles, run-finished notifications, crash panel | Demonstrated (browser, desktop and phone width) |
+| Unsaved-changes guard on in-app navigation (code, step settings, sample rows, launch form kept in the session); browser popups replaced by dialogs that state the consequence | Demonstrated (browser: leaving the code editor with an edit asks first) |
+| Launch: blocking reasons listed, parameters handed over from a pipeline page, generic parameters for pipelines without a form, Advanced section; Runs list sort/filter/bulk cancel in the URL; failure panel with the failed step, sample, error and next actions | Demonstrated (browser: a real run started from a FASTQ folder; a failing run shows its step, sample and gzip error) |
+| One set of pipeline tabs, one copy action, Home with your runs and experiments and a quick start, user admin (role, reset password, reactivate; last admin protected), sample-table undo, Studio toolbar with a More menu and overlays below xl | Demonstrated (browser; user admin by `test_user_admin.py`) |
+
 ## Tools check at install
 
 | Feature | Status |
