@@ -46,9 +46,9 @@
   --accent: 64 92 214;
   --accent-ink: 255 255 255;
   --run: 14 140 166;
-  --ok: 30 140 82;
+  --ok: 20 116 66;        /* AA contrast on white */
   --bad: 200 50 70;
-  --wait: 176 120 20;
+  --wait: 146 94 8;       /* AA contrast on white */
   --well-off: 226 226 230;
   /* viridis t=0.0..0.44 (dark half, stands out on white); text is white */
   --src-controller: 68 1 84;

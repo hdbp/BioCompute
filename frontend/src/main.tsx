@@ -1,11 +1,12 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Toaster } from "sonner";
 import "./index.css";
 import App from "./App";
 import { TooltipProvider } from "@/components/ui/misc";
+import { ConfirmHost } from "@/components/ui/confirm";
 import { ApiError } from "@/lib/api";
 
 const qc = new QueryClient({
@@ -20,13 +21,15 @@ const qc = new QueryClient({
 
 document.documentElement.classList.add((() => { try { return localStorage.getItem("biocompute.theme") ?? "dark"; } catch { return "dark"; } })());
 
+// A data router (needed for the unsaved-changes guard); the routes themselves stay in App.
+const router = createBrowserRouter([{ path: "*", element: <App /> }]);
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
       <TooltipProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <RouterProvider router={router} />
+        <ConfirmHost />
         <Toaster theme="system" position="bottom-right" toastOptions={{ className: "!bg-surface !border-line !text-text" }} />
       </TooltipProvider>
     </QueryClientProvider>

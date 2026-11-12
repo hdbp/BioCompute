@@ -26,7 +26,9 @@ export function ago(ts?: string | null): string {
   if (s < 60) return `${Math.round(s)}s ago`;
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
+  if (s < 30 * 86400) return `${Math.round(s / 86400)}d ago`;
+  // older than a month: the date says more than "412d ago"
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
 }
 
 export function when(ts?: string | null): string {
