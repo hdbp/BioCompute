@@ -47,3 +47,13 @@ def test_uninstall_keeps_what_runs_used_and_restores(client, auth):
 def test_catalog_entries_are_not_uninstalled(client, auth):
     tpl = next(p for p in client.get("/api/pipelines", headers=auth).json() if p["kind"] == "template")
     assert client.delete(f"/api/pipelines/{tpl['id']}", headers=auth).status_code == 409
+
+
+def test_rename_and_describe(client, auth):
+    pid = _pipeline(client, auth, "Rename me")
+    r = client.patch(f"/api/pipelines/{pid}", headers=auth, json={"name": "  Renamed QC ", "description": "d", "category": "QC"})
+    assert r.status_code == 200 and r.json()["name"] == "Renamed QC" and r.json()["category"] == "QC"
+    assert client.patch(f"/api/pipelines/{pid}", headers=auth, json={"name": "   "}).status_code == 422
+    assert client.patch(f"/api/pipelines/{pid}", headers=auth, json={"name": "x" * 201}).status_code == 422
+    ana = _login(client, auth, "ana_rename")
+    assert client.patch(f"/api/pipelines/{pid}", headers=ana, json={"name": "mine now"}).status_code in (403, 404)

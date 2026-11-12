@@ -93,9 +93,9 @@ class PipelineDetail(PipelineSummary):
 
 
 class PipelineUpdate(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    category: str | None = None
+    name: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = Field(None, max_length=4000)
+    category: str | None = Field(None, min_length=1, max_length=80)
     favorite: bool | None = None  # per user
     tags: list[str] | None = None
     visibility: str | None = None  # private | lab (owner or admin)

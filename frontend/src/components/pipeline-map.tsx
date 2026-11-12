@@ -153,15 +153,17 @@ type NfFlowNode = Node<NfNode, "nf">;
 const NfNodeView = memo(function NfNodeView({ data, selected }: NodeProps<NfFlowNode>) {
   const Icon = data.kind === "input" ? Database : data.kind === "subworkflow" ? Layers : Box;
   return (
-    <div className={cn("w-[220px] rounded-lg border bg-surface text-[12px] shadow-lg shadow-black/20", selected ? "border-accent ring-2 ring-accent/25" : data.state === "edited" ? "border-wait/70" : "border-line",
-      data.condition && !selected && "border-dashed", (data.state === "off" || data.state === "starved") && "opacity-45")}>
+    <div aria-selected={selected} className={cn("w-[220px] rounded-lg border text-[12px] shadow-lg shadow-black/20 transition-colors",
+      selected ? "border-accent bg-accent/10 ring-2 ring-accent/50" : cn("bg-surface", data.state === "edited" ? "border-wait/70" : "border-line"),
+      data.condition && !selected && "border-dashed", (data.state === "off" || data.state === "starved") && !selected && "opacity-45")}>
       {data.kind !== "input" && <Handle type="target" position={Position.Left} className="!size-2 !border-0 !bg-muted" />}
-      <div className={cn("flex items-center gap-2 rounded-t-lg px-2.5 py-2", data.kind === "input" ? "bg-run/10" : data.kind === "subworkflow" ? "bg-accent/10" : "bg-raised/60")}>
-        <Icon className="size-3.5 shrink-0 text-muted" />
+      <div className={cn("flex items-center gap-2 rounded-t-[7px] px-2.5 py-2",
+        selected ? "bg-accent text-accent-ink" : data.kind === "input" ? "bg-run/10" : data.kind === "subworkflow" ? "bg-accent/10" : "bg-raised/60")}>
+        <Icon className={cn("size-3.5 shrink-0", selected ? "text-accent-ink" : "text-muted")} />
         <span className="min-w-0 flex-1 leading-tight">
           <span className="block truncate font-medium" title={data.label}>{data.label}</span>
-          {data.name && data.name !== data.label && <span className="block truncate text-[10.5px] text-muted">{data.name}</span>}
-          {data.kind === "input" && <span className="block truncate text-[10.5px] text-muted">{data.detail}</span>}
+          {data.name && data.name !== data.label && <span className={cn("block truncate text-[10.5px]", selected ? "text-accent-ink/75" : "text-muted")}>{data.name}</span>}
+          {data.kind === "input" && <span className={cn("block truncate text-[10.5px]", selected ? "text-accent-ink/75" : "text-muted")}>{data.detail}</span>}
         </span>
         {data.state === "off" ? <span className="rounded bg-bad/15 px-1 text-[10px] font-medium text-bad">off</span>
           : data.state === "starved" ? <span className="rounded bg-ink/40 px-1 text-[10px] text-muted" title="Everything this step reads comes from steps that are off">no input</span>
@@ -268,7 +270,7 @@ function Canvas({ view, selected, onSelect, focus, states, layoutKey }: {
           aria-label="Arrange the steps automatically"><LayoutGrid /></ControlButton>
       </Controls>
       <MiniMap position="bottom-right" pannable zoomable className="!rounded-md !border !border-line"
-        nodeColor={(n) => (n.id === selected ? "rgb(var(--wait))" : "rgb(var(--accent))")} maskColor="rgb(var(--ink) / 0.6)" />
+        nodeColor={(n) => (n.id === selected ? "rgb(var(--wait))" : "rgb(var(--muted) / 0.6)")} maskColor="rgb(var(--ink) / 0.6)" />
     </ReactFlow>
   );
   return <div ref={box} className="h-full w-full">{view.ctx ? <StudioContext.Provider value={view.ctx}>{flow}</StudioContext.Provider> : flow}</div>;

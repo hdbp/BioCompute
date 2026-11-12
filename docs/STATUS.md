@@ -103,6 +103,8 @@ These limits apply to everything below.
 | Runs on the controller reserve their CPU cores and memory against its allocation; a run that does not fit waits in the queue (reason on the run page, free capacity in the launch form), first come, first served; HTCondor runs reserve nothing locally. Systemd unit: `OOMPolicy=continue` | Admission rules demonstrated (`test_admission.py`); limits are scheduling limits, not OS-enforced |
 | Uninstall a pipeline (card menu, pipeline page): never run, deleted with its files; with runs, hidden from the lists and the launch form, keeping only the versions its runs used; restorable (Pipelines, Uninstalled) | Demonstrated (`test_uninstall.py`, browser) |
 | Pipeline map and Studio step editor: steps can be dragged; the arrangement is remembered per pipeline in the browser, with a button to arrange them automatically again | Checked in the browser |
+| Right-click menu (and a "…" button) on pipelines: run, map, parameters, Studio, code, make a copy, rename and describe, favorite, share, uninstall; catalog entries: install, details, repository; uninstalled: restore | Checked in the browser; rename limits in `test_uninstall.py` |
+| The selected step on the pipeline map, in the step editor and in Studio is filled with the accent colour | Checked in the browser |
 | Machine usage samples pruned after `BIOCOMPUTE_METRICS_RETENTION_DAYS` | Implemented, not tested |
 
 ## Separate account for pipeline runs

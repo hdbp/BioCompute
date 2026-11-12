@@ -121,6 +121,11 @@ def update_pipeline(pid: str, body: PipelineUpdate, user: User = Depends(require
         favs = [x for x in prefs.get("favorite_pipelines", []) if x != p.id]
         prefs["favorite_pipelines"] = favs + ([p.id] if fav else [])
         user.prefs = prefs
+    for k in ("name", "category"):
+        if k in changes:
+            changes[k] = (changes[k] or "").strip()
+            if not changes[k]:
+                raise HTTPException(422, f"The {k} cannot be empty")
     if "visibility" in changes:
         access.check_visibility_value(changes["visibility"])
         if p.owner is None:

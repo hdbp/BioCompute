@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArchiveRestore, Download, GitBranch, FolderInput, MoreHorizontal, Search, Star, Boxes, Trash2, Workflow } from "lucide-react";
+import { ArchiveRestore, Download, GitBranch, FolderInput, Search, Star, Boxes, Workflow } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Pipeline } from "@/lib/types";
@@ -16,8 +16,8 @@ import { PathInput } from "@/components/file-browser";
 import { RunStatusBadge } from "@/components/status";
 import { StudioDrafts } from "@/components/studio-drafts";
 import { SharingBadge } from "@/components/sharing";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/menu";
 import { usePipelineUninstall } from "@/components/uninstall";
+import { PipelineContextMenu, PipelineMenuButton, usePipelineMenu } from "@/components/pipeline-menu";
 
 const WHOSE = [["all", "Everything"], ["mine", "Mine"], ["others", "Lab & catalog"]] as const;
 type Whose = (typeof WHOSE)[number][0];
@@ -57,7 +57,7 @@ export default function PipelinesPage() {
   const [importOpen, setImportOpen] = useState<null | { url?: string; name?: string; category?: string }>(null);
   const list = useQuery({ queryKey: ["pipelines"], queryFn: () => api.get<Pipeline[]>("/api/pipelines") });
   const archived = useQuery({ queryKey: ["pipelines-archived"], queryFn: () => api.get<Pipeline[]>("/api/pipelines?archived=true"), enabled: kind === "archived" });
-  const { ask: askUninstall, restore } = usePipelineUninstall();
+  const { restore } = usePipelineUninstall();
 
   const categories = useMemo(() => [...new Set((list.data ?? []).map((p) => p.category))].sort(), [list.data]);
   const items = useMemo(() => {
@@ -123,7 +123,7 @@ export default function PipelinesPage() {
           )}
           {installed.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-8">
-              {installed.map((p) => <PipelineCard key={p.id} p={p} onFav={() => fav.mutate(p)} onUninstall={can(user, "scientist") && p.can_edit ? () => askUninstall(p) : undefined} />)}
+              {installed.map((p) => <PipelineCard key={p.id} p={p} onFav={() => fav.mutate(p)} />)}
             </div>
           )}
           {templates.length > 0 && (
@@ -131,16 +131,7 @@ export default function PipelinesPage() {
               {kind === "all" && <h2 className="mb-1 text-[15px] font-semibold">Catalog (nf-core community pipelines)</h2>}
               {kind === "all" && <p className="mb-3 text-[13px] text-muted">Not installed. Installing downloads the pipeline onto the controller (needs network access to GitHub).</p>}
               <Panel className="divide-y divide-line/60">
-                {templates.map((p) => (
-                  <div key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-[13.5px]"><Link to={`/pipelines/${p.id}`} className="hover:underline">{p.name}</Link> <Badge className="ml-1.5">{p.category}</Badge></p>
-                      <p className="text-[13px] text-muted truncate">{p.description}</p>
-                    </div>
-                    {p.source_url && <a href={p.source_url} target="_blank" rel="noreferrer" className="text-xs text-muted hover:text-text">Repository</a>}
-                    {can(user, "scientist") && <Button size="sm" onClick={() => setImportOpen({ url: p.source_url ?? "", name: p.name.replace("/", "-"), category: p.category })}><Download />Install</Button>}
-                  </div>
-                ))}
+                {templates.map((p) => <CatalogRow key={p.id} p={p} onInstall={can(user, "scientist") ? () => setImportOpen({ url: p.source_url ?? "", name: p.name.replace("/", "-"), category: p.category }) : undefined} />)}
               </Panel>
             </>
           )}
@@ -165,22 +156,48 @@ function Uninstalled({ q, query, onRestore, restoring }: {
   return (
     <Panel className="divide-y divide-line/60">
       <p className="px-4 py-2.5 text-[12.5px] text-muted">Hidden from the lists and the launch form. Their runs keep working (records, results, Resume); only the versions those runs used were kept.</p>
-      {rows.map((p) => (
-        <div key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[13.5px] font-medium"><Link to={`/pipelines/${p.id}`} className="hover:underline">{p.name}</Link></p>
-            <p className="text-[12px] text-muted">{p.run_count} run{p.run_count === 1 ? "" : "s"} · {p.category}{p.owner ? ` · ${p.owner}` : ""}</p>
-          </div>
-          {p.can_edit && <Button size="sm" variant="secondary" loading={restoring === p.id} onClick={() => onRestore(p)}><ArchiveRestore />Restore</Button>}
-        </div>
-      ))}
+      {rows.map((p) => <UninstalledRow key={p.id} p={p} onRestore={() => onRestore(p)} restoring={restoring === p.id} />)}
     </Panel>
   );
 }
 
-function PipelineCard({ p, onFav, onUninstall }: { p: Pipeline; onFav: () => void; onUninstall?: () => void }) {
-  const v = p.latest_version;
+function UninstalledRow({ p, onRestore, restoring }: { p: Pipeline; onRestore: () => void; restoring: boolean }) {
+  const menu = usePipelineMenu(p);
   return (
+    <PipelineContextMenu p={p} menu={menu}>
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[13.5px] font-medium"><Link to={`/pipelines/${p.id}`} className="hover:underline">{p.name}</Link></p>
+          <p className="text-[12px] text-muted">{p.run_count} run{p.run_count === 1 ? "" : "s"} · {p.category}{p.owner ? ` · ${p.owner}` : ""}</p>
+        </div>
+        {p.can_edit && <Button size="sm" variant="secondary" loading={restoring} onClick={onRestore}><ArchiveRestore />Restore</Button>}
+        <PipelineMenuButton p={p} menu={menu} />
+      </div>
+    </PipelineContextMenu>
+  );
+}
+
+function CatalogRow({ p, onInstall }: { p: Pipeline; onInstall?: () => void }) {
+  const menu = usePipelineMenu(p, { onInstall });
+  return (
+    <PipelineContextMenu p={p} menu={menu}>
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-[13.5px]"><Link to={`/pipelines/${p.id}`} className="hover:underline">{p.name}</Link> <Badge className="ml-1.5">{p.category}</Badge></p>
+          <p className="text-[13px] text-muted truncate">{p.description}</p>
+        </div>
+        {p.source_url && <a href={p.source_url} target="_blank" rel="noreferrer" className="text-xs text-muted hover:text-text">Repository</a>}
+        {onInstall && <Button size="sm" onClick={onInstall}><Download />Install</Button>}
+      </div>
+    </PipelineContextMenu>
+  );
+}
+
+function PipelineCard({ p, onFav }: { p: Pipeline; onFav: () => void }) {
+  const v = p.latest_version;
+  const menu = usePipelineMenu(p);
+  return (
+    <PipelineContextMenu p={p} menu={menu}>
     <Panel className="flex flex-col p-4 hover:border-muted/60 transition-colors">
       <div className="flex items-start gap-2">
         <Link to={p.kind === "template" ? `/pipelines/${p.id}` : `/pipelines/${p.id}/map`} className="min-w-0 flex-1">
@@ -210,16 +227,10 @@ function PipelineCard({ p, onFav, onUninstall }: { p: Pipeline; onFav: () => voi
         {p.kind !== "template" && <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${p.id}/map`}>Map</Link></Button>}
         <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${p.id}`} title="Parameters, inputs and outputs, versions and runs">Parameters</Link></Button>
         <span className="ml-auto self-center whitespace-nowrap text-[11px] text-muted">updated <Ago ts={p.updated_at} /></span>
-        {onUninstall && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" aria-label={`More actions for ${p.name}`}><MoreHorizontal /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem danger onSelect={onUninstall}><Trash2 />Uninstall…</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        <PipelineMenuButton p={p} menu={menu} />
       </div>
     </Panel>
+    </PipelineContextMenu>
   );
 }
 

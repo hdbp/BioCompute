@@ -8,9 +8,10 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export function Panel({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("rounded-lg border border-line bg-surface", className)} {...props} />;
-}
+export const Panel = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
+  <div ref={ref} className={cn("rounded-lg border border-line bg-surface", className)} {...props} />
+));
+Panel.displayName = "Panel";
 
 export function PanelHeader({ title, description, actions, className }: { title: React.ReactNode; description?: React.ReactNode; actions?: React.ReactNode; className?: string }) {
   return (

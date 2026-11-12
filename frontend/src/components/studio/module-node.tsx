@@ -18,22 +18,23 @@ function ModuleNodeImpl({ id, data, selected }: NodeProps<StudioNode>) {
   return (
     <div
       className={cn(
-        "min-w-[210px] max-w-[260px] rounded-lg border bg-surface shadow-lg shadow-black/20 text-[12.5px]",
-        selected ? "border-accent ring-2 ring-accent/25" : errors.length ? "border-bad/60" : "border-line",
+        "min-w-[210px] max-w-[260px] rounded-lg border shadow-lg shadow-black/20 text-[12.5px] transition-colors",
+        selected ? "border-accent bg-accent/10 ring-2 ring-accent/50" : cn("bg-surface", errors.length ? "border-bad/60" : "border-line"),
       )}
+      aria-selected={selected}
     >
-      <div className={cn("flex items-center gap-2 rounded-t-lg border-b border-line px-2.5 py-2",
-        mod?.kind === "source" ? "bg-run/10" : mod?.kind === "sink" ? "bg-ok/10" : "bg-raised/60")}>
-        <Icon className="size-3.5 shrink-0 text-muted" />
+      <div className={cn("flex items-center gap-2 rounded-t-[7px] border-b px-2.5 py-2",
+        selected ? "border-accent bg-accent text-accent-ink" : cn("border-line", mod?.kind === "source" ? "bg-run/10" : mod?.kind === "sink" ? "bg-ok/10" : "bg-raised/60"))}>
+        <Icon className={cn("size-3.5 shrink-0", selected ? "text-accent-ink" : "text-muted")} />
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate font-medium text-text" title={data.label}>{data.label}</span>
-          {mod && mod.name !== data.label && <span className="block truncate text-[10.5px] font-normal text-muted">{mod.name}</span>}
+          <span className={cn("block truncate font-medium", selected ? "text-accent-ink" : "text-text")} title={data.label}>{data.label}</span>
+          {mod && mod.name !== data.label && <span className={cn("block truncate text-[10.5px] font-normal", selected ? "text-accent-ink/75" : "text-muted")}>{mod.name}</span>}
         </span>
         {errors.length > 0 && (
-          <span title={errors.map((e) => e.message).join("\n")} className="text-bad"><AlertTriangle className="size-3.5" /></span>
+          <span title={errors.map((e) => e.message).join("\n")} className={selected ? "text-accent-ink" : "text-bad"}><AlertTriangle className="size-3.5" /></span>
         )}
         {!errors.length && issues.length > 0 && (
-          <span title={issues.map((e) => e.message).join("\n")} className="text-wait"><AlertTriangle className="size-3.5" /></span>
+          <span title={issues.map((e) => e.message).join("\n")} className={selected ? "text-accent-ink" : "text-wait"}><AlertTriangle className="size-3.5" /></span>
         )}
       </div>
       <div className="px-0 py-1.5">
