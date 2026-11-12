@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -16,8 +16,6 @@ import { GenericParamEditor, SchemaForm, type Params } from "@/components/schema
 import { RunStatusBadge } from "@/components/status";
 import { ShareButton, SharingBadge, type Visibility } from "@/components/sharing";
 
-const PipelineMap = lazy(() => import("@/components/pipeline-map"));
-
 export default function PipelineDetailPage() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -33,7 +31,8 @@ export default function PipelineDetailPage() {
   const history = useQuery({ queryKey: ["history", id], queryFn: () => api.get<{ id: string; name: string; status: string; created_at: string; params: Params }[]>(`/api/pipelines/${id}/history`), enabled: !!p.data });
   const [params, setParams] = useState<Params>({});
   const [dupOpen, setDupOpen] = useState(false);
-  const [tab, setTab] = useState("map");
+  const [tab, setTab] = useState("params");
+  const openMap = (vid?: string, page = "map") => nav(`/pipelines/${id}/${page}${vid ? `?version=${vid}` : ""}`);
   const [compare, setCompare] = useState<Preset | null>(null);
 
   useEffect(() => { if (schema.data) setParams(schema.data.defaults); }, [schema.data]);
@@ -88,28 +87,16 @@ export default function PipelineDetailPage() {
           BioCompute only shows parameters for pipelines that exist locally. Install it to read its schema and run it.
         </Empty></Panel>
       ) : (
-        <Tabs value={tab} onValueChange={setTab}>
+        <Tabs value={tab} onValueChange={(v) => (v === "map" || v === "code" ? openMap(versionId, v) : setTab(v))}>
           <TabsList className="mb-5">
             <TabsTrigger value="map">Map</TabsTrigger>
+            {d.kind !== "studio" && <TabsTrigger value="code">Code</TabsTrigger>}
             <TabsTrigger value="params">Parameters</TabsTrigger>
             <TabsTrigger value="io">Inputs and outputs</TabsTrigger>
             <TabsTrigger value="versions">Versions</TabsTrigger>
             <TabsTrigger value="history">Execution history <span className="ml-1 text-xs text-muted">{d.run_count}</span></TabsTrigger>
             {d.readme && <TabsTrigger value="readme">Readme</TabsTrigger>}
           </TabsList>
-          <TabsContent value="map">
-            {d.versions.length > 1 && (
-              <div className="mb-3 flex items-center gap-2 text-[13px]">
-                <span className="text-muted">Version</span>
-                <Select className="h-8 w-auto" aria-label="Version shown on the map" value={versionId ?? d.latest_version?.id ?? ""} onChange={(e) => setVersionId(e.target.value)}>
-                  {[...d.versions].reverse().map((v) => <option key={v.id} value={v.id}>{v.version}{v.id === d.latest_version?.id ? " (current)" : ""} · {when(v.created_at)}</option>)}
-                </Select>
-              </div>
-            )}
-            <Suspense fallback={<Skeleton className="h-[560px]" />}>
-              <PipelineMap pid={d.id} versionId={versionId} canCopy={sci} onCopy={() => setDupOpen(true)} />
-            </Suspense>
-          </TabsContent>
           <TabsContent value="params">
             <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
               <div className="min-w-0">
@@ -192,7 +179,7 @@ export default function PipelineDetailPage() {
                     <p className="font-mono text-[11.5px] text-muted truncate">{v.git_commit ?? "not a git checkout"} {v.path}</p>
                   </div>
                   <span className="text-xs text-muted">{when(v.created_at)}</span>
-                  <Button size="sm" variant="secondary" onClick={() => { setVersionId(v.id); setTab("map"); }}>Map</Button>
+                  <Button size="sm" variant="secondary" onClick={() => openMap(v.id)}>Map</Button>
                   <Button size="sm" variant={versionId === v.id ? "primary" : "secondary"} onClick={() => { setVersionId(v.id); setTab("params"); }}>Parameters</Button>
                   {sci && !v.pinned && <Button size="sm" variant="ghost" onClick={() => pin.mutate(v.id)}><Pin />Pin</Button>}
                 </div>

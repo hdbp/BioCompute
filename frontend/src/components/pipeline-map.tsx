@@ -5,13 +5,13 @@ import {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow,
   type Edge, type Node, type NodeProps, type NodeTypes,
 } from "@xyflow/react";
-import { ArrowLeft, ArrowRight, Box, Copy, Database, FileCode2, FileInput, FolderOutput, Layers, Maximize2, Pencil, Search, Workflow } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, Search } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import type { StudioModule } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/theme";
 import { Button } from "@/components/ui/button";
-import { Badge, Panel, Skeleton } from "@/components/ui/misc";
+import { Badge } from "@/components/ui/misc";
 import { nodeTypes as studioNodeTypes } from "@/components/studio/module-node";
 import { deserialize, effective, StudioContext, type PortTypes, type StudioCtx } from "@/components/studio/model";
 
@@ -23,7 +23,7 @@ interface NfNode extends Record<string, unknown> {
 }
 interface NfMap { ok: boolean; reason?: string; workflow?: string; file?: string; nodes: NfNode[]; edges: { id: string; source: string; target: string }[] }
 export interface MapResponse {
-  kind: "studio" | "nextflow" | "none"; reason?: string; version_id?: string; version?: string;
+  kind: "studio" | "nextflow" | "none"; reason?: string; version_id?: string; version?: string; copy_of?: string | null; can_edit_code?: boolean;
   studio?: { workflow_id: string; workflow_exists: boolean; can_view_workflow: boolean; can_edit: boolean; graph: { nodes: unknown[]; edges: unknown[] } | null;
     exact: boolean; next_version: string; latest: boolean };
   nextflow?: NfMap;
@@ -260,7 +260,7 @@ function StepList({ view, selected, onPick }: { view: MapView; selected: string 
   );
 }
 
-function Inspector({ view, id, onPick, floating }: { view: MapView; id: string; onPick: (id: string) => void; floating?: boolean }) {
+function Inspector({ view, id, onPick }: { view: MapView; id: string; onPick: (id: string) => void }) {
   const item = view.items.find((i) => i.id === id);
   if (!item) return null;
   const name = (x: string) => view.items.find((i) => i.id === x)?.label ?? x;
@@ -276,8 +276,7 @@ function Inspector({ view, id, onPick, floating }: { view: MapView; id: string; 
     </div>
   );
   return (
-    <aside className={cn("flex flex-col bg-surface", floating ? "absolute right-3 top-3 z-10 max-h-[calc(100%-1.5rem)] w-80 rounded-lg border border-line shadow-xl" : "w-80 shrink-0 border-l border-line")}
-      aria-label="Step details">
+    <aside className="flex w-80 shrink-0 flex-col border-l border-line bg-surface" aria-label="Step details">
       <div className="flex items-center gap-2 border-b border-line px-4 py-3">
         <item.icon className="size-4 shrink-0 text-muted" />
         <span className="min-w-0 flex-1 truncate font-medium">{item.label}</span>
@@ -299,83 +298,44 @@ function Inspector({ view, id, onPick, floating }: { view: MapView; id: string; 
 /** What this map is and what can be done with it. */
 function Explanation({ m }: { m: MapResponse }) {
   const s = m.studio;
+  const keep = <> <b className="font-medium text-text">Edit as new pipeline</b> makes your own copy; the original is never changed.</>;
   if (m.kind === "studio" && s) {
     return (
       <>
         {s.graph ? <>Built in Pipeline Studio: the graph of <b className="font-medium text-text">{m.version}</b>.</>
           : <>{m.version} was published before graphs were kept with each version; this map is read from its generated code.</>}
-        {s.can_edit && !s.graph && !s.latest && <> Studio can open the current workflow, not this version.</>}
-        {s.can_edit && <> Change it in Studio and <b className="font-medium text-text">Publish</b> to save it as <b className="font-medium text-text">{s.next_version}</b>; earlier versions stay available.</>}
-        {!s.can_edit && s.workflow_exists && <> It belongs to someone else: make your own copy to change it.</>}
+        {keep}
       </>
     );
   }
   const nf = m.nextflow;
   return (
     <>Read from the Nextflow code: workflow <span className="font-mono text-text">{nf?.workflow}</span> in <span className="font-mono">{nf?.file}</span>.
-      Arrows follow the channels in the code, dashed steps only run when their condition holds. Nextflow pipelines are changed in their code, not in Studio.</>
+      Arrows follow the channels in the code; dashed steps only run when their condition holds.
+      {m.can_edit_code ? <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: <b className="font-medium text-text">Edit code</b> saves each change as a new version.</> : keep}</>
   );
 }
 
-function Actions({ m, pid, canCopy, onCopy, size }: { m: MapResponse; pid: string; canCopy: boolean; onCopy?: () => void; size?: "sm" }) {
-  const s = m.studio;
-  if (m.kind !== "studio" || !s) return null;
-  const editTo = s.graph && !(s.latest && s.exact) ? `/studio/${s.workflow_id}${qs({ pipeline: pid, version: m.version_id })}` : `/studio/${s.workflow_id}`;
+function Actions({ m, pid, canFork, onFork, size }: { m: MapResponse; pid: string; canFork: boolean; onFork: () => void; size?: "sm" }) {
+  const forkable = canFork && (m.kind === "nextflow" || !!m.studio?.graph);
   return (
     <>
-      {s.can_edit && (
-        <Button asChild size={size} variant="primary">
-          <Link to={editTo}><Pencil />{s.latest ? "Edit in Pipeline Studio" : s.graph ? `Edit ${m.version} in Studio` : "Open current workflow in Studio"}</Link>
-        </Button>
+      {m.can_edit_code && (
+        <Button asChild size={size} variant="primary"><Link to={`/pipelines/${pid}/code${qs({ version: m.version_id })}`}><FileCode2 />Edit code</Link></Button>
       )}
-      {!s.can_edit && s.can_view_workflow && <Button asChild size={size} variant="secondary"><Link to={`/studio/${s.workflow_id}`}><Workflow />Open in Studio (read-only)</Link></Button>}
-      {!s.can_edit && canCopy && onCopy && <Button size={size} variant="primary" onClick={onCopy}><Copy />Make my own copy</Button>}
+      {forkable && <Button size={size} variant={m.can_edit_code ? "secondary" : "primary"} onClick={onFork}><GitFork />Edit as new pipeline</Button>}
     </>
-  );
-}
-
-// ---------------------------------------------------------------------------- inline preview (pipeline page, launch form)
-/** Map inside a page: fills the window height; "Open full view" gives the Studio-like page. */
-export default function PipelineMap(props: { pid: string; versionId?: string; canCopy: boolean; onCopy: () => void; newTab?: boolean }) {
-  return <ReactFlowProvider><Preview {...props} /></ReactFlowProvider>;
-}
-
-function Preview({ pid, versionId, canCopy, onCopy, newTab }: { pid: string; versionId?: string; canCopy: boolean; onCopy: () => void; newTab?: boolean }) {
-  const q = usePipelineMap(pid, versionId);
-  const { view, loading } = useMapView(q.data);
-  const [sel, setSel] = useState<string | null>(null);
-  const h = "h-[max(520px,calc(100dvh-17rem))]";
-  if (q.isLoading || loading) return <Skeleton className={h} />;
-  if (q.isError) return <Panel className="p-4 text-[13px] text-bad">{errMsg(q.error)}</Panel>;
-  const m = q.data!;
-  if (m.kind === "none" || !view) return <Panel className="p-6 text-[13px] text-muted">No map for this pipeline{m.reason ? `: ${m.reason}` : m.nextflow?.reason ? `: ${m.nextflow.reason}` : ""}.</Panel>;
-  const full = `/pipelines/${pid}/map${qs({ version: versionId })}`;
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-[13px]">
-        {m.kind === "nextflow" && <FileCode2 className="size-4 shrink-0 text-muted" />}
-        <p className="min-w-0 flex-1 text-muted"><Explanation m={m} /></p>
-        <Button asChild variant="secondary">
-          <Link to={full} target={newTab ? "_blank" : undefined}><Maximize2 />Open full view</Link>
-        </Button>
-        <Actions m={m} pid={pid} canCopy={canCopy} onCopy={onCopy} />
-      </div>
-      <div className={cn("relative overflow-hidden rounded-lg border border-line bg-ink/40", h)}>
-        <Canvas view={view} selected={sel} onSelect={setSel} focus={0} />
-        {sel && <Inspector view={view} id={sel} onPick={setSel} floating />}
-      </div>
-    </div>
   );
 }
 
 // ---------------------------------------------------------------------------- full view (its own page)
 export function PipelineMapFull(props: {
-  pid: string; versionId?: string; toolbar: ReactNode; canCopy: boolean; onCopy: () => void;
+  pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void;
 }) {
   return <ReactFlowProvider><Full {...props} /></ReactFlowProvider>;
 }
 
-function Full({ pid, versionId, toolbar, canCopy, onCopy }: { pid: string; versionId?: string; toolbar: ReactNode; canCopy: boolean; onCopy: () => void }) {
+function Full({ pid, versionId, toolbar, canFork, onFork }: { pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void }) {
   const q = usePipelineMap(pid, versionId);
   const { view, loading } = useMapView(q.data);
   const [sel, setSel] = useState<string | null>(null);
@@ -388,7 +348,7 @@ function Full({ pid, versionId, toolbar, canCopy, onCopy }: { pid: string; versi
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2">
         {toolbar}
         <div className="flex-1" />
-        {m && <Actions m={m} pid={pid} canCopy={canCopy} onCopy={onCopy} size="sm" />}
+        {m && <Actions m={m} pid={pid} canFork={canFork} onFork={() => onFork(m)} size="sm" />}
       </div>
       <div className="flex min-h-0 flex-1">
         {view && <StepList view={view} selected={sel} onPick={pick} />}

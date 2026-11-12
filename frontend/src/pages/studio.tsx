@@ -432,7 +432,7 @@ function StudioInner() {
       qc.invalidateQueries({ queryKey: ["pipelines"] });
       qc.invalidateQueries({ queryKey: ["studio-workflows"] });
       toast.success(`Published to the pipeline library as ${r.version}`, {
-        action: { label: "Open pipeline", onClick: () => navigate(`/pipelines/${r.pipeline_id}`) },
+        action: { label: "Open pipeline", onClick: () => navigate(`/pipelines/${r.pipeline_id}/map`) },
       });
     } catch (e) {
       const iss = (e as { issues?: Issue[] }).issues;

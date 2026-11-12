@@ -45,27 +45,29 @@ file** nodes likewise take a *default path* (an index, a FASTA, a GTF). All path
 (Settings → Data folders), or a refgenie reference such as `refgenie://hg38/bowtie2_index.dir`
 (DNA button next to the path; see [reference-genomes.md](reference-genomes.md)).
 
-## Pipeline map and versions
+## Pipeline map, and adapting a pipeline
 
-Every pipeline page opens on a **Map** tab (also available in the launch form: *Show pipeline map*). **Open full view**
-shows the map on its own page, laid out like Studio: the steps on the left (search, click to find one on the map), the
-graph in the middle, and the selected step's details on the right (settings, container, condition, what it receives
-from and sends to). Large pipelines open at a readable zoom starting at their inputs; pan, zoom, or use the minimap
-for the rest.
+Opening a pipeline shows its **map** on a full-window page laid out like Studio: the steps on the left (search, click
+to find one on the map), the graph in the middle, and the selected step's details on the right (settings, container,
+condition, what it receives from and sends to). Large pipelines open at a readable zoom starting at their inputs.
+The toolbar picks the version and links to *Details* (parameters, versions, history), *Code* and *Run*.
 
-* **Built in Studio:** the graph of the selected version. Each published version keeps the graph it was built from
-  (`studio_graph.json` next to its files), so earlier versions can still be viewed. *Edit in Pipeline Studio* opens the
-  workflow; from an earlier version, Studio starts from that version's graph. **Publish** (labelled *Publish v3*, etc.
-  on wide screens) saves the workflow and adds it to the same pipeline as the next version; earlier versions stay
-  available and runnable, and runs record which version they used. *Save* alone only keeps the Studio draft.
-  Versions published before graphs were kept are shown from their generated code, and Studio can only open the
-  current workflow for them.
-* **Someone else's Studio pipeline:** *Make my own copy* copies the files and the workflow, so the copy can be
-  changed in Studio and published as new versions of your copy.
-* **Written in Nextflow** (nf-core, git, imported folders): a read-only map read from the code (nothing is run):
-  the workflow that calls the most steps (for nf-core, the pipeline workflow in `workflows/`), its processes and
-  subworkflows, aliases, containers, conditions (`if (!params.skip_trimming)` → "only if …") and the channel flow
-  between steps. Dynamic channel logic can hide or add an arrow. These pipelines are changed in their code.
+* **Built in Studio:** the graph of the selected version (each published version keeps the graph it was built from).
+* **Written in Nextflow** (nf-core, git, imported folders): a map read from the code, nothing is run: the workflow
+  that calls the most steps (for nf-core, the pipeline workflow in `workflows/`), its processes and subworkflows,
+  aliases, containers, conditions (`if (!params.skip_trimming)` → "only if …") and the channel flow between steps.
+  Dynamic channel logic can hide or add an arrow.
+
+**Edit as new pipeline** adapts any pipeline without touching it. The original is never changed:
+
+* A Studio pipeline is copied into a new Studio workflow of yours (from the version you are viewing). Change it in
+  Studio and **Publish**: that creates a separate pipeline.
+* A Nextflow pipeline's files (that version) are copied into a new pipeline of yours, and its **Code** page opens:
+  a file tree and an editor. **Save as v2** (Ctrl+S) writes your changes into a new version folder of your copy;
+  earlier versions of the copy stay as they were and remain runnable. The map follows the code you saved.
+* Originals, including the ones you imported yourself, are read-only on the Code page, and the server refuses code
+  changes to anything that is not your own copy. Paths outside the pipeline folder and links leading out of it are
+  refused.
 
 ## Module contract
 

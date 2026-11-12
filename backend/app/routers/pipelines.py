@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,7 @@ from ..schemas import (DuplicateIn, ImportGit, ImportLocal, ParamValidateIn, Pip
                        PipelineUpdate, PipelineVersionOut, PresetIn, PresetOut, SchemaAuthorIn)
 from ..security import audit, require_scientist, require_viewer
 from ..services import access, fs, nf_map, nfschema
+from ..services import pipeline_edit as pedit
 from ..services import pipelines as svc
 
 STUDIO_SNAPSHOT = "studio_graph.json"  # written next to each published Studio version
@@ -232,6 +234,93 @@ def duplicate(pid: str, body: DuplicateIn, user: User = Depends(require_scientis
     return _summary(db, newp, user)
 
 
+# --------------------------------------------------------------------------- your own editable copy
+class ForkIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    version_id: str | None = None
+    visibility: str = "private"
+
+
+@router.post("/{pid}/fork")
+def fork(pid: str, body: ForkIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Start a new pipeline of your own from one version of this one. The original is not changed.
+
+    Studio pipelines: a new Studio workflow with that version's graph (publish it to create the new pipeline).
+    Other pipelines: that version's files copied into a new pipeline whose code you can edit.
+    """
+    access.check_visibility_value(body.visibility)
+    p = get_pipeline(db, pid, user)
+    if p.kind == "template":
+        raise HTTPException(400, "Install the pipeline before copying it")
+    v = get_version(p, body.version_id)
+    if p.source_type == "studio":
+        graph = _studio_graph(db, p, v)
+        if graph is None:
+            raise HTTPException(409, f"{v.version} has no Studio graph to start from")
+        w = StudioWorkflow(name=body.name.strip(), description=p.description, graph=graph, created_by=user.username,
+                           visibility=body.visibility)
+        db.add(w)
+        audit(db, user.username, "pipeline.fork", p.slug, version=v.version, workflow=body.name)
+        db.commit()
+        return {"kind": "studio", "workflow_id": w.id, "from": f"{p.name} {v.version}"}
+    dest = pedit.new_copy_dir(svc.slugify(body.name))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(v.path, dest, symlinks=True, ignore=pedit.IGNORE)
+    newp = svc.register_from_dir(db, dest, source_type="local", source_url=f"{pedit.COPY_PREFIX}{p.slug}@{v.version}",
+                                 name=body.name.strip(), category=p.category, version="v1")
+    newp.owner, newp.visibility, newp.description = user.username, body.visibility, p.description
+    for pr in p.presets:
+        db.add(ParameterPreset(pipeline_id=newp.id, name=pr.name, description=pr.description, params=pr.params,
+                               created_by=user.username))
+    audit(db, user.username, "pipeline.fork", p.slug, version=v.version, new=newp.slug)
+    db.commit()
+    return {"kind": "nextflow", "pipeline_id": newp.id, "from": f"{p.name} {v.version}"}
+
+
+@router.get("/{pid}/files")
+def pipeline_files(pid: str, version_id: str | None = None, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    p = get_pipeline(db, pid, user)
+    v = get_version(p, version_id)
+    editable = access.can_edit(user, p.owner) and pedit.is_copy(p) and p.source_type != "studio"
+    return {"version_id": v.id, "version": v.version, "editable": editable, "files": pedit.list_files(v)}
+
+
+@router.get("/{pid}/files/content", response_class=PlainTextResponse)
+def pipeline_file(pid: str, path: str, version_id: str | None = None, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    p = get_pipeline(db, pid, user)
+    return pedit.read_file(get_version(p, version_id), path)
+
+
+class SaveFilesIn(BaseModel):
+    base_version_id: str
+    changes: dict[str, str | None]  # path -> new content; None deletes the file
+    note: str = Field(default="", max_length=500)
+
+
+@router.post("/{pid}/files")
+def save_files(pid: str, body: SaveFilesIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Save code changes as a NEW version of your own copy. Existing versions are never written to."""
+    p = get_pipeline(db, pid, user, edit=True)
+    if not pedit.is_copy(p) or p.source_type == "studio":
+        raise HTTPException(403, "Originals are never changed: use “Edit as new pipeline” to make your own copy first")
+    if not body.changes:
+        raise HTTPException(400, "No changes to save")
+    base = get_version(p, body.base_version_id)
+    dest, label = pedit.new_version_dir(p)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        applied = pedit.write_version(base, dest, body.changes)
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    svc.register_from_dir(db, dest, source_type=p.source_type, name=p.name, version=label, pipeline=p)
+    audit(db, user.username, "pipeline.edit", p.slug, version=label, base=base.version, files=applied, note=body.note)
+    db.commit()
+    db.refresh(p)
+    newv = next(x for x in p.versions if x.version == label)
+    return {"version_id": newv.id, "version": label, "files": applied}
+
+
 # --------------------------------------------------------------------------- map
 def _naive(t):
     return t.replace(tzinfo=None) if t is not None and t.tzinfo else t
@@ -257,7 +346,9 @@ def pipeline_map(pid: str, version_id: str | None = None, user: User = Depends(r
     if p.kind == "template" or not p.versions:
         return {"kind": "none", "reason": "Not installed on this controller"}
     v = get_version(p, version_id)
-    base = {"version_id": v.id, "version": v.version}
+    base = {"version_id": v.id, "version": v.version,
+            "copy_of": (p.source_url or "").split(":", 1)[1] if pedit.is_copy(p) else None,
+            "can_edit_code": access.can_edit(user, p.owner) and pedit.is_copy(p) and p.source_type != "studio"}
     if p.source_type == "studio" and p.studio_workflow_id:
         w = db.get(StudioWorkflow, p.studio_workflow_id)
         nums = [int(x.version[1:]) for x in p.versions if x.version[:1] == "v" and x.version[1:].isdigit()]

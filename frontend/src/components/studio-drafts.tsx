@@ -40,7 +40,7 @@ export function StudioDrafts({ query }: { query: string }) {
       const r = await api.post<{ pipeline_id: string; version: string }>(`/api/studio/workflows/${w.id}/publish`);
       qc.invalidateQueries({ queryKey: ["pipelines"] });
       qc.invalidateQueries({ queryKey: ["studio-workflows"] });
-      toast.success(`Published “${w.name}” as ${r.version}`, { action: { label: "Open", onClick: () => nav(`/pipelines/${r.pipeline_id}`) } });
+      toast.success(`Published “${w.name}” as ${r.version}`, { action: { label: "Open", onClick: () => nav(`/pipelines/${r.pipeline_id}/map`) } });
     } catch (e) {
       const n = e instanceof ApiError ? e.issues.filter((i) => i.level !== "warning").length : 0;
       toast.error(n ? `“${w.name}” has ${n} error${n === 1 ? "" : "s"} to fix before publishing.` : errMsg(e),

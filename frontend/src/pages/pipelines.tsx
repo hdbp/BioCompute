@@ -123,7 +123,7 @@ function PipelineCard({ p, onFav }: { p: Pipeline; onFav: () => void }) {
   return (
     <Panel className="flex flex-col p-4 hover:border-muted/60 transition-colors">
       <div className="flex items-start gap-2">
-        <Link to={`/pipelines/${p.id}`} className="min-w-0 flex-1">
+        <Link to={p.kind === "template" ? `/pipelines/${p.id}` : `/pipelines/${p.id}/map`} className="min-w-0 flex-1">
           <p className="font-semibold truncate hover:underline">{p.name}</p>
           <p className="text-xs text-muted">{p.category}</p>
         </Link>
@@ -145,6 +145,7 @@ function PipelineCard({ p, onFav }: { p: Pipeline; onFav: () => void }) {
       </div>
       <div className="mt-3 flex gap-2">
         <Button asChild size="sm" variant="primary"><Link to={`/jobs/new?pipeline=${p.id}`}>Configure and run</Link></Button>
+        {p.kind !== "template" && <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${p.id}/map`}>Map</Link></Button>}
         <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${p.id}`}>Details</Link></Button>
         <span className="ml-auto self-center text-[11px] text-muted">updated {ago(p.updated_at)}</span>
       </div>

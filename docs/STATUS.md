@@ -73,6 +73,7 @@ These limits apply to everything below.
 | Publish to the library and run (native engine) | Demonstrated (`test_publish_and_run_studio_pipeline`) |
 | Run generated DSL2 with Nextflow | Implemented, **untested** here |
 | Pipeline map: Studio graph per published version, edit a version in Studio and publish it as the next version, copies of others' Studio pipelines stay editable | Demonstrated (`test_pipeline_map.py`, browser) |
+| Edit as new pipeline: Studio copy as a new workflow, Nextflow copy with a code editor; saves are new version folders of the copy; originals refused by the server | Demonstrated (`test_edit_as_new_pipeline_never_touches_the_original`, browser) |
 | Read-only map of Nextflow DSL2 pipelines from their code (processes, subworkflows, aliases, conditions, channel flow) | Demonstrated on the bundled pipeline and an nf-core-shaped fixture (`test_pipeline_map.py`, browser); not yet checked against real nf-core releases (not downloadable here) |
 | Import arbitrary Nextflow scripts back into a graph | Not supported by design |
 | User modules for installed software: scan PATH, 15 templates (Genrich, SEACR, HOMER, epic2, GoPeaks, …), builder with live checks, edit/export/import/delete | Demonstrated (`test_custom_modules.py`, browser); a user-made module ran end to end on the native engine |

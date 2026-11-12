@@ -11,6 +11,7 @@ const Pipelines = lazy(() => import("@/pages/pipelines"));
 const PipelineDetail = lazy(() => import("@/pages/pipeline-detail"));
 const Studio = lazy(() => import("@/pages/studio"));
 const PipelineMapPage = lazy(() => import("@/pages/pipeline-map"));
+const PipelineCodePage = lazy(() => import("@/pages/pipeline-code"));
 const Experiments = lazy(() => import("@/pages/experiments"));
 const ExperimentEditor = lazy(() => import("@/pages/experiment-editor"));
 const Jobs = lazy(() => import("@/pages/jobs"));
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="pipelines" element={<Pipelines />} />
           <Route path="pipelines/:id" element={<PipelineDetail />} />
           <Route path="pipelines/:id/map" element={<PipelineMapPage />} />
+          <Route path="pipelines/:id/code" element={<PipelineCodePage />} />
           <Route path="studio" element={<Studio />} />
           <Route path="studio/:id" element={<Studio />} />
           <Route path="experiments" element={<Experiments />} />

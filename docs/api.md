@@ -37,6 +37,8 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `GET    /api/pipeline-schemas/{pid}`
 - `GET    /api/pipelines`
 - `GET    /api/pipelines/{pid}`
+- `GET    /api/pipelines/{pid}/files`
+- `GET    /api/pipelines/{pid}/files/content`
 - `GET    /api/pipelines/{pid}/history`
 - `GET    /api/pipelines/{pid}/map`
 - `GET    /api/pipelines/{pid}/presets`
@@ -48,6 +50,8 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `POST   /api/pipelines/import/git`
 - `POST   /api/pipelines/import/local`
 - `POST   /api/pipelines/{pid}/duplicate`
+- `POST   /api/pipelines/{pid}/files`
+- `POST   /api/pipelines/{pid}/fork`
 - `POST   /api/pipelines/{pid}/presets`
 - `POST   /api/pipelines/{pid}/versions/update`
 

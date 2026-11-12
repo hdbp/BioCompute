@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -14,8 +14,6 @@ import { PathInput } from "@/components/file-browser";
 import { TailnetTag } from "@/components/source-tag";
 import { formErrors, SchemaForm, type Params } from "@/components/schema-form";
 import { ReferenceGenomeBar } from "@/components/reference-picker";
-
-const PipelineMap = lazy(() => import("@/components/pipeline-map"));
 
 interface Candidate {
   node_id: string; hostname: string; eligible: boolean; reasons: string[]; warnings: string[]; facts: string[];
@@ -65,7 +63,6 @@ export default function LaunchPage() {
   const [needDisk, setNeedDisk] = useState("");
   const [needGpu, setNeedGpu] = useState(false);
   const [serverIssues, setServerIssues] = useState<Issue[]>([]);
-  const [showMap, setShowMap] = useState(false);
 
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => api.get<Pipeline[]>("/api/pipelines") });
   const experiments = useQuery({ queryKey: ["experiments"], queryFn: () => api.get<Experiment[]>("/api/experiments") });
@@ -190,19 +187,10 @@ export default function LaunchPage() {
                 {detail.data.runnable.every((r) => !r.available) && <p className="text-[13px] text-bad">No engine available for this pipeline. Install Nextflow on the controller (see Settings).</p>}
               </div>
             )}
-            {pipelineId && detail.data?.kind !== "template" && (
-              <div className="mt-3">
-                <Button size="sm" variant="ghost" onClick={() => setShowMap((x) => !x)} aria-expanded={showMap}>
-                  <Network />{showMap ? "Hide pipeline map" : "Show pipeline map"}
-                </Button>
-                {showMap && (
-                  <div className="mt-2">
-                    <Suspense fallback={<Skeleton className="h-[560px]" />}>
-                      <PipelineMap pid={pipelineId} versionId={versionId || undefined} canCopy={false} onCopy={() => undefined} newTab />
-                    </Suspense>
-                  </div>
-                )}
-              </div>
+            {pipelineId && detail.data && detail.data.kind !== "template" && (
+              <Button asChild size="sm" variant="ghost" className="mt-3">
+                <Link to={`/pipelines/${pipelineId}/map${versionId ? `?version=${versionId}` : ""}`} target="_blank"><Network />Open pipeline map</Link>
+              </Button>
             )}
           </Step>
 

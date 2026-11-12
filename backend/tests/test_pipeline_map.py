@@ -75,3 +75,57 @@ def test_bundled_example_map(client, auth):
     m = client.get(f"/api/pipelines/{qc['id']}/map", headers=auth).json()
     assert m["kind"] == "nextflow"
     assert {(e["source"], e["target"]) for e in m["nextflow"]["edges"]} >= {("params:input", "FASTQ_STATS"), ("FASTQ_STATS", "QC_REPORT")}
+
+
+def test_edit_as_new_pipeline_never_touches_the_original(client, auth):
+    # Studio pipeline: the copy is a new workflow; publishing it makes a separate pipeline
+    w = client.post("/api/studio/workflows", headers=auth, json={"name": "Fork QC", "graph": QC_GRAPH}).json()
+    pid = client.post(f"/api/studio/workflows/{w['id']}/publish", headers=auth).json()["pipeline_id"]
+    f = client.post(f"/api/pipelines/{pid}/fork", headers=auth, json={"name": "Fork QC (mine)"}).json()
+    assert f["kind"] == "studio" and f["workflow_id"] != w["id"]
+    new = client.post(f"/api/studio/workflows/{f['workflow_id']}/publish", headers=auth).json()
+    assert new["pipeline_id"] != pid and new["version"] == "v1"
+    assert len(client.get(f"/api/pipelines/{pid}", headers=auth).json()["versions"]) == 1  # original unchanged
+
+    # Nextflow pipeline: files copied into a new pipeline; edits are new versions of the copy
+    shutil.copytree(FIXTURE, RAW / "nfcore_fork", dirs_exist_ok=True)
+    orig = client.post("/api/pipelines/import/local", headers=auth, json={"path": "raw:nfcore_fork", "name": "Fork demo"}).json()
+    orig_dir = Path(client.get(f"/api/pipelines/{orig['id']}", headers=auth).json()["versions"][0]["path"])
+    before = (orig_dir / "workflows/demo.nf").read_text()
+    # the original cannot be edited, even by its owner
+    assert not client.get(f"/api/pipelines/{orig['id']}/files", headers=auth).json()["editable"]
+    v0 = client.get(f"/api/pipelines/{orig['id']}", headers=auth).json()["versions"][0]["id"]
+    r = client.post(f"/api/pipelines/{orig['id']}/files", headers=auth, json={"base_version_id": v0, "changes": {"main.nf": "x"}})
+    assert r.status_code == 403
+
+    c = client.post(f"/api/pipelines/{orig['id']}/fork", headers=auth, json={"name": "Fork demo (no trimming)"}).json()
+    assert c["kind"] == "nextflow"
+    cid = c["pipeline_id"]
+    files = client.get(f"/api/pipelines/{cid}/files", headers=auth).json()
+    assert files["editable"] and any(x["path"] == "workflows/demo.nf" and x["text"] for x in files["files"])
+    src = client.get(f"/api/pipelines/{cid}/files/content", params={"path": "workflows/demo.nf"}, headers=auth).text
+    assert src == before
+    edited = src.replace("if (!params.skip_trimming) {", "if (false) {")
+    s = client.post(f"/api/pipelines/{cid}/files", headers=auth, json={
+        "base_version_id": files["version_id"], "changes": {"workflows/demo.nf": edited, "bin/helper.sh": "#!/bin/sh\necho hi\n"}}).json()
+    assert s["version"] == "v2"
+    d = client.get(f"/api/pipelines/{cid}", headers=auth).json()
+    paths = {v["version"]: Path(v["path"]) for v in d["versions"]}
+    assert (paths["v2"] / "workflows/demo.nf").read_text() == edited
+    assert (paths["v1"] / "workflows/demo.nf").read_text() == before  # earlier version of the copy kept
+    assert (paths["v2"] / "bin/helper.sh").stat().st_mode & 0o111
+    assert (orig_dir / "workflows/demo.nf").read_text() == before  # original untouched
+    m = client.get(f"/api/pipelines/{cid}/map", headers=auth).json()
+    assert m["can_edit_code"] and m["copy_of"].startswith("fork-demo")
+    assert next(n for n in m["nextflow"]["nodes"] if n["id"] == "TRIMGALORE")["condition"] == "false"
+
+    # paths outside the pipeline are refused
+    for bad in ("../escape.nf", "/etc/passwd", "work/x", "a/../../b"):
+        r = client.post(f"/api/pipelines/{cid}/files", headers=auth, json={"base_version_id": s["version_id"], "changes": {bad: "x"}})
+        assert r.status_code == 400, bad
+    assert client.get(f"/api/pipelines/{cid}/files/content", params={"path": "../../../etc/passwd"}, headers=auth).status_code == 400
+    # a link pointing out of the pipeline is not written through
+    v2 = paths["v2"]
+    (v2 / "outlink").symlink_to(RAW)
+    r = client.post(f"/api/pipelines/{cid}/files", headers=auth, json={"base_version_id": s["version_id"], "changes": {"outlink/evil.txt": "x"}})
+    assert r.status_code == 400 and not (RAW / "evil.txt").exists()
