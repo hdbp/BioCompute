@@ -93,7 +93,9 @@ class NextflowAdapter:
         else:
             lines += ["executor {", "    name = 'local'", f"    cpus = {cpus}", f"    memory = '{mem:g} GB'", "}"]
         # nf-core resourceLimits (Nextflow >= 24.04) caps individual process requests
-        lines += ["process {", f"    resourceLimits = [ cpus: {cpus}, memory: '{mem:g}.GB', time: '{int(resources.get('max_time_h') or 240)}.h' ]", "}"]
+        lines += ["process {", f"    resourceLimits = [ cpus: {cpus}, memory: '{mem:g} GB', time: '{int(resources.get('max_time_h') or 240)}h' ]", "}"]
+        # a resumed run writes its report and timeline again: without overwrite Nextflow stops with "file already exists"
+        lines += ["report { overwrite = true }", "timeline { overwrite = true }"]
         lines += ["trace {", "    enabled = true", "    overwrite = true",
                   "    fields = 'task_id,hash,native_id,process,tag,name,status,exit,submit,start,complete,duration,realtime,%cpu,peak_rss,workdir'",
                   "}"]
@@ -114,7 +116,9 @@ class NextflowAdapter:
             if prof:
                 argv += ["-profile", prof]
         if resume_session:
-            argv += ["-resume", resume_session]
+            # plain -resume continues the last session of this run folder; naming an earlier attempt fails when
+            # that attempt never got as far as creating a Nextflow session
+            argv += ["-resume"]
         env = {"NXF_ANSI_LOG": "false", "NXF_OPTS": f"-Xms256m -Xmx{int(resources.get('controller_heap_gb') or 4)}g"}
         if s.nextflow_home:
             env["NXF_HOME"] = str(s.nextflow_home)

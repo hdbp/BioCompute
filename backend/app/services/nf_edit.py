@@ -43,21 +43,48 @@ def _workflow(root: Path) -> tuple[dict[str, Any], str, str, str, tuple[int, int
 
 
 def _statements(clean: str, a: int, b: int) -> list[dict[str, Any]]:
-    """Top-level statements of a workflow body with absolute [start, end) offsets (whole lines) and section."""
+    """Top-level statements of a workflow body with absolute [start, end) offsets (whole lines) and section.
+
+    `if (...) {`, `} else {` and `}` lines are control structure, not statements; the `if` header may span
+    several lines and its `{` may be on the next line.
+    """
     out: list[dict[str, Any]] = []
     section = "main"
     cur: dict[str, Any] | None = None
     depth = 0
+    hdr = 0          # > 0 while inside the parentheses of a multi-line `if (` header
+    allman = False   # an `if (...)` header ended without `{`: a lone `{` on the next line belongs to it
     pos = a
     for line in clean[a:b].split("\n"):
         start, end = pos, pos + len(line)
         pos = end + 1
         s = line.strip()
+        if hdr:
+            hdr += s.count("(") - s.count(")")
+            if hdr <= 0:
+                hdr = 0
+                allman = not s.endswith("{")
+            continue
         if cur is None:
             if not s:
                 continue
-            if re.match(r"^\}?\s*(else\s+)?if\s*\(.*\)\s*\{$", s) or re.match(r"^\}?\s*else\s*\{$", s) or s == "}":
+            if allman:
+                allman = False
+                if s == "{":
+                    continue
+            if re.match(r"^\}?\s*(else\s+)?if\s*\(.*\)\s*\{$", s) or re.match(r"^\}?\s*else\s*\{$", s) or s in ("}", "{"):
                 continue
+            mh = re.match(r"^\}?\s*(else\s+)?if\s*\(", s)
+            if mh:
+                d = s.count("(") - s.count(")")
+                if d > 0:          # header continues on the next lines
+                    hdr = d
+                    continue
+                hd = nf_map._if_header(s)
+                if hd and not hd[1]:           # `if (x)` alone: the block opens on the next line
+                    allman = True
+                    continue
+                # `if (x) CALL(...)` on one line: an ordinary statement (callers refuse to rewrite it)
             if re.fullmatch(r"(take|main|emit|publish):", s):
                 section = s[:-1]
                 continue
@@ -121,6 +148,23 @@ def _call(stmts: list[dict[str, Any]], clean: str, step: str) -> tuple[dict[str,
     return None
 
 
+def _exact_call(raw_clean: str, st: dict[str, Any], o: int, c: int) -> bool:
+    """True when the statement is nothing but the call NAME ( ... ): no assignment, no `if`, no `;`, no block."""
+    name_start = raw_clean.rfind("\n", 0, o) + 1
+    head = raw_clean[st["start"]:o]
+    return (re.fullmatch(rf"\s*{IDENT}\s*", head) is not None and raw_clean[c + 1:st["end"]].strip() == ""
+            and st["start"] <= name_start <= o)
+
+
+def _one_line(s: str) -> str:
+    return " ".join(str(s).split())
+
+
+def _sq(s: Any) -> str:
+    """A Groovy single-quoted string literal."""
+    return "'" + str(s).replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ") + "'"
+
+
 def _diff(files_before: dict[str, str], files_after: dict[str, str]) -> str:
     chunks = []
     for path in sorted(files_after):
@@ -157,8 +201,9 @@ def plan_remove(root: Path, step: str, connect: bool = False) -> dict[str, Any]:
     if not found:
         raise HTTPException(409, f"Could not find where {step} is called; remove it in the code instead")
     call_st, o, c = found
-    if re.match(rf"^\s*{IDENT}\s*=", call_st["text"]):
-        raise HTTPException(409, f"{step}'s result is assigned to a variable; remove it in the code instead")
+    if not _exact_call(clean, call_st, o, c):
+        raise HTTPException(409, f"{step} is not called on a line of its own (it is assigned to a variable, shares a line with other "
+                                 "code, or sits in an `if` BioCompute cannot read safely); remove it in the code instead")
     args = _split_args(clean[o + 1:c])
     raw_args = []
     pos = o + 1
@@ -176,6 +221,9 @@ def plan_remove(root: Path, step: str, connect: bool = False) -> dict[str, Any]:
         if st is call_st or not ref.search(st["text"]):
             continue
         text = st["text"]
+        if ";" in text or re.search(rf"(?<![.\w]){re.escape(step)}\.out\s*\[", text):
+            raise HTTPException(409, f"{step}'s output is used in a way BioCompute cannot rewrite safely "
+                                     f"(several statements on one line, or an indexed output like {step}.out[0]); edit the code instead")
         lhs = re.match(rf"^\s*({IDENT})\s*=(?!=)\s*", text)
         if st["section"] == "emit" and lhs:
             edits.append((st["start"] + lhs.end(), st["end"] - (1 if clean[st["end"] - 1] == "\n" else 0), "Channel.empty()"))
@@ -214,15 +262,21 @@ def plan_remove(root: Path, step: str, connect: bool = False) -> dict[str, Any]:
                 notes.append(f"“{var}” becomes empty.")
             continue
         # another step is called with STEP's output
-        callee = next((x for x in re.findall(rf"(?<![.\w])({IDENT})\s*\(", text) if x != step and x in {n["id"] for n in m["nodes"]}), None)
+        cm_ = re.match(rf"^\s*({IDENT})\s*\(", text)
+        callee = cm_.group(1) if cm_ and cm_.group(1) != step and cm_.group(1) in {n["id"] for n in m["nodes"]} else None
         if callee:
+            co = st["start"] + cm_.end() - 1
+            if not _exact_call(clean, st, co, _match_paren(clean, co)):
+                raise HTTPException(409, f"{callee} uses {step}'s output in a statement BioCompute cannot rewrite safely; edit the code instead")
             consumers.append(callee)
+            emits = {r.group(1) or "" for r in ref.finditer(clean, st["start"], st["end"])}
             if connect and first_input:
+                if len(emits) > 1:
+                    raise HTTPException(409, f"{callee} reads several outputs of {step} ({', '.join(sorted(e.lstrip('.') or 'out' for e in emits))}); "
+                                             f"they cannot all be replaced by {step}'s input. Remove {callee} first, or edit the code.")
                 for r in ref.finditer(clean, st["start"], st["end"]):
-                    end = r.end()
-                    edits.append((r.start(), end, first_input))
-                notes.append(f"{callee} now reads {first_input} (what {step} was given) instead of {step}'s output.")
-                continue
+                    edits.append((r.start(), r.end(), first_input))
+                notes.append(f"{callee} now reads {first_input} (what {step} was given) instead of {step}'s “{next(iter(emits)).lstrip('.') or 'output'}”.")
             continue
         raise HTTPException(409, f"{step}'s output is used in a way BioCompute cannot rewrite; edit the code instead")
     if consumers and not (connect and first_input):
@@ -325,11 +379,11 @@ def plan_add(root: Path, module: dict[str, Any], after: str, output: str, name: 
     directives = [f'    tag "{"${meta.id}" if per_sample else lower}"', f"    cpus {module.get('cpus', 1)}",
                   f"    memory '{float(module.get('memory_gb', 2)):g} GB'", f"    publishDir \"${{params.outdir}}/{lower}\", mode: 'copy'"]
     if module.get("conda"):
-        directives.append(f"    conda '{module['conda']}'")
+        directives.append(f"    conda {_sq(module['conda'])}")
     if module.get("container"):
-        directives.append(f"    container '{module['container']}'")
+        directives.append(f"    container {_sq(module['container'])}")
     prefix = "    export BC_PREFIX='${meta.id}'" if per_sample else f"    export BC_PREFIX='{lower}'"
-    process = (f"// Added with BioCompute Pipeline Studio: module “{module['name']}” ({module['id']}).\n"
+    process = (f"// Added with BioCompute Pipeline Studio: module “{_one_line(module['name'])}” ({_one_line(module['id'])}).\n"
                f"process {proc} {{\n" + "\n".join(directives)
                + "\n\n    input:\n" + "\n".join(f"    {d}" for d in in_decl)
                + "\n\n    output:\n" + "\n".join(f"    {d}" for d in out_decl)
@@ -343,8 +397,14 @@ def plan_add(root: Path, module: dict[str, Any], after: str, output: str, name: 
     found = _call(stmts, clean, after)
     if not found:
         raise HTTPException(409, f"Could not find where {after} is called; add the step in the code instead")
-    call_st = found[0]
-    indent = re.match(r"[ \t]*", raw[call_st["start"]:]).group(0)
+    call_st, co, cc = found
+    line_start = raw.rfind("\n", 0, co) + 1
+    line_end = raw.find("\n", cc)
+    line_end = len(raw) if line_end < 0 else line_end + 1
+    if re.fullmatch(rf"[ \t]*{IDENT}[ \t]*", clean[line_start:co]) is None or clean[cc + 1:line_end].strip() != "":
+        raise HTTPException(409, f"{after} is not called on a line of its own (assignment, one-line `if`, or other code on the line); "
+                                 "add the step in the code instead")
+    indent = re.match(r"[ \t]*", raw[line_start:]).group(0)
     call = f"{indent}{proc} ( {', '.join(call_args)} )  // added in Pipeline Studio\n"
     depth = len(Path(rel).parent.parts)
     inc_path = ("/".join([".."] * depth + [mod_rel]) if depth else f"./{mod_rel}").removesuffix(".nf")
@@ -353,7 +413,7 @@ def plan_add(root: Path, module: dict[str, Any], after: str, output: str, name: 
     for mm in re.finditer(r"(?m)^[ \t]*include\s*\{[^}]*\}\s*from\s*['\"][^'\"]*['\"].*$", raw):
         if clean[mm.start():mm.start() + 20].lstrip().startswith("include"):
             last_inc = mm
-    edits = [(call_st["end"], call_st["end"], call)]
+    edits = [(line_end, line_end, call if raw[:line_end].endswith("\n") else "\n" + call)]
     if last_inc:
         edits.append((last_inc.end() + 1, last_inc.end() + 1, include))
     else:

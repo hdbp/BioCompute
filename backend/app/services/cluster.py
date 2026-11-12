@@ -198,7 +198,13 @@ def upsert_node(db: Session, inv: dict[str, Any], source: str, *, site: str | No
     hostname = short_hostname(inv.get("hostname"))
     strong = fp.startswith("mid:")
 
+    # what a machine says about itself (its agent, or another agent's report) must not let it take over the
+    # controller's record or an already enrolled machine: those only match on their exact identity (above)
+    self_reported = source.startswith("agent")
+
     def compatible(cand: Node) -> bool:
+        if self_reported and (cand.is_controller or cand.agent_installed):
+            return False
         # two different machine-ids are two machines, whatever their names/addresses
         return not (strong and cand.fingerprint.startswith("mid:") and cand.fingerprint != fp)
 
@@ -239,7 +245,9 @@ def upsert_node(db: Session, inv: dict[str, Any], source: str, *, site: str | No
             setattr(node, attr, inv[attr])
     for key in ("tailscale", "link", "scratch"):  # network facts, measured link speed, scratch space
         if isinstance(inv.get(key), dict):
-            node.network = {**(node.network or {}), key: inv[key]}
+            # only the controller's own `tailscale status` says who is in the tailnet; an agent's claim is kept apart
+            stored = "tailscale_reported" if key == "tailscale" and self_reported else key
+            node.network = {**(node.network or {}), stored: inv[key]}
     if inv.get("utilization"):
         node.utilization = inv["utilization"]
     return node

@@ -29,6 +29,8 @@ def _make_engine(url: str) -> Engine:
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA foreign_keys=ON")
             cur.execute("PRAGMA journal_mode=WAL")
+            # wait for another writer (monitor, heartbeats, a long request) instead of failing with "database is locked"
+            cur.execute("PRAGMA busy_timeout=30000")
             cur.close()
 
     return eng

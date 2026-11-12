@@ -244,10 +244,12 @@ def publish(wid: str, user: User = Depends(require_scientist), db: Session = Dep
     if not res["valid"]:
         raise HTTPException(422, {"message": "Graph is invalid", "issues": res["issues"]})
     existing = db.query(Pipeline).filter(Pipeline.studio_workflow_id == w.id).first()
-    n = len(existing.versions) + 1 if existing else 1
-    dest = get_settings().pipelines_path / f"studio-{psvc.slugify(w.name)}-{w.id}" / f"v{n}"
-    if dest.exists():
-        shutil.rmtree(dest)
+    nums = [int(x.version[1:]) for x in (existing.versions if existing else []) if x.version[:1] == "v" and x.version[1:].isdigit()]
+    n = max(nums, default=len(existing.versions) if existing else 0) + 1
+    base = get_settings().pipelines_path / f"studio-{psvc.slugify(w.name)}-{w.id}"
+    while (base / f"v{n}").exists():  # never write over a folder that is already there
+        n += 1
+    dest = base / f"v{n}"
     for name, content in res["files"].items():
         p = dest / name
         p.parent.mkdir(parents=True, exist_ok=True)

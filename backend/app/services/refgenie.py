@@ -123,6 +123,10 @@ def reload() -> None:
     try:
         rgc = load()
         folder = Path(rgc["genome_folder"]).expanduser().resolve()
+        from . import data_roots
+        # the same rules as for folders an admin adds: no system, home, hidden or state folders
+        if data_roots.check_path(str(folder)).get("errors"):
+            folder = Path("/nonexistent")
         if folder.is_dir() and ROOT_NAME not in {n for n in fs.roots() if fs.roots()[n].source != "refgenie"}:
             roots.append(fs.Root(name=ROOT_NAME, path=folder, restricted=False, writable=False,
                                  description="Reference genomes (refgenie)", source="refgenie"))

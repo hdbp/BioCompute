@@ -194,10 +194,7 @@ def fetch_new_version(pid: str, body: ImportGit, user: User = Depends(require_sc
     if p.source_type not in ("git", "nf-core"):
         raise HTTPException(400, "Only git-based pipelines can fetch versions")
     tmp = svc.import_git(db, p.source_url or body.url, body.ref, f"{p.slug}-{body.ref or 'latest'}", p.category)
-    v = tmp.versions[-1]
-    v.pipeline_id = p.id
-    db.flush()
-    db.delete(tmp)
+    svc.adopt_version(db, tmp, p)
     audit(db, user.username, "pipeline.version_add", p.slug, ref=body.ref)
     db.commit()
     db.refresh(p)
@@ -325,16 +322,21 @@ def save_files(pid: str, body: SaveFilesIn, user: User = Depends(require_scienti
 
 
 # --------------------------------------------------------------------------- step settings (interactive edits)
-def _step_names(v: PipelineVersion) -> list[str]:
+def _step_info(v: PipelineVersion) -> dict[str, dict]:
+    """Processes of the shown workflow (also inside its subworkflows) with what each supports."""
     m = nf_map.build_map(v.path)
-    names: list[str] = []
+    info: dict[str, dict] = {}
     for n in m.get("nodes", []) if m.get("ok") else []:
         if n["kind"] == "process":
-            names.append(n["id"])
+            info.setdefault(n["id"], {"supports_when": n.get("supports_when"), "supports_args": n.get("supports_args")})
         for st in n.get("step_info") or []:
             if st["kind"] == "process":
-                names.append(st["id"])
-    return list(dict.fromkeys(names))
+                info.setdefault(st["id"], {"supports_when": st.get("supports_when"), "supports_args": st.get("supports_args")})
+    return info
+
+
+def _step_names(v: PipelineVersion) -> list[str]:
+    return list(_step_info(v))
 
 
 @router.get("/{pid}/steps")
@@ -361,10 +363,15 @@ def step_settings_save(pid: str, body: StepSettingsIn, user: User = Depends(requ
         raise HTTPException(403, "Originals are never changed: use “Edit as new pipeline” to make your own copy first")
     base = get_version(p, body.base_version_id)
     steps = step_settings.validate(body.overrides)
-    known = set(_step_names(base))
-    unknown = sorted(set(steps) - known)
+    known = _step_info(base)
+    unknown = sorted(set(steps) - set(known))
     if unknown:
         raise HTTPException(400, f"Not a step of this pipeline: {', '.join(unknown)}")
+    for name, o in steps.items():
+        if o.get("enabled") is False and not known[name].get("supports_when"):
+            raise HTTPException(400, f"{name} has no on/off switch (no `when:` using task.ext.when); turn it off in the code")
+        if "args" in o and not known[name].get("supports_args"):
+            raise HTTPException(400, f"{name} does not read task.ext.args; change its command in the code")
     dest, label = pedit.new_version_dir(p)
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:

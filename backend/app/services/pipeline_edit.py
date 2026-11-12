@@ -20,7 +20,8 @@ COPY_PREFIX = "copy:"  # Pipeline.source_url of a copy made here ("copy:<origina
 SKIP_DIRS = {".git", "work", ".nextflow", "node_modules", "results", "__pycache__", ".nf-test"}
 MAX_FILES = 5000
 MAX_EDIT_BYTES = 1_000_000
-IGNORE = shutil.ignore_patterns("work", ".nextflow*", "results", ".nf-test")
+# .git is left out: a copy is no longer that commit, and it would be duplicated on every save
+IGNORE = shutil.ignore_patterns("work", ".nextflow*", "results", ".nf-test", ".git")
 
 
 def is_copy(p: Pipeline) -> bool:

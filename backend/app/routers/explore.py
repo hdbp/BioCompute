@@ -28,6 +28,8 @@ def raw(path: str, request: Request, _: User = Depends(require_viewer)):
     headers = {"Cache-Control": "private, max-age=60"}
     if media == "text/html":  # reports run with scripts but in an opaque origin: no access to the app or its token
         headers["Content-Security-Policy"] = "sandbox allow-scripts allow-popups"
+    elif suffix == ".svg":  # an SVG can carry scripts: opened directly it must not run them with the app's origin
+        headers["Content-Security-Policy"] = "sandbox"
     return FileResponse(p, media_type=media, headers=headers, content_disposition_type="inline", filename=p.name)
 
 

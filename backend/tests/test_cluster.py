@@ -103,7 +103,7 @@ def test_nextflow_adapter_command(tmp_path):
                     resources={"max_cpus": 12, "max_memory_gb": 48, "profile": "docker,test;rm -rf /"}, session_name="bc_x_1",
                     resume_session="bc_x_0")
     argv = spec.argv
-    assert argv[argv.index("run") + 1] == "/pipe" and argv[argv.index("-resume") + 1] == "bc_x_0"
+    assert argv[argv.index("run") + 1] == "/pipe" and "-resume" in argv and "bc_x_0" not in argv  # plain -resume: last session of the run folder
     assert argv[argv.index("-profile") + 1] == "docker"  # unsafe profile token dropped
     cfg = (tmp_path / "biocompute.config").read_text()
     assert "cpus = 12" in cfg and "memory = '48 GB'" in cfg

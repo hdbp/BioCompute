@@ -194,6 +194,21 @@ def register_from_dir(
     return pipeline
 
 
+def adopt_version(db: Session, tmp: Pipeline, target: Pipeline) -> PipelineVersion:
+    """Move the newest version of the temporary pipeline `tmp` to `target`, then drop `tmp`.
+
+    The version has to change parents through the relationships: `versions` cascades delete-orphan, so deleting
+    `tmp` while the version is still in its collection would delete the version too.
+    """
+    v = tmp.versions[-1]
+    tmp.versions.remove(v)
+    target.versions.append(v)
+    db.flush()
+    db.delete(tmp)
+    db.flush()
+    return v
+
+
 def import_git(db: Session, url: str, ref: str | None, name: str | None, category: str | None) -> Pipeline:
     if not GIT_URL_RE.match(url):
         raise HTTPException(400, "Unsupported git URL (use https:// or ssh)")

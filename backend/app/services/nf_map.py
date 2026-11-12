@@ -17,6 +17,16 @@ MAX_BYTES = 2_000_000
 IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
 
 
+def _regex_start(src: str, i: int) -> bool:
+    """A `/` opens a regex literal when an expression is expected there (after `(`, `,`, `=`, `~`, ...)."""
+    if i + 1 >= len(src) or src[i + 1] in "/* \n=":
+        return False
+    k = i - 1
+    while k >= 0 and src[k] in " \t":
+        k -= 1
+    return k < 0 or src[k] in "(,=~[!&|?:{;\n"
+
+
 def _blank(src: str) -> str:
     """Comments removed and string contents replaced by spaces; same length, so offsets stay valid."""
     out = list(src)
@@ -48,9 +58,28 @@ def _blank(src: str) -> str:
         elif c in "\"'":
             j = i + 1
             while j < n and src[j] != c and src[j] != "\n":
-                j += 2 if src[j] == "\\" else 1
+                if src[j] == "\\":
+                    j += 2
+                elif c == '"' and src.startswith("${", j):
+                    # "${cond ? "a {" : "b"}": the interpolation may hold quotes and braces of its own
+                    depth, j = 1, j + 2
+                    while j < n and depth and src[j] != "\n":
+                        depth += (src[j] == "{") - (src[j] == "}")
+                        j += 1
+                else:
+                    j += 1
             blank(i + 1, j)
             i = j + 1
+        elif c == "/" and _regex_start(src, i):
+            # a slashy string / regex literal such as replaceAll(/'/, ''): its quotes are not string starts
+            j = i + 1
+            while j < n and src[j] != "/" and src[j] != "\n":
+                j += 2 if src[j] == "\\" else 1
+            if j < n and src[j] == "/":
+                blank(i + 1, j)
+                i = j + 1
+            else:
+                i += 1
         else:
             i += 1
     return "".join(out)
@@ -117,7 +146,7 @@ def _resolve(base: Path, root: Path, target: str) -> str | None:
     if target.startswith("plugin/"):
         return None
     p = (base.parent / target)
-    for cand in (p, p.with_suffix(".nf") if p.suffix != ".nf" else p, p / "main.nf"):
+    for cand in (p, p if p.name.endswith(".nf") else p.with_name(p.name + ".nf"), p / "main.nf"):
         try:
             if cand.is_file():
                 return str(cand.resolve().relative_to(root.resolve()))
@@ -126,22 +155,68 @@ def _resolve(base: Path, root: Path, target: str) -> str | None:
     return None
 
 
+def _if_header(s: str) -> tuple[str, str] | None:
+    """For a line starting with `if (` whose parentheses close on it: (condition, text after the `)`)."""
+    m = re.match(r"^\}?\s*(?:else\s+)?if\s*\(", s)
+    if not m:
+        return None
+    depth = 0
+    for k in range(m.end() - 1, len(s)):
+        if s[k] == "(":
+            depth += 1
+        elif s[k] == ")":
+            depth -= 1
+            if depth == 0:
+                return s[m.end():k], s[k + 1:].strip()
+    return None
+
+
 def _statements(body: str):
-    """(statement text, condition stack) for each top-level statement of a workflow body."""
+    """(statement text, condition stack) for each top-level statement of a workflow body.
+
+    The `if` header may span several lines, and its `{` may be on the next line.
+    """
     lines = body.split("\n")
     conds: list[str] = []
     buf: list[str] = []
     depth = 0
+    hdr: list[str] = []   # lines of an `if (` header that is not closed yet
+    hdr_depth = 0
+    allman: str | None = None  # condition of an `if (...)` whose `{` is expected on the next line
+
+    def open_if(first: str, cond: str) -> None:
+        if first.lstrip().startswith("}") and conds:
+            conds.pop()
+        conds.append(cond.strip())
+
     for line in lines:
         s = line.strip()
+        if hdr:
+            hdr.append(s)
+            hdr_depth += s.count("(") - s.count(")")
+            if hdr_depth <= 0:
+                text = " ".join(hdr)
+                m = re.match(r"^\}?\s*(?:else\s+)?if\s*\((.*)\)\s*(\{)?\s*$", text)
+                cond = m.group(1) if m else text
+                if m and m.group(2):
+                    open_if(hdr[0], cond)
+                else:
+                    allman = cond
+                    if hdr[0].lstrip().startswith("}") and conds:
+                        conds.pop()
+                hdr, hdr_depth = [], 0
+            continue
         if not buf:
             if not s:
                 continue
+            if allman is not None:
+                cond, allman = allman, None
+                if s == "{":
+                    conds.append(cond.strip())
+                    continue
             m = re.match(r"^\}?\s*(else\s+)?if\s*\((.*)\)\s*\{$", s)
             if m:
-                if s.startswith("}") and conds:
-                    conds.pop()
-                conds.append(m.group(2).strip())
+                open_if(s, m.group(2))
                 continue
             if re.match(r"^\}?\s*else\s*\{$", s):
                 prev = conds.pop() if conds else ""
@@ -150,6 +225,21 @@ def _statements(body: str):
             if s == "}":
                 if conds:
                     conds.pop()
+                continue
+            mh = re.match(r"^\}?\s*(else\s+)?if\s*\(", s)
+            if mh:
+                d = s.count("(") - s.count(")")
+                if d > 0:
+                    hdr, hdr_depth = [s], d
+                    continue
+                cond, rest = _if_header(s) or ("", "")
+                if not rest:
+                    allman = cond
+                    if s.startswith("}") and conds:
+                        conds.pop()
+                    continue
+                # `if (x) CALL(...)` on one line: the call is conditional
+                yield "\x00" + rest, [*conds, cond.strip()]
                 continue
             if re.match(r"^(take|main|emit|publish):$", s):
                 yield s, list(conds)
@@ -175,6 +265,30 @@ def _merge_chains(stmts):
                 continue
         out.append((text, conds))
     return out
+
+
+def _split_pipes(text: str) -> list[str]:
+    """Top-level `|` separators of a statement (not `||`, not inside brackets or closures)."""
+    parts, depth, cur = [], 0, ""
+    k = 0
+    while k < len(text):
+        ch = text[k]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "|" and depth == 0:
+            if text[k:k + 2] == "||":
+                cur += "||"
+                k += 2
+                continue
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+        k += 1
+    parts.append(cur)
+    return parts
 
 
 def build_map(pipeline_dir: str | Path) -> dict[str, Any]:
@@ -259,15 +373,51 @@ def build_map(pipeline_dir: str | Path) -> dict[str, Any]:
             continue
         if section in ("emit", "publish"):
             continue
-        refs: set[str] = set()
-        for c in re.findall(rf"(?<![.\w])({IDENT})\.out\b", text):
-            if c in comps:
-                refs.add(c)
-        for v in re.findall(rf"(?<![.\w])({IDENT})\b", text):
-            if v in var_src:
-                refs |= var_src[v]
-        for pm in re.findall(rf"(?:fromPath|fromFilePairs|fromSamplesheet|file|files|samplesheetToList)\s*\(\s*params\.({IDENT})", text):
-            refs.add(input_node(f"params:{pm}", f"params.{pm}", "file or folder given at launch"))
+        def refs_of(t: str) -> set[str]:
+            found: set[str] = set()
+            for c in re.findall(rf"(?<![.\w])({IDENT})\.out\b", t):
+                if c in comps:
+                    found.add(c)
+            for v in re.findall(rf"(?<![.\w])({IDENT})\b", t):
+                if v in var_src:
+                    found |= var_src[v]
+            for pm in re.findall(rf"(?:fromPath|fromFilePairs|fromSamplesheet|file|files|samplesheetToList)\s*\(\s*params\.({IDENT})", t):
+                found.add(input_node(f"params:{pm}", f"params.{pm}", "file or folder given at launch"))
+            return found
+
+        # pipe syntax: Channel.of(..) | A | map { .. } | B   (each step reads the one before it)
+        segs = _split_pipes(text)
+        if len(segs) > 1:
+            head = re.match(rf"^(?:def\s+)?({IDENT})\s*=(?!=)\s*", segs[0])
+            carry = refs_of(segs[0][head.end():] if head else segs[0])
+            first = re.match(rf"^\s*({IDENT})\s*(?:\(.*\))?\s*$", segs[0][head.end():] if head else segs[0], re.S)
+            chain = [first.group(1)] if first and first.group(1) in comps else []
+            if chain:
+                carry = set(carry) - {chain[0]}
+            for seg in ([None] if chain else []) + segs[1:]:
+                name = chain[0] if seg is None else (re.match(rf"^\s*({IDENT})\s*(?:\(.*\))?\s*$", seg, re.S) or [None, None])[1]
+                if name in comps:
+                    info = comps[name]
+                    if info["kind"] == "workflow" and "steps" not in info:
+                        info.update(_sub_info(files.get(info.get("file") or ""), info["name"], scope))
+                    nodes.setdefault(name, {
+                        "id": name, "kind": "subworkflow" if info["kind"] == "workflow" else "process", "label": name,
+                        "name": info["name"], "file": info.get("file"), "outputs": info.get("outputs", []),
+                        "container": info.get("container"), "resource_label": info.get("label"), "steps": info.get("steps"),
+                        "step_info": info.get("step_info"), "supports_when": bool(info.get("supports_when")),
+                        "output_shapes": info.get("output_shapes") or {}, "supports_args": bool(info.get("supports_args")),
+                        "condition": " and ".join(conds) if conds else None,
+                    })
+                    for r in carry:
+                        if r != name:
+                            edges.add((r, name))
+                    carry = {name}
+                elif seg is not None:
+                    carry |= refs_of(seg)
+            if head:
+                var_src[head.group(1)] |= carry
+            continue
+        refs = refs_of(text)
         calls = [c for c in re.findall(rf"(?<![.\w])({IDENT})\s*\(", text) if c in comps]
         target = re.match(rf"^(?:def\s+)?({IDENT})\s*=(?!=)", text)
         sets = re.findall(rf"\.set\s*\{{\s*({IDENT})\s*\}}", text)

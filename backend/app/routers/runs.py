@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -36,6 +37,109 @@ def _out(db: Session, r: Run, cls=RunOut, **extra):
     return o
 
 
+# What a client may ask for. Where a run executes (executor, nodes) and where it works (work_dir) are decided
+# by the server from the placement rules, never taken from the request.
+CLIENT_RESOURCES = {"max_cpus": (1, 4096), "max_memory_gb": (0.5, 65536), "min_memory_gb": (0, 65536), "min_disk_gb": (0, 10_000_000),
+                    "max_time_h": (1, 24 * 365), "queue_size": (1, 10000), "controller_heap_gb": (1, 256)}
+
+
+def clean_resources(raw: dict) -> dict:
+    out: dict = {}
+    for k, (lo, hi) in CLIENT_RESOURCES.items():
+        if raw.get(k) in (None, ""):
+            continue
+        try:
+            v = float(raw[k])
+        except (TypeError, ValueError):
+            raise HTTPException(422, f"{k} must be a number") from None
+        if not lo <= v <= hi:
+            raise HTTPException(422, f"{k} must be between {lo:g} and {hi:g}")
+        out[k] = v
+    if raw.get("requires_gpu"):
+        out["requires_gpu"] = True
+    prof = raw.get("profile")
+    if prof:
+        if not isinstance(prof, str) or not re.fullmatch(r"[A-Za-z0-9_.,-]{1,200}", prof):
+            raise HTTPException(422, "profile: letters, digits, _ . - and commas only")
+        out["profile"] = prof
+    return out
+
+
+def scan_inputs(exp: Experiment | None, params: dict) -> tuple[bool, int, list[str]]:
+    """Every file a run would read: (any in a restricted data folder, total bytes, existing paths outside all data folders).
+
+    Looks at the experiment's sample files, at parameters holding paths (data-folder paths or absolute paths), and
+    inside a samplesheet given as `input`. A FASTQ folder counts with the files in it.
+    """
+    restricted = False
+    total = 0
+    outside: list[str] = []
+    seen: set[str] = set()
+
+    def visit(value: object, deep: bool = False) -> None:
+        nonlocal restricted, total
+        if not isinstance(value, str) or not value or value in seen or len(value) > 4096 or "\n" in value:
+            return
+        seen.add(value)
+        head = value.split("/", 1)[0]
+        path: Path | None = None
+        root = None
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value):
+            return  # a URL (or refgenie://, resolved later into its own data folder)
+        if ":" in head and not value.startswith(("/", "~")):
+            if head.split(":", 1)[0] not in fs.roots():
+                return  # not a data-folder path (an ordinary value with a colon)
+            try:
+                root, path = fs.resolve(value, must_exist=False)
+            except HTTPException:
+                return
+        elif value.startswith(("/", "~")):
+            path = Path(value).expanduser()
+            try:
+                exists = path.exists()
+            except OSError:
+                exists = False
+            if not exists:
+                return
+            root = fs.root_of(path)
+            if root is None:
+                outside.append(value)
+                return
+        else:
+            return
+        restricted |= root.restricted
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+                if deep and path.suffix.lower() in (".csv", ".tsv", ".txt") and path.stat().st_size < 5_000_000:
+                    for line in path.read_text(errors="replace").splitlines()[:20000]:
+                        for cell in re.split(r"[,\t]", line):
+                            visit(cell.strip().strip('"'))
+            elif path.is_dir() and deep:
+                n = 0
+                for f in path.rglob("*"):
+                    n += 1
+                    if n > 20000:
+                        break
+                    try:
+                        if f.is_file():
+                            total += f.stat().st_size
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+
+    if exp:
+        for s in exp.samples:
+            for vp in (s.files or {}).values():
+                for one in (vp if isinstance(vp, list) else [vp]):
+                    visit(one)
+    for key, val in (params or {}).items():
+        for one in (val if isinstance(val, list) else [val]):
+            visit(one, deep=key == "input")
+    return restricted, total, outside
+
+
 def get_run(db: Session, rid: str) -> Run:
     r = db.get(Run, rid)
     if not r:
@@ -68,20 +172,13 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
     exp = db.get(Experiment, body.experiment_id) if body.experiment_id else None
     if body.experiment_id and not exp:
         raise HTTPException(404, "Experiment not found")
-    res = dict(body.resources)
-    # data-locality-aware placement
-    restricted = False
-    input_bytes = 0
-    if exp:
-        for s in exp.samples:
-            for vp in (s.files or {}).values():
-                if isinstance(vp, str) and vp:
-                    try:
-                        root, path = fs.resolve(vp)
-                        restricted |= root.restricted
-                        input_bytes += path.stat().st_size if path.is_file() else 0
-                    except HTTPException:
-                        pass
+    res = clean_resources(body.resources)
+    # data-locality-aware placement: every input counts, not only the experiment's files
+    restricted, input_bytes, outside = scan_inputs(exp, body.params)
+    if outside:
+        raise HTTPException(422, {"message": "Some inputs are outside the data folders BioCompute may use",
+                                  "issues": [{"level": "error", "message": f"{x} is not inside a data folder. An admin can add its folder in "
+                                              "Settings, Controller, Data folders."} for x in outside[:20]]})
     # max_cpus / max_memory_gb are ceilings; min_memory_gb / min_disk_gb / requires_gpu are hard requirements
     plan = cluster.placement(db, input_bytes=input_bytes, restricted=restricted,
                              requested_cpus=int(res.get("max_cpus") or 0), requested_mem_gb=float(res.get("min_memory_gb") or 0),
@@ -280,9 +377,12 @@ def result_file(rid: str, path: str, download: bool = False, _: User = Depends(r
         return FileResponse(target, filename=target.name)
     if target.suffix in (".html", ".htm"):
         return FileResponse(target, media_type="text/html", headers={"Content-Security-Policy": "sandbox allow-scripts"})
-    if target.suffix in (".png", ".jpg", ".jpeg", ".svg", ".pdf"):
+    if target.suffix == ".svg":  # an SVG can carry scripts: opened directly it must not run them with the app's origin
+        return FileResponse(target, headers={"Content-Security-Policy": "sandbox"})
+    if target.suffix in (".png", ".jpg", ".jpeg", ".pdf"):
         return FileResponse(target)
-    data = target.read_bytes()[:200_000]
+    with target.open("rb") as fh:  # only the part that is shown (the file may be a multi-GB BAM)
+        data = fh.read(200_000)
     if b"\x00" in data[:4096]:
         return {"binary": True, "size": target.stat().st_size}
     return {"binary": False, "size": target.stat().st_size, "content": data.decode("utf-8", errors="replace"),

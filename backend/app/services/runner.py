@@ -225,6 +225,12 @@ def start(db: Session, run: Run) -> None:
         _spawn(db, run, version)
 
 
+def engine_environ() -> dict[str, str]:
+    """The environment pipeline code runs with: the service's, minus the controller's own configuration and
+    keys (database URL and password, signing key, assistant API keys). Pipelines never need those."""
+    return {k: v for k, v in os.environ.items() if not k.upper().startswith(("BIOCOMPUTE_", "ANTHROPIC_", "OPENAI_"))}
+
+
 def _spawn(db: Session, run: Run, version: PipelineVersion) -> None:
     run_dir = Path(run.run_dir)
     for f in ("exit_code", "cancelled", "wrapper.pid", "child.pid"):
@@ -237,7 +243,7 @@ def _spawn(db: Session, run: Run, version: PipelineVersion) -> None:
         resume_session=run.provenance.get("resume_session") if run.resumed_from or run.attempt > 1 else None,
     )
     (run_dir / "command.json").write_text(json.dumps({"argv": spec.argv, "cwd": spec.cwd, "env": spec.env}, indent=2))
-    env = {**os.environ, **spec.env}
+    env = {**engine_environ(), **spec.env}
     with open(run_dir / "stdout.log", "ab") as fh:
         fh.write(f"[biocompute] attempt {run.attempt} - launching: {' '.join(spec.argv)}\n".encode())
     proc = subprocess.Popen(
@@ -285,59 +291,102 @@ def resume(db: Session, run: Run, user: str) -> Run:
 
 
 # --------------------------------------------------------------------------- monitor
+_poll_failures: dict[str, int] = {}
+MAX_POLL_FAILURES = 5
+
+
+def _poll_run(db: Session, run: Run) -> None:
+    rd = Path(run.run_dir)
+    try:
+        prog = parse_progress(rd)
+        if prog != run.progress:
+            newly_failed = prog["failed"] - (run.progress or {}).get("failed", 0)
+            run.progress = prog
+            if newly_failed > 0:
+                add_event(db, run, "task", f"{newly_failed} task(s) failed")
+            events.publish("run", {"run_id": run.id, "kind": "progress", "status": run.status,
+                                   "done": prog["done"], "total": prog["total"]})
+    except Exception as exc:  # never let parsing kill the monitor
+        run.progress = {**(run.progress or {}), "parse_error": str(exc)}
+    ec_file = rd / "exit_code"
+    if ec_file.exists():
+        try:
+            rc = int(ec_file.read_text().strip() or 1)
+        except ValueError:
+            rc = 1
+        run.exit_code = rc
+        if (rd / "cancelled").exists() or run.status == "cancelling":
+            set_status(db, run, "cancelled", f"Run cancelled (engine exit code {rc})")
+        elif rc == 0:
+            set_status(db, run, "completed", "Pipeline completed successfully")
+        else:
+            run.error = _error_excerpt(rd) or f"Engine exited with code {rc}"
+            set_status(db, run, "failed", f"Pipeline failed (exit code {rc})")
+        _write_provenance_final(run)
+    elif not _alive(run):
+        if run.status == "cancelling":
+            set_status(db, run, "cancelled", "Run cancelled (supervisor terminated)")
+        else:
+            run.error = "Execution supervisor disappeared without recording an exit code (host reboot or kill -9?)"
+            set_status(db, run, "lost", run.error)
+    elif run.status == "cancelling":
+        t0 = (run.provenance or {}).get("cancel_requested_at", time.time())
+        if time.time() - t0 > 60:
+            try:
+                os.killpg(os.getpgid(run.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+
 def _poll_once() -> None:
+    """One monitor pass. Each run is handled and committed on its own: a problem with one run (an unreadable
+    folder, a broken file) must not stop the others from being updated or queued runs from starting."""
     db = SessionLocal()
     try:
-        runs = db.query(Run).filter(Run.status.in_(("running", "cancelling", "queued"))).all()
-        for run in runs:
-            if run.status == "queued":
-                continue
-            rd = Path(run.run_dir)
+        ids = [r.id for r in db.query(Run.id).filter(Run.status.in_(("running", "cancelling"))).all()]
+        for rid in ids:
             try:
-                prog = parse_progress(rd)
-                if prog != run.progress:
-                    newly_failed = prog["failed"] - (run.progress or {}).get("failed", 0)
-                    run.progress = prog
-                    if newly_failed > 0:
-                        add_event(db, run, "task", f"{newly_failed} task(s) failed")
-                    events.publish("run", {"run_id": run.id, "kind": "progress", "status": run.status,
-                                           "done": prog["done"], "total": prog["total"]})
-            except Exception as exc:  # never let parsing kill the monitor
-                run.progress = {**(run.progress or {}), "parse_error": str(exc)}
-            ec_file = rd / "exit_code"
-            if ec_file.exists():
-                rc = int(ec_file.read_text().strip() or 1)
-                run.exit_code = rc
-                if (rd / "cancelled").exists() or run.status == "cancelling":
-                    set_status(db, run, "cancelled", f"Run cancelled (engine exit code {rc})")
-                elif rc == 0:
-                    set_status(db, run, "completed", "Pipeline completed successfully")
-                else:
-                    run.error = _error_excerpt(rd) or f"Engine exited with code {rc}"
-                    set_status(db, run, "failed", f"Pipeline failed (exit code {rc})")
-                _write_provenance_final(run)
-            elif not _alive(run):
-                if run.status == "cancelling":
-                    set_status(db, run, "cancelled", "Run cancelled (supervisor terminated)")
-                else:
-                    run.error = "Execution supervisor disappeared without recording an exit code (host reboot or kill -9?)"
-                    set_status(db, run, "lost", run.error)
-            elif run.status == "cancelling":
-                t0 = (run.provenance or {}).get("cancel_requested_at", time.time())
-                if time.time() - t0 > 60:
+                run = db.get(Run, rid)
+                if run is None or run.status not in ("running", "cancelling"):
+                    continue
+                _poll_run(db, run)
+                db.commit()
+                _poll_failures.pop(rid, None)
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()
+                n = _poll_failures[rid] = _poll_failures.get(rid, 0) + 1
+                if n >= MAX_POLL_FAILURES:
                     try:
-                        os.killpg(os.getpgid(run.pid), signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        pass
-        db.commit()
+                        run = db.get(Run, rid)
+                        if run is not None:
+                            run.error = f"BioCompute could not read this run's state {n} times in a row: {exc}"
+                            set_status(db, run, "lost", run.error)
+                            db.commit()
+                    except Exception:  # noqa: BLE001
+                        db.rollback()
+                    _poll_failures.pop(rid, None)
         # start queued runs when capacity frees up
-        queued = db.query(Run).filter(Run.status == "queued").order_by(Run.created_at).all()
-        for run in queued:
-            with _launch_lock:
-                if active_count(db) >= get_settings().max_concurrent_runs:
-                    break
-                _spawn(db, run, db.get(PipelineVersion, run.pipeline_version_id))
-            db.commit()
+        queued = [r.id for r in db.query(Run.id).filter(Run.status == "queued").order_by(Run.created_at).all()]
+        for rid in queued:
+            try:
+                with _launch_lock:
+                    if active_count(db) >= get_settings().max_concurrent_runs:
+                        break
+                    run = db.get(Run, rid)
+                    if run is None or run.status != "queued":
+                        continue
+                    _spawn(db, run, db.get(PipelineVersion, run.pipeline_version_id))
+                db.commit()
+            except Exception as exc:  # noqa: BLE001 - a run that cannot start must not block the queue behind it
+                db.rollback()
+                try:
+                    run = db.get(Run, rid)
+                    if run is not None:
+                        run.error = f"The run could not be started: {exc}"
+                        set_status(db, run, "failed", run.error)
+                        db.commit()
+                except Exception:  # noqa: BLE001
+                    db.rollback()
     finally:
         db.close()
 
@@ -360,10 +409,18 @@ def _write_provenance_final(run: Run) -> None:
                  "finished_at": now().isoformat(), "progress_summary": {k: run.progress.get(k) for k in ("total", "done", "failed")}})
     outputs = []
     out = Path(run.output_dir)
-    if out.is_dir():
-        for p in sorted(out.rglob("*")):
-            if p.is_file() and len(outputs) < 5000:
-                outputs.append({"path": str(p.relative_to(out)), "size": p.stat().st_size})
+    try:
+        if out.is_dir():
+            for p in sorted(out.rglob("*")):
+                if len(outputs) >= 5000:
+                    break
+                try:
+                    if p.is_file():
+                        outputs.append({"path": str(p.relative_to(out)), "size": p.stat().st_size})
+                except OSError:
+                    continue  # a file that vanished or cannot be read is simply not listed
+    except OSError:
+        pass
     prov["outputs"] = outputs
     run.provenance = prov
     try:

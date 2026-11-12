@@ -115,7 +115,9 @@ node frontend/e2e/launch-flow.cjs <experiment-id>  # browser walkthrough (needs 
   the controller's unprivileged service user.
 - Discovery never grants permission to run work. An admin must authorize a device, its owner
   installs the agent with a single-use token, and participation is switched on separately.
-  Active probing only happens inside authorized CIDRs. Nothing is ever installed remotely.
-- Data in *restricted* roots is never placed on nodes outside the controller's site.
+  Active probing only happens inside authorized CIDRs. Nothing is installed on another computer unless an admin
+  starts SSH enrollment for that one tailnet machine and confirms it.
+- Runs reading anything in a *restricted* data folder are never placed on nodes outside the controller's site
+  (every input is checked: experiment files, samplesheets and the files they list, FASTQ folders, file parameters).
 
 More detail: [`docs/architecture.md`](docs/architecture.md).

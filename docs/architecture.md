@@ -113,18 +113,20 @@ Every candidate is listed with these facts, so the estimate can be checked. Runs
 default**, next to the data. The fastest node is offered as a one-click alternative. Choosing any other node
 uses Nextflow's HTCondor executor, which needs a shared filesystem.
 
-* `cluster.placement()` scores eligible nodes on several factors:
-  * allocation priority and cores;
-  * a bonus for the controller;
-  * a penalty for estimated transfer time (about 100 Mbit/s between sites).
+* `cluster.placement()` estimates, per eligible node, how long the run would take there (cores, memory, and the
+  time to move the inputs over the measured or assumed link) and ranks them.
 
   It also rules nodes out entirely:
-  * if inputs come from a *restricted* data root, nodes outside the controller's site;
+  * if any input is in a *restricted* data folder, nodes outside the controller's site. Every input counts:
+    experiment files, a samplesheet or FASTQ folder given as `input`, the files a samplesheet lists, and any
+    parameter holding a path. Existing local paths outside all data folders are refused at launch;
   * nodes whose `data_policy` is `local-only`;
   * architecture or GPU mismatches;
   * node eligibility failures: disabled, draining, outside allowed hours, on battery, in use (idle-only nodes), or a stale heartbeat.
 * Runs default to data-local execution on the controller, with Nextflow's local executor capped to the controller's allocation.
 * Selecting extra nodes switches the run to Nextflow's `condor` executor, with a `requirements` expression that pins the chosen machines.
+* The client cannot choose where a run executes: `executor`, `nodes` and the work folder are set by the server
+  from these rules; only resource ceilings/requirements and the Nextflow profile are accepted from the request.
   This **requires a filesystem shared by those nodes** (Nextflow's work directory model).
   BioCompute does not pretend that Nextflow can scatter tasks to arbitrary machines without one.
 * Per-node HTCondor configuration (`/api/nodes/{id}/condor-config`) turns the allocation into `NUM_CPUS`, `MEMORY`, a partitionable slot, `START`/`SUSPEND` rules (idle and hours) and site attributes.
@@ -135,7 +137,8 @@ uses Nextflow's HTCondor executor, which needs a shared filesystem.
 ## Security boundaries
 
 * **Authentication:** JWT, HS256. The signing key comes from the environment or is generated once into `state_dir/secret.key` (0600).
-  Login has rate limiting, and the initial admin password is written to a 0600 file.
+  Login has rate limiting. The first administrator is created in the browser (first-run setup; a one-time
+  setup code is needed from another computer).
 * **Authorization:** viewer < scientist < admin. Node, user and discovery operations are admin-only.
   Launching, imports and editing need the scientist role.
 * **Filesystem:** only configured roots are reachable, through `fs.resolve`.
@@ -145,16 +148,23 @@ uses Nextflow's HTCondor executor, which needs a shared filesystem.
   Profile names and HTCondor hostnames are allow-listed by regex.
   The example pipeline's schema forbids quote characters in free-text values that reach a shell script.
 * **Arbitrary code:** pipelines and Studio custom modules are code. They run with the controller
-  service account's permissions and nothing more. The systemd unit sets `NoNewPrivileges` and
-  `ProtectSystem`, and limits writable paths. Admins can disable custom code modules.
+  service account's permissions: they can read whatever that account can read, **including BioCompute's
+  own state folder** (database, signing key). The engine's environment has the controller's own settings and
+  keys removed (`BIOCOMPUTE_*`, assistant API keys). The unit written by `install.sh` sets `NoNewPrivileges`
+  only; `deploy/biocompute.service` adds `ProtectSystem`. Only give the scientist role to people you would
+  trust with that account. Admins can disable custom code in Studio.
 * **SSH enrollment:** this is the only case where BioCompute changes another machine, and it is deliberately narrow.
   * An admin starts it and confirms, for one tailnet member at a time.
   * The target must be that machine's own tailnet address.
   * The commands are fixed and quoted, and the token goes over stdin.
-  * It runs in BatchMode with `StrictHostKeyChecking=accept-new` and a known-hosts file in the state directory.
+  * It runs in BatchMode (key login) with `StrictHostKeyChecking=accept-new` and a known-hosts file in the state
+    directory. If no key is authorized yet, the admin can type that machine's password once: it is used for one
+    connection that installs the controller's key, and is not stored.
   * It is audit-logged, and it can be disabled with `BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false`.
 * **Agent listener (optional):** a second listener, on the tailnet IP for example, serves only the
   token-protected agent endpoints and `/api/health`. The UI and the main API never leave 127.0.0.1.
-* **Agents:** they have no inbound port and no command channel. Their identity is bound to a token,
-  so a self-reported machine ID cannot override it. Discovery reports need a token flagged for them.
+* **Agents:** they have no inbound port and no command channel. Their identity is bound to a token.
+  What a machine reports about itself (hostname, addresses) cannot attach it to the controller's record or to an
+  already enrolled machine, and its own claim of tailnet membership is kept apart from the controller's
+  `tailscale status`. Discovery reports need a token flagged for them.
 * **HTML reports** are served with `Content-Security-Policy: sandbox`.

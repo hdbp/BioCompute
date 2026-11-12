@@ -230,3 +230,27 @@ def test_add_and_remove_steps_of_a_nextflow_copy(client, auth):
     assert rm["ok"] and "MACS3" not in {n["id"] for n in client.get(f"/api/pipelines/{cid}/map", headers=auth).json()["nextflow"]["nodes"]}
     # the original never changed
     assert "TRIMGALORE ( ch_samplesheet )" in (RAW / "nfcore_struct/workflows/demo.nf").read_text()
+
+
+def test_fetched_version_survives_removing_the_temporary_pipeline(client, auth):
+    """`versions/update` imports the ref as a temporary pipeline and moves its version; the version must survive."""
+    from app.db import SessionLocal
+    from app.models import Pipeline, PipelineVersion
+    from app.services import pipelines as svc
+
+    with SessionLocal() as db:
+        target = Pipeline(slug="adopt-target", name="Adopt target")
+        tmp = Pipeline(slug="adopt-tmp", name="Adopt tmp")
+        db.add_all([target, tmp])
+        db.flush()
+        db.add(PipelineVersion(pipeline_id=tmp.id, version="2.0", path="/nonexistent", engines=["nextflow"]))
+        db.commit()
+        db.refresh(tmp)
+        v = svc.adopt_version(db, tmp, target)
+        db.commit()
+        vid, tid = v.id, target.id
+    with SessionLocal() as db:
+        assert db.get(PipelineVersion, vid).pipeline_id == tid
+        assert db.query(Pipeline).filter_by(slug="adopt-tmp").first() is None
+        db.delete(db.get(Pipeline, tid))
+        db.commit()

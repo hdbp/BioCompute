@@ -35,7 +35,7 @@ then confirm. Tailscale SSH always answers on port 22 of the tailnet address. If
 port, enter that port; it is remembered per machine in your browser.
 BioCompute then runs this fixed sequence and shows each step live:
 
-1. `ssh -o BatchMode=yes -p <port> <user>@<its tailnet name or IP>`, then check for Python 3.9+. There are never password prompts.
+1. `ssh -o BatchMode=yes -p <port> <user>@<its tailnet name or IP>`, then check for Python 3.9+. No prompt appears on either machine; if the key is not authorized yet, BioCompute offers a one-time password field (see below).
 2. Check that the machine can reach the controller URL (`/api/health`). This catches a wrong address before any token is used.
 3. Copy the agent into `~/.local/share/biocompute-agent`.
 4. Enroll with a one-time token. The token is bound to this node, valid for 1 hour, and sent over the SSH connection's
@@ -88,8 +88,8 @@ Set `BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false` to turn the feature off.
   desktop. Otherwise the agent is still enrolled; run `install.sh` once when logged in.
 
 `Permission denied (publickey,password)` means the machine's own sshd answered, so the port is right, but no key
-from the controller is authorized. Password login is not possible for automatic enrollment. Authorize the key as
-described above, then click *Try again*.
+from the controller is authorized. Authorize the key as described above and click *Try again*, or type that
+machine's password in the enrollment dialog: it is used once to install the controller's key and is not stored.
 
 If a step fails, the panel shows the output and a hint for common problems: refused key, check-mode policy,
 no route, or a changed host key. *Try again* reruns the whole sequence; it is safe to repeat.

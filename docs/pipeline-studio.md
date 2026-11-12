@@ -144,7 +144,8 @@ is only a warning, because a conda or container profile may provide it.
 User modules sit in the library with the built-in ones. Hover over one to **edit**, **export** (JSON) or **delete** it.
 The id cannot change after creation, because saved workflows refer to it. A module that a saved workflow
 still uses cannot be deleted. User modules are custom code: `BIOCOMPUTE_ALLOW_CUSTOM_CODE_MODULES=false`
-disables creating and running them.
+disables creating them and validating, exporting or publishing graphs that contain custom code (including a
+built-in module whose node carries its own script). Pipelines published before the switch was turned off still run.
 
 Modules run on whichever node executes the task. The program must be installed there too, or provided
 by the module's conda package or container. BioCompute never installs software by itself.
