@@ -5,14 +5,22 @@ process BOWTIE2_ALIGN {
 
     input:
     tuple val(meta), path(reads)
+    val save_unaligned
 
     output:
     tuple val(meta), path("*.bam"), emit: bam
     tuple val(meta), path("*.log"), emit: log
     path "versions.yml", emit: versions
 
+    when:
+    task.ext.when == null || task.ext.when
+
     script:
+    def args = task.ext.args ?: ''
+    def prefix = task.ext.prefix ?: "${meta.id}"
     """
-    echo "process { } // not code" > versions.yml
+    echo "bowtie2 ${args}" > ${prefix}.log
+    cat ${reads} > ${prefix}.bam
+    echo 'BOWTIE2_ALIGN: tool 1.0' > versions.yml
     """
 }

@@ -1,17 +1,23 @@
 process MULTIQC {
-    tag "$meta.id"
-    label 'process_medium'
+    label 'process_single'
     container "${ workflow.containerEngine == 'singularity' ? 'https://depot.galaxyproject.org/singularity/multiqc:1.21--pyhdfd78af_0' : 'biocontainers/multiqc:1.21--pyhdfd78af_0' }"
 
     input:
-    tuple val(meta), path(reads)
+    path multiqc_files, stageAs: "?/*"
+    val title
 
     output:
-    tuple val(meta), path("*.report"), emit: report
+    path "*.html"      , emit: report
     path "versions.yml", emit: versions
 
+    when:
+    task.ext.when == null || task.ext.when
+
     script:
+    def args = task.ext.args ?: ''
     """
-    echo "process { } // not code" > versions.yml
+    ls -R > multiqc_report.html
+    echo "multiqc ${args}" >> multiqc_report.html
+    echo 'MULTIQC: tool 1.0' > versions.yml
     """
 }

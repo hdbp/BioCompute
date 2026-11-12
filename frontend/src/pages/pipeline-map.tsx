@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, FileCode2, Info, Play, Workflow } from "lucide-react";
@@ -18,6 +18,7 @@ export default function PipelineMapPage() {
   const [sp, setSp] = useSearchParams();
   const user = useAuth((s) => s.user);
   const p = useQuery({ queryKey: ["pipeline", id], queryFn: () => api.get<PipelineDetail>(`/api/pipelines/${id}`) });
+  const dirty = useRef(false);
   const [fork, setFork] = useState<{ versionId?: string; version?: string; studio: boolean } | null>(null);
   const d = p.data;
   const versionId = sp.get("version") ?? undefined;
@@ -30,7 +31,10 @@ export default function PipelineMapPage() {
       {d && <Badge tone={d.kind === "studio" ? "ok" : "neutral"}>{d.kind === "studio" ? "Built in Studio" : "Nextflow code"}</Badge>}
       {d && d.versions.length > 0 && (
         <Select className="h-8 w-auto" aria-label="Version" value={current}
-          onChange={(e) => setSp(e.target.value === d.latest_version?.id ? {} : { version: e.target.value }, { replace: true })}>
+          onChange={(e) => {
+            if (dirty.current && !window.confirm("Discard your unsaved step settings?")) return;
+            setSp(e.target.value === d.latest_version?.id ? {} : { version: e.target.value }, { replace: true });
+          }}>
           {[...d.versions].reverse().map((v) => <option key={v.id} value={v.id}>{v.version}{v.id === d.latest_version?.id ? " (current)" : ""} · {when(v.created_at)}</option>)}
         </Select>
       )}
@@ -41,7 +45,7 @@ export default function PipelineMapPage() {
   );
   return (
     <>
-      <PipelineMapFull pid={id} versionId={versionId} toolbar={toolbar} canFork={can(user, "scientist")}
+      <PipelineMapFull pid={id} versionId={versionId} toolbar={toolbar} canFork={can(user, "scientist")} onDirty={(x) => { dirty.current = x; }}
         onFork={(m) => setFork({ versionId: m.version_id, version: m.version, studio: m.kind === "studio" })} />
       {d && <ForkDialog open={!!fork} onOpenChange={(o) => !o && setFork(null)} pid={d.id} name={d.name} version={fork?.version} versionId={fork?.versionId} studio={!!fork?.studio} />}
     </>

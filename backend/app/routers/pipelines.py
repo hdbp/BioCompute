@@ -19,6 +19,7 @@ from ..schemas import (DuplicateIn, ImportGit, ImportLocal, ParamValidateIn, Pip
 from ..security import audit, require_scientist, require_viewer
 from ..services import access, fs, nf_map, nfschema
 from ..services import pipeline_edit as pedit
+from ..services import step_settings
 from ..services import pipelines as svc
 
 STUDIO_SNAPSHOT = "studio_graph.json"  # written next to each published Studio version
@@ -319,6 +320,62 @@ def save_files(pid: str, body: SaveFilesIn, user: User = Depends(require_scienti
     db.refresh(p)
     newv = next(x for x in p.versions if x.version == label)
     return {"version_id": newv.id, "version": label, "files": applied}
+
+
+# --------------------------------------------------------------------------- step settings (interactive edits)
+def _step_names(v: PipelineVersion) -> list[str]:
+    m = nf_map.build_map(v.path)
+    names: list[str] = []
+    for n in m.get("nodes", []) if m.get("ok") else []:
+        if n["kind"] == "process":
+            names.append(n["id"])
+        for st in n.get("step_info") or []:
+            if st["kind"] == "process":
+                names.append(st["id"])
+    return list(dict.fromkeys(names))
+
+
+@router.get("/{pid}/steps")
+def step_settings_get(pid: str, version_id: str | None = None, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    """Step settings changed on the map for this version, and what the pipeline itself sets for each step."""
+    p = get_pipeline(db, pid, user)
+    v = get_version(p, version_id)
+    root = Path(v.path)
+    return {"version_id": v.id, "version": v.version,
+            "editable": access.can_edit(user, p.owner) and pedit.is_copy(p) and p.source_type != "studio",
+            "overrides": step_settings.load(root), "current": step_settings.current(root, _step_names(v))}
+
+
+class StepSettingsIn(BaseModel):
+    base_version_id: str
+    overrides: dict[str, dict]
+
+
+@router.post("/{pid}/steps")
+def step_settings_save(pid: str, body: StepSettingsIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Save step settings as a NEW version of your own copy (a config file; the code is not modified)."""
+    p = get_pipeline(db, pid, user, edit=True)
+    if not pedit.is_copy(p) or p.source_type == "studio":
+        raise HTTPException(403, "Originals are never changed: use “Edit as new pipeline” to make your own copy first")
+    base = get_version(p, body.base_version_id)
+    steps = step_settings.validate(body.overrides)
+    known = set(_step_names(base))
+    unknown = sorted(set(steps) - known)
+    if unknown:
+        raise HTTPException(400, f"Not a step of this pipeline: {', '.join(unknown)}")
+    dest, label = pedit.new_version_dir(p)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        pedit.write_version(base, dest, step_settings.changes_for(Path(base.path), steps))
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    svc.register_from_dir(db, dest, source_type=p.source_type, name=p.name, version=label, pipeline=p)
+    audit(db, user.username, "pipeline.steps", p.slug, version=label, base=base.version, steps=steps)
+    db.commit()
+    db.refresh(p)
+    newv = next(x for x in p.versions if x.version == label)
+    return {"version_id": newv.id, "version": label, "steps": steps}
 
 
 # --------------------------------------------------------------------------- map

@@ -62,9 +62,20 @@ The toolbar picks the version and links to *Details* (parameters, versions, hist
 
 * A Studio pipeline is copied into a new Studio workflow of yours (from the version you are viewing). Change it in
   Studio and **Publish**: that creates a separate pipeline.
-* A Nextflow pipeline's files (that version) are copied into a new pipeline of yours, and its **Code** page opens:
-  a file tree and an editor. **Save as v2** (Ctrl+S) writes your changes into a new version folder of your copy;
-  earlier versions of the copy stay as they were and remain runnable. The map follows the code you saved.
+* A Nextflow pipeline (that version) is copied into a new pipeline of yours, and its **map** opens for editing. Click a
+  step and change it in the panel on the right:
+  * **Run this step** off. nf-core modules skip themselves (`ext.when = false`); steps whose only input came from a
+    step that is off are shown as *no input*. Steps without a `when:` switch say so and can be changed in the code.
+  * **Tool arguments** (`ext.args`, the extra command-line arguments nf-core modules pass to the tool). The
+    pipeline's own value is shown; yours replaces it (*Start from it* copies it into the field).
+  * **CPUs, memory, time limit, container image.**
+  * Steps inside a subworkflow are listed in its panel, each with the same settings.
+
+  **Save as v2** writes them as `conf/biocompute_steps.config` (plus `conf/biocompute_steps.json`), included last
+  from `nextflow.config` so they win over the pipeline's own settings. It reuses the selector the pipeline already
+  uses for each step (for example nf-core's fully qualified `withName` names), otherwise `(.*:)?NAME`. The code is
+  not modified. For anything else, **Edit code** opens the file tree and editor; its **Save as vN** also writes a
+  new version. Earlier versions of your copy stay as they were and remain runnable.
 * Originals, including the ones you imported yourself, are read-only on the Code page, and the server refuses code
   changes to anything that is not your own copy. Paths outside the pipeline folder and links leading out of it are
   refused.

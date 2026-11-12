@@ -7,12 +7,19 @@ process TRIMGALORE {
     tuple val(meta), path(reads)
 
     output:
-    tuple val(meta), path("*.reads"), emit: reads
-    tuple val(meta), path("*.log"), emit: log
+    tuple val(meta), path("*.trimmed.fq"), emit: reads
+    tuple val(meta), path("*.log")       , emit: log
     path "versions.yml", emit: versions
 
+    when:
+    task.ext.when == null || task.ext.when
+
     script:
+    def args = task.ext.args ?: ''
+    def prefix = task.ext.prefix ?: "${meta.id}"
     """
-    echo "process { } // not code" > versions.yml
+    echo "trim_galore ${args}" > ${prefix}.log
+    cat ${reads} > ${prefix}.trimmed.fq
+    echo 'TRIMGALORE: tool 1.0' > versions.yml
     """
 }

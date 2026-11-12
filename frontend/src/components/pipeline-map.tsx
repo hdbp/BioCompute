@@ -1,11 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow,
   type Edge, type Node, type NodeProps, type NodeTypes,
 } from "@xyflow/react";
-import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, RotateCcw, Save, Search } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import type { StudioModule } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -14,11 +15,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/misc";
 import { nodeTypes as studioNodeTypes } from "@/components/studio/module-node";
 import { deserialize, effective, StudioContext, type PortTypes, type StudioCtx } from "@/components/studio/model";
+import { cleanOverride, StepForm, stepStates, useStepSettings, type Overrides, type StepInfo, type StepOverride } from "@/components/step-settings";
 
 // ---------------------------------------------------------------------------- data
 interface NfNode extends Record<string, unknown> {
   id: string; kind: "input" | "process" | "subworkflow"; label: string; name?: string; file?: string | null; detail?: string;
   outputs?: string[]; container?: string | null; resource_label?: string | null; condition?: string | null; steps?: string[] | null;
+  step_info?: StepInfo[] | null; supports_when?: boolean; supports_args?: boolean; state?: "off" | "starved" | "edited";
   position: { x: number; y: number };
 }
 interface NfMap { ok: boolean; reason?: string; workflow?: string; file?: string; nodes: NfNode[]; edges: { id: string; source: string; target: string }[] }
@@ -147,8 +150,8 @@ type NfFlowNode = Node<NfNode, "nf">;
 const NfNodeView = memo(function NfNodeView({ data, selected }: NodeProps<NfFlowNode>) {
   const Icon = data.kind === "input" ? Database : data.kind === "subworkflow" ? Layers : Box;
   return (
-    <div className={cn("w-[220px] rounded-lg border bg-surface text-[12px] shadow-lg shadow-black/20", selected ? "border-accent ring-2 ring-accent/25" : "border-line",
-      data.condition && !selected && "border-dashed")}>
+    <div className={cn("w-[220px] rounded-lg border bg-surface text-[12px] shadow-lg shadow-black/20", selected ? "border-accent ring-2 ring-accent/25" : data.state === "edited" ? "border-wait/70" : "border-line",
+      data.condition && !selected && "border-dashed", (data.state === "off" || data.state === "starved") && "opacity-45")}>
       {data.kind !== "input" && <Handle type="target" position={Position.Left} className="!size-2 !border-0 !bg-muted" />}
       <div className={cn("flex items-center gap-2 rounded-t-lg px-2.5 py-2", data.kind === "input" ? "bg-run/10" : data.kind === "subworkflow" ? "bg-accent/10" : "bg-raised/60")}>
         <Icon className="size-3.5 shrink-0 text-muted" />
@@ -157,7 +160,10 @@ const NfNodeView = memo(function NfNodeView({ data, selected }: NodeProps<NfFlow
           {data.name && data.name !== data.label && <span className="block truncate text-[10.5px] text-muted">{data.name}</span>}
           {data.kind === "input" && <span className="block truncate text-[10.5px] text-muted">{data.detail}</span>}
         </span>
-        {data.container && <span className="truncate rounded bg-ink/40 px-1 text-[10px] text-muted" title={`container: ${data.container}`}>{data.container}</span>}
+        {data.state === "off" ? <span className="rounded bg-bad/15 px-1 text-[10px] font-medium text-bad">off</span>
+          : data.state === "starved" ? <span className="rounded bg-ink/40 px-1 text-[10px] text-muted" title="Everything this step reads comes from steps that are off">no input</span>
+          : data.state === "edited" ? <span className="rounded bg-wait/15 px-1 text-[10px] font-medium text-wait">edited</span>
+          : data.container && <span className="truncate rounded bg-ink/40 px-1 text-[10px] text-muted" title={`container: ${data.container}`}>{data.container}</span>}
       </div>
       {(data.condition || data.steps?.length || data.outputs?.length) ? (
         <div className="space-y-1 border-t border-line/60 px-2.5 py-1.5 text-[11px] text-muted">
@@ -174,13 +180,19 @@ const nfNodeTypes: NodeTypes = { nf: NfNodeView };
 
 // ---------------------------------------------------------------------------- pieces
 const READABLE = 0.85; // below this zoom node text is too small to read
-function Canvas({ view, selected, onSelect, focus }: { view: MapView; selected: string | null; onSelect: (id: string | null) => void; focus: number }) {
+function Canvas({ view, selected, onSelect, focus, states }: {
+  view: MapView; selected: string | null; onSelect: (id: string | null) => void; focus: number; states?: Record<string, string>;
+}) {
   const { theme } = useTheme();
   const rf = useReactFlow();
   // React Flow's own node state, so it can record the measured sizes (needed before placing the view)
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(view.nodes);
   useEffect(() => setNodes(view.nodes), [view.nodes, setNodes]);
   useEffect(() => setNodes((ns) => ns.map((n) => (n.selected === (n.id === selected) ? n : { ...n, selected: n.id === selected }))), [selected, view.nodes, setNodes]);
+  useEffect(() => setNodes((ns) => ns.map((n) => {
+    const st = states?.[n.id];
+    return (n.data as { state?: string }).state === st ? n : { ...n, data: { ...n.data, state: st } };
+  })), [states, view.nodes, setNodes]);
   const box = useRef<HTMLDivElement>(null);
   const ready = useNodesInitialized();
   const placed = useRef<MapView | null>(null);
@@ -260,7 +272,7 @@ function StepList({ view, selected, onPick }: { view: MapView; selected: string 
   );
 }
 
-function Inspector({ view, id, onPick }: { view: MapView; id: string; onPick: (id: string) => void }) {
+function Inspector({ view, id, onPick, extra }: { view: MapView; id: string; onPick: (id: string) => void; extra?: ReactNode }) {
   const item = view.items.find((i) => i.id === id);
   if (!item) return null;
   const name = (x: string) => view.items.find((i) => i.id === x)?.label ?? x;
@@ -283,6 +295,7 @@ function Inspector({ view, id, onPick }: { view: MapView; id: string; onPick: (i
         <Badge>{item.group === "Steps" ? "step" : item.group === "Inputs" ? "input" : "output"}</Badge>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {extra}
         {view.details(id)}
         {(ups.length > 0 || downs.length > 0) && (
           <Section title="Connected to">
@@ -312,7 +325,7 @@ function Explanation({ m }: { m: MapResponse }) {
   return (
     <>Read from the Nextflow code: workflow <span className="font-mono text-text">{nf?.workflow}</span> in <span className="font-mono">{nf?.file}</span>.
       Arrows follow the channels in the code; dashed steps only run when their condition holds.
-      {m.can_edit_code ? <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: <b className="font-medium text-text">Edit code</b> saves each change as a new version.</> : keep}</>
+      {m.can_edit_code ? <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: click a step to switch it off or change its arguments, resources or container; <b className="font-medium text-text">Edit code</b> for anything else. Each save is a new version.</> : keep}</>
   );
 }
 
@@ -321,34 +334,114 @@ function Actions({ m, pid, canFork, onFork, size }: { m: MapResponse; pid: strin
   return (
     <>
       {m.can_edit_code && (
-        <Button asChild size={size} variant="primary"><Link to={`/pipelines/${pid}/code${qs({ version: m.version_id })}`}><FileCode2 />Edit code</Link></Button>
+        <Button asChild size={size} variant="secondary"><Link to={`/pipelines/${pid}/code${qs({ version: m.version_id })}`}><FileCode2 />Edit code</Link></Button>
       )}
-      {forkable && <Button size={size} variant={m.can_edit_code ? "secondary" : "primary"} onClick={onFork}><GitFork />Edit as new pipeline</Button>}
+      {forkable && (
+        <Button size={size} variant={m.can_edit_code ? "ghost" : "primary"} onClick={onFork} title="Edit as new pipeline: your own copy; this one is not changed">
+          <GitFork />{m.can_edit_code ? <span className="hidden 2xl:inline">Edit as new pipeline</span> : "Edit as new pipeline"}
+        </Button>
+      )}
     </>
   );
 }
 
 // ---------------------------------------------------------------------------- full view (its own page)
 export function PipelineMapFull(props: {
-  pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void;
+  pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void; onDirty?: (d: boolean) => void;
 }) {
   return <ReactFlowProvider><Full {...props} /></ReactFlowProvider>;
 }
 
-function Full({ pid, versionId, toolbar, canFork, onFork }: { pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void }) {
+function Full({ pid, versionId, toolbar, canFork, onFork, onDirty }: {
+  pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void; onDirty?: (d: boolean) => void;
+}) {
+  const qc = useQueryClient();
+  const nav = useNavigate();
   const q = usePipelineMap(pid, versionId);
   const { view, loading } = useMapView(q.data);
   const [sel, setSel] = useState<string | null>(null);
   const [focus, setFocus] = useState(0);
-  useEffect(() => setSel(null), [versionId]);
+  useEffect(() => setSel(null), [pid, versionId]);
   const pick = (id: string | null) => { setSel(id); if (id) setFocus((f) => f + 1); };
   const m = q.data;
+  const nf = m?.kind === "nextflow" ? m.nextflow : undefined;
+  const steps = useStepSettings(pid, versionId, !!nf?.ok);
+  const [pending, setPending] = useState<Overrides>({});
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (steps.data) setPending(steps.data.overrides ?? {}); }, [steps.data]);
+  const saved = steps.data?.overrides ?? {};
+  const dirty = JSON.stringify(normalize(pending)) !== JSON.stringify(normalize(saved));
+  useEffect(() => { onDirty?.(dirty); }, [dirty, onDirty]);
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [dirty]);
+  const states = useMemo(() => (nf?.ok ? stepStates(nf.nodes, nf.edges, normalize(pending)) : undefined), [nf, pending]);
+  const editable = !!steps.data?.editable;
+  const setStep = (id: string, o: StepOverride) => setPending((p) => {
+    const n = { ...p };
+    const c = cleanOverride(o);
+    // keep partly typed values while editing; empty means the pipeline's own settings
+    if (c || Object.values(o).some((v) => v !== undefined && v !== "")) n[id] = o; else delete n[id];
+    return n;
+  });
+  const save = async () => {
+    if (!steps.data) return;
+    setSaving(true);
+    try {
+      const r = await api.post<{ version_id: string; version: string }>(`/api/pipelines/${pid}/steps`, { base_version_id: steps.data.version_id, overrides: normalize(pending) });
+      toast.success(`Saved as ${r.version}. ${steps.data.version} is kept as it was.`);
+      qc.invalidateQueries({ queryKey: ["pipeline", pid] });
+      qc.invalidateQueries({ queryKey: ["pipelines"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-map", pid] });
+      qc.invalidateQueries({ queryKey: ["pipeline-steps", pid] });
+      onDirty?.(false);
+      nav(`/pipelines/${pid}/map`, { replace: true });
+    } catch (e) { toast.error(errMsg(e)); } finally { setSaving(false); }
+  };
+  const nextLabel = (() => {
+    const d = qc.getQueryData<{ versions: { version: string }[] }>(["pipeline", pid]);
+    const n = Math.max(0, ...(d?.versions ?? []).map((v) => Number(/^v(\d+)$/.exec(v.version)?.[1] ?? 0)));
+    return n ? `v${n + 1}` : "a new version";
+  })();
+
+  // settings form for the selected step (a process, or each process inside a subworkflow)
+  const node = nf?.nodes.find((n) => n.id === sel);
+  const extra = node && node.kind !== "input" && steps.data ? (
+    <section className="space-y-3 border-b border-line/60 bg-raised/30 px-4 py-3">
+      <h4 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted">
+        Settings{!editable && <span className="normal-case tracking-normal text-muted/80">· read-only original</span>}
+      </h4>
+      {node.kind === "process" ? (
+        <StepForm info={node} current={steps.data.current[node.id] ?? []} value={pending[node.id] ?? {}} onChange={(o) => setStep(node.id, o)} editable={editable} />
+      ) : (node.step_info ?? []).filter((s) => s.kind === "process").map((s) => (
+        <details key={s.id} className="rounded-md border border-line/70 bg-surface" open={!!pending[s.id]}>
+          <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[12.5px] font-medium">
+            {s.id}{pending[s.id]?.enabled === false ? <span className="text-[10.5px] text-bad">off</span> : pending[s.id] ? <span className="text-[10.5px] text-wait">edited</span> : null}
+          </summary>
+          <div className="border-t border-line/60 p-3">
+            <StepForm compact info={s} current={steps.data!.current[s.id] ?? []} value={pending[s.id] ?? {}} onChange={(o) => setStep(s.id, o)} editable={editable} />
+          </div>
+        </details>
+      ))}
+      {!editable && <p className="text-[11.5px] text-muted">Use <b className="font-medium text-text">Edit as new pipeline</b> to change it in your own copy.</p>}
+    </section>
+  ) : null;
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2">
         {toolbar}
         <div className="flex-1" />
+        {dirty && <Button size="sm" variant="ghost" onClick={() => setPending(saved)} title="Discard unsaved step settings"><RotateCcw /><span className="hidden 2xl:inline">Discard</span></Button>}
         {m && <Actions m={m} pid={pid} canFork={canFork} onFork={() => onFork(m)} size="sm" />}
+        {editable && (
+          <Button size="sm" variant="primary" disabled={!dirty} loading={saving} onClick={save} title={`Saves the step settings as ${nextLabel} of your copy; earlier versions stay as they are`}>
+            <Save />{dirty ? `Save as ${nextLabel}` : "Saved"}
+          </Button>
+        )}
       </div>
       <div className="flex min-h-0 flex-1">
         {view && <StepList view={view} selected={sel} onPick={pick} />}
@@ -356,16 +449,28 @@ function Full({ pid, versionId, toolbar, canFork, onFork }: { pid: string; versi
           {(q.isLoading || loading) && <div className="flex h-full items-center justify-center text-[13px] text-muted">Loading the map…</div>}
           {q.isError && <p className="p-6 text-[13px] text-bad">{errMsg(q.error)}</p>}
           {m && (m.kind === "none" || (!view && !loading)) && <p className="p-6 text-[13px] text-muted">No map for this pipeline{m.reason ? `: ${m.reason}` : ""}.</p>}
-          {view && <Canvas view={view} selected={sel} onSelect={setSel} focus={focus} />}
+          {view && <Canvas view={view} selected={sel} onSelect={setSel} focus={focus} states={states} />}
+          {editable && !sel && view && (
+            <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md border border-line bg-surface/95 px-3 py-1.5 text-[12.5px] text-muted shadow">
+              Click a step to change it
+            </div>
+          )}
         </div>
-        {view && sel && <Inspector view={view} id={sel} onPick={pick} />}
+        {view && sel && <Inspector view={view} id={sel} onPick={pick} extra={extra} />}
       </div>
       {m && view && (
         <div className="flex items-center gap-3 border-t border-line bg-surface px-3 py-1.5 text-[12px] text-muted">
           <span className="tabular-nums">{plural(view.items.filter((i) => i.group === "Steps").length, "step")}, {plural(view.edges.length, "connection")}</span>
+          {states && Object.values(states).some((x) => x === "off") && <span className="text-bad">{plural(Object.values(states).filter((x) => x === "off").length, "step")} off</span>}
           <span className="min-w-0 flex-1"><Explanation m={m} /></span>
         </div>
       )}
     </div>
   );
+}
+
+function normalize(o: Overrides): Overrides {
+  const out: Overrides = {};
+  for (const k of Object.keys(o).sort()) { const c = cleanOverride(o[k]); if (c) out[k] = c; }
+  return out;
 }

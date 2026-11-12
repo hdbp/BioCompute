@@ -93,7 +93,9 @@ class _File:
 
 
 def _process_info(raw: str, clean: str) -> dict[str, Any]:
-    info: dict[str, Any] = {"outputs": [], "container": None, "label": None}
+    info: dict[str, Any] = {"outputs": [], "container": None, "label": None,
+                            # nf-core modules honour these, so a config can switch the step off or change its arguments
+                            "supports_when": "task.ext.when" in raw, "supports_args": "task.ext.args" in raw}
     m = re.search(r"(?m)^\s*output:\s*$", clean)
     if m:
         end = re.search(r"(?m)^\s*(when|script|shell|exec|stub|input):\s*$", clean[m.end():])
@@ -274,6 +276,8 @@ def build_map(pipeline_dir: str | Path) -> dict[str, Any]:
                 "id": c, "kind": "subworkflow" if info["kind"] == "workflow" else "process", "label": c,
                 "name": info["name"], "file": info.get("file"), "outputs": info.get("outputs", []),
                 "container": info.get("container"), "resource_label": info.get("label"), "steps": info.get("steps"),
+                "step_info": info.get("step_info"), "supports_when": bool(info.get("supports_when")),
+                "supports_args": bool(info.get("supports_args")),
                 "condition": " and ".join(conds) if conds else None,
             })
             if conds and node.get("condition") is None:
@@ -312,7 +316,10 @@ def _sub_info(f: "_File | None", name: str, scope) -> dict[str, Any]:
     main = body[:emit.start()] if emit else body
     comps = scope(f)
     steps = [c for c in dict.fromkeys(re.findall(rf"(?<![.\w])({IDENT})\s*\(", main)) if c in comps]
-    return {"outputs": outputs, "steps": steps}
+    info = [{"id": c, "name": comps[c]["name"], "kind": comps[c]["kind"], "file": comps[c].get("file"),
+             "supports_when": bool(comps[c].get("supports_when")), "supports_args": bool(comps[c].get("supports_args")),
+             "container": comps[c].get("container"), "resource_label": comps[c].get("label")} for c in steps]
+    return {"outputs": outputs, "steps": steps, "step_info": info}
 
 
 def _layout(nodes: dict[str, dict[str, Any]], edges: set[tuple[str, str]]) -> None:

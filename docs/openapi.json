@@ -1496,6 +1496,122 @@
                 }
             }
         },
+        "/api/pipelines/{pid}/steps": {
+            "get": {
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Step Settings Get",
+                "description": "Step settings changed on the map for this version, and what the pipeline itself sets for each step.",
+                "operationId": "step_settings_get_api_pipelines__pid__steps_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "pid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Pid"
+                        }
+                    },
+                    {
+                        "name": "version_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Version Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Step Settings Save",
+                "description": "Save step settings as a NEW version of your own copy (a config file; the code is not modified).",
+                "operationId": "step_settings_save_api_pipelines__pid__steps_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "pid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Pid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/StepSettingsIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/pipelines/{pid}/map": {
             "get": {
                 "tags": [
@@ -11554,6 +11670,28 @@
                     "host"
                 ],
                 "title": "SshEnrollIn"
+            },
+            "StepSettingsIn": {
+                "properties": {
+                    "base_version_id": {
+                        "type": "string",
+                        "title": "Base Version Id"
+                    },
+                    "overrides": {
+                        "additionalProperties": {
+                            "additionalProperties": true,
+                            "type": "object"
+                        },
+                        "type": "object",
+                        "title": "Overrides"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "base_version_id",
+                    "overrides"
+                ],
+                "title": "StepSettingsIn"
             },
             "StudioCompileIn": {
                 "properties": {

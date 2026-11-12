@@ -129,3 +129,46 @@ def test_edit_as_new_pipeline_never_touches_the_original(client, auth):
     (v2 / "outlink").symlink_to(RAW)
     r = client.post(f"/api/pipelines/{cid}/files", headers=auth, json={"base_version_id": s["version_id"], "changes": {"outlink/evil.txt": "x"}})
     assert r.status_code == 400 and not (RAW / "evil.txt").exists()
+
+
+def test_step_settings_on_the_map_are_a_config_on_a_new_version(client, auth):
+    shutil.copytree(FIXTURE, RAW / "nfcore_steps", dirs_exist_ok=True)
+    orig = client.post("/api/pipelines/import/local", headers=auth, json={"path": "raw:nfcore_steps", "name": "Steps demo"}).json()
+    o = client.get(f"/api/pipelines/{orig['id']}/steps", headers=auth).json()
+    assert not o["editable"]
+    # what the pipeline already sets, per step (including steps inside subworkflows)
+    cur = o["current"]
+    assert cur["FASTQC"][0]["selector"] == ".*:FASTQC" and cur["FASTQC"][0]["settings"]["ext.args"] == "'--quiet'"
+    assert cur["FASTQC_TRIMMED"][0]["selector"] == ".*:FASTQC_TRIMMED"  # one alternative of 'A|B', not both
+    assert "SAMTOOLS_SORT" in cur and cur["SAMTOOLS_SORT"] == []
+    r = client.post(f"/api/pipelines/{orig['id']}/steps", headers=auth, json={"base_version_id": o["version_id"], "overrides": {"FASTQC": {"enabled": False}}})
+    assert r.status_code == 403
+
+    cid = client.post(f"/api/pipelines/{orig['id']}/fork", headers=auth, json={"name": "Steps demo (mine)"}).json()["pipeline_id"]
+    c = client.get(f"/api/pipelines/{cid}/steps", headers=auth).json()
+    assert c["editable"] and c["overrides"] == {}
+    bad = client.post(f"/api/pipelines/{cid}/steps", headers=auth, json={"base_version_id": c["version_id"], "overrides": {"NOPE": {"enabled": False}}})
+    assert bad.status_code == 400
+    for wrong in ({"memory": "lots"}, {"cpus": "x"}, {"container": "a b"}, {"args": "a\nb"}):
+        assert client.post(f"/api/pipelines/{cid}/steps", headers=auth, json={"base_version_id": c["version_id"], "overrides": {"FASTQC": wrong}}).status_code == 400
+    s = client.post(f"/api/pipelines/{cid}/steps", headers=auth, json={"base_version_id": c["version_id"], "overrides": {
+        "TRIMGALORE": {"enabled": False},
+        "FASTQC": {"args": "--nogroup --kmers 7 'quoted'", "cpus": 4, "memory": "8 GB", "time": "2h", "container": "quay.io/biocontainers/fastqc:0.12.1--hdfd78af_0"},
+        "SAMTOOLS_SORT": {"memory": "16 GB"}}}).json()
+    assert s["version"] == "v2"
+    paths = {v["version"]: Path(v["path"]) for v in client.get(f"/api/pipelines/{cid}", headers=auth).json()["versions"]}
+    conf = (paths["v2"] / "conf/biocompute_steps.config").read_text()
+    assert "withName: '.*:FASTQC' {  // FASTQC" in conf and "ext.args = '--nogroup --kmers 7 \\'quoted\\''" in conf
+    assert "withName: 'NFCORE_DEMO:DEMO:TRIMGALORE' {  // TRIMGALORE" in conf and "ext.when = false" in conf
+    assert "withName: '(.*:)?SAMTOOLS_SORT' {" in conf and "memory = '16 GB'" in conf
+    assert "cpus = 4" in conf and "container = 'quay.io/biocontainers/fastqc:0.12.1--hdfd78af_0'" in conf
+    nfc = (paths["v2"] / "nextflow.config").read_text()
+    assert nfc.rstrip().endswith("includeConfig 'conf/biocompute_steps.config'") and nfc.count("biocompute_steps.config") == 1
+    assert not (paths["v1"] / "conf/biocompute_steps.config").exists()  # earlier version untouched
+    assert not (RAW / "nfcore_steps/conf/biocompute_steps.config").exists()  # original untouched
+    again = client.get(f"/api/pipelines/{cid}/steps", headers=auth).json()
+    assert again["overrides"]["TRIMGALORE"] == {"enabled": False} and again["overrides"]["FASTQC"]["cpus"] == 4
+    # saving again on v2 keeps a single include line
+    s3 = client.post(f"/api/pipelines/{cid}/steps", headers=auth, json={"base_version_id": s["version_id"], "overrides": {}}).json()
+    p3 = {v["version"]: Path(v["path"]) for v in client.get(f"/api/pipelines/{cid}", headers=auth).json()["versions"]}[s3["version"]]
+    assert (p3 / "nextflow.config").read_text().count("biocompute_steps.config") == 1
