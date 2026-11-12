@@ -242,7 +242,10 @@ function StudioInner() {
   const selKey = nodes.filter((n) => n.selected).map((n) => n.id).join("\n");
   const selectedIds = useMemo(() => new Set(selKey ? selKey.split("\n") : []), [selKey]);
   const linked = useMemo(() => linkedTo(selectedIds, edges), [selectedIds, edges]);
-  const styledEdges = useMemo(() => edges.map((e) => {
+  // until the module list has loaded the steps have no ports yet: React Flow cannot attach the connections then and
+  // warns once per render for each of them, so they are drawn as soon as the ports exist
+  const modulesReady = !!modulesQ.data;
+  const styledEdges = useMemo(() => (!modulesReady ? [] : edges.map((e) => {
     const out = portOf(e.source, e.sourceHandle, "out");
     const bad = issueEdges.has(e.id);
     const lit = selectedIds.has(e.source) || selectedIds.has(e.target);
@@ -254,7 +257,7 @@ function StudioInner() {
         : { stroke: bad ? "rgb(var(--bad))" : portTypes[out?.type ?? "any"]?.color ?? "rgb(var(--muted))", strokeWidth: e.selected ? 2.5 : 1.75, strokeDasharray: bad ? "5 4" : undefined },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [edges, issueEdges, portTypes, portOf, nodes, selectedIds]);
+  })), [edges, issueEdges, portTypes, portOf, nodes, selectedIds, modulesReady]);
 
   // ------------------------------------------------------------------ add / insert
   const viewportCenter = useCallback(() => {

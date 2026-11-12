@@ -25,17 +25,20 @@ export function PanelHeader({ title, description, actions, className }: { title:
   );
 }
 
-export function Badge({ className, tone = "neutral", ...props }: React.HTMLAttributes<HTMLSpanElement> & { tone?: "neutral" | "accent" | "ok" | "bad" | "run" | "wait" }) {
-  const tones = {
-    neutral: "bg-raised text-muted border-line",
-    accent: "bg-accent/12 text-accent border-accent/30",
-    ok: "bg-ok/12 text-ok border-ok/30",
-    bad: "bg-bad/12 text-bad border-bad/30",
-    run: "bg-run/12 text-run border-run/30",
-    wait: "bg-wait/12 text-wait border-wait/30",
-  };
-  return <span className={cn("inline-flex items-center gap-1 rounded border px-1.5 py-px text-[11.5px] font-medium whitespace-nowrap", tones[tone], className)} {...props} />;
-}
+const BADGE_TONES = {
+  neutral: "bg-raised text-muted border-line",
+  accent: "bg-accent/12 text-accent border-accent/30",
+  ok: "bg-ok/12 text-ok border-ok/30",
+  bad: "bg-bad/12 text-bad border-bad/30",
+  run: "bg-run/12 text-run border-run/30",
+  wait: "bg-wait/12 text-wait border-wait/30",
+};
+// forwards its ref: badges are tooltip triggers (Tip), which need the element to attach to and to position against
+export const Badge = React.forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanElement> & { tone?: keyof typeof BADGE_TONES }>(
+  ({ className, tone = "neutral", ...props }, ref) => (
+    <span ref={ref} className={cn("inline-flex items-center gap-1 rounded border px-1.5 py-px text-[11.5px] font-medium whitespace-nowrap", BADGE_TONES[tone], className)} {...props} />
+  ));
+Badge.displayName = "Badge";
 
 export const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitive.Root>, React.ComponentPropsWithoutRef<typeof SwitchPrimitive.Root>>(
   ({ className, ...props }, ref) => (

@@ -22,13 +22,16 @@ const qc = new QueryClient({
 document.documentElement.classList.add((() => { try { return localStorage.getItem("biocompute.theme") ?? "dark"; } catch { return "dark"; } })());
 
 // A data router (needed for the unsaved-changes guard); the routes themselves stay in App.
-const router = createBrowserRouter([{ path: "*", element: <App /> }]);
+// React Router 7 behaviour now (silences its warnings): no relative links, forms, fetchers or route actions use it
+const router = createBrowserRouter([{ path: "*", element: <App /> }], {
+  future: { v7_relativeSplatPath: true, v7_fetcherPersist: true, v7_normalizeFormMethod: true, v7_partialHydration: true, v7_skipActionErrorRevalidation: true },
+});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
       <TooltipProvider>
-        <RouterProvider router={router} />
+        <RouterProvider router={router} future={{ v7_startTransition: true }} />
         <ConfirmHost />
         <Toaster theme="system" position="bottom-right" toastOptions={{ className: "!bg-surface !border-line !text-text" }} />
       </TooltipProvider>
