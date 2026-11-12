@@ -1,0 +1,221 @@
+#!/usr/bin/python3 -I
+"""biocompute-runas: start BioCompute runs under the separate run account, in systemd units with OS-enforced limits.
+
+Installed root-owned as /usr/local/libexec/biocompute-runas by scripts/run-account.py. The controller's account may run
+it through sudo without a password (and nothing else as root). Whatever the caller passes, every process this helper
+starts runs as the run account named in the root-owned /etc/biocompute/runas.json, never as root or as the caller:
+
+  start  --unit NAME --cpus N --memory-mb M --cwd DIR -- COMMAND ARGS...   (environment: JSON object on stdin)
+         systemd-run as the run account: CPUQuota, MemoryMax, private /tmp, no new privileges, the controller's
+         database, signing key and configuration made inaccessible
+  signal --unit NAME          SIGTERM to the unit's main process (graceful cancel)
+  stop   --unit NAME          stop the unit (all its processes)
+  status --unit NAME          ActiveState, Result, MainPID of the unit
+  remove PATH                 rm -rf PATH as the run account (files it created that the controller cannot delete)
+  check                       as the run account: which paths it can read / write ({"read": [...], "write": [...]} on stdin)
+
+--dry-run prints the command instead of running it.
+"""
+from __future__ import annotations
+
+import grp
+import json
+import os
+import pwd
+import re
+import subprocess
+import sys
+
+CONFIG = "/etc/biocompute/runas.json"
+UNIT_RE = re.compile(r"biocompute-run-[a-z0-9]{1,40}-[0-9]{1,6}")
+ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
+CONTROL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+# never handed to the run account: its identity, session and home come from its own account
+DROP_ENV = {"HOME", "USER", "LOGNAME", "SHELL", "MAIL", "PWD", "OLDPWD", "TMPDIR", "NXF_HOME", "NOTIFY_SOCKET",
+            "INVOCATION_ID", "JOURNAL_STREAM", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT"}
+DROP_PREFIX = ("XDG_", "DBUS_", "SSH_", "SUDO_", "LISTEN_", "SYSTEMD_")
+PRIVILEGED_GROUPS = {"root", "sudo", "wheel", "admin", "docker", "lxd", "libvirt", "disk", "shadow", "systemd-journal"}
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def die(msg: str, code: int = 2) -> None:
+    print(f"biocompute-runas: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def load_config() -> dict:
+    path = CONFIG
+    # a different configuration only for direct use by root (tests); never through sudo
+    if os.geteuid() == 0 and "SUDO_UID" not in os.environ and os.environ.get("BIOCOMPUTE_RUNAS_CONFIG"):
+        path = os.environ["BIOCOMPUTE_RUNAS_CONFIG"]
+    try:
+        st = os.stat(path)
+        if path == CONFIG and (st.st_uid != 0 or st.st_mode & 0o022):
+            die(f"{path} must be owned by root and not writable by others")
+        with open(path) as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError) as exc:
+        die(f"cannot read {path}: {exc}")
+    try:
+        acct = pwd.getpwnam(cfg["account"])
+    except (KeyError, TypeError):
+        die("the run account in the configuration does not exist")
+    owner = int(cfg.get("owner_uid", -1))
+    if acct.pw_uid == 0 or acct.pw_gid == 0 or acct.pw_uid == owner:
+        die("the run account must be a separate, unprivileged account")
+    groups = {g.gr_name for g in grp.getgrall() if cfg["account"] in g.gr_mem} | {grp.getgrgid(acct.pw_gid).gr_name}
+    if groups & PRIVILEGED_GROUPS:
+        die(f"the run account is in a privileged group ({', '.join(sorted(groups & PRIVILEGED_GROUPS))})")
+    # through sudo, only the controller's account may use it
+    if "SUDO_UID" in os.environ and int(os.environ["SUDO_UID"]) != owner:
+        die("only BioCompute's controller account may use this helper")
+    cfg["_pw"] = acct
+    return cfg
+
+
+def clean(value: str, what: str, allow_tab: bool = True) -> str:
+    if CONTROL.search(value) or (not allow_tab and "\t" in value):
+        die(f"{what}: control characters are not allowed")
+    return value
+
+
+def unit_name(args: list[str]) -> str:
+    if len(args) != 2 or args[0] != "--unit" or not UNIT_RE.fullmatch(args[1]):
+        die("expected --unit biocompute-run-<id>-<attempt>")
+    return args[1] + ".service"
+
+
+def as_account(cfg: dict) -> list[str]:
+    pw = cfg["_pw"]
+    return ["/usr/bin/setpriv", f"--reuid={pw.pw_uid}", f"--regid={pw.pw_gid}", "--init-groups", "--no-new-privs", "--"]
+
+
+def run(cmd: list[str], dry: bool, stdin: str | None = None) -> int:
+    if dry:
+        print(json.dumps(cmd))
+        return 0
+    env = {"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
+    return subprocess.run(cmd, input=stdin, text=True, env=env).returncode
+
+
+def systemd_version() -> int:
+    try:
+        out = subprocess.run(["/usr/bin/systemd-run", "--version"], capture_output=True, text=True, timeout=10,
+                             env={"PATH": SAFE_PATH}).stdout
+        return int(re.search(r"systemd (\d+)", out).group(1))
+    except (OSError, subprocess.SubprocessError, AttributeError, ValueError):
+        return 0
+
+
+def cmd_start(cfg: dict, args: list[str], dry: bool) -> int:
+    opts: dict[str, str] = {}
+    while args and args[0] != "--":
+        if len(args) < 2 or args[0] not in ("--unit", "--cpus", "--memory-mb", "--cwd"):
+            die(f"unknown or incomplete option {args[0]!r}")
+        opts[args[0]] = args[1]
+        args = args[2:]
+    command = args[1:]
+    if not command or not os.path.isabs(command[0]):
+        die("the command must start with an absolute path")
+    unit = unit_name(["--unit", opts.get("--unit", "")])
+    try:
+        cpus = int(opts.get("--cpus", ""))
+        mem = int(opts.get("--memory-mb", ""))
+    except ValueError:
+        die("--cpus and --memory-mb must be whole numbers")
+    if not 1 <= cpus <= 4096 or not 64 <= mem <= 64 * 1024 * 1024:
+        die("--cpus or --memory-mb out of range")
+    cwd = clean(opts.get("--cwd", ""), "--cwd", allow_tab=False)
+    if not os.path.isabs(cwd):
+        die("--cwd must be an absolute path")
+    try:
+        env = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        die("the environment on stdin is not JSON")
+    if not isinstance(env, dict) or len(env) > 500:
+        die("the environment must be a JSON object")
+    pw = cfg["_pw"]
+    expand = ["--expand-environment=no"] if systemd_version() >= 254 else []  # "$x" in a path stays "$x"
+    cmd = ["/usr/bin/systemd-run", *expand, f"--unit={unit}", f"--uid={pw.pw_uid}", f"--gid={pw.pw_gid}", "--collect", "--quiet",
+           "--service-type=exec", f"--working-directory={cwd}",
+           f"--property=CPUQuota={cpus * 100}%", f"--property=MemoryMax={mem}M", "--property=OOMPolicy=continue",
+           "--property=UMask=0007", "--property=NoNewPrivileges=yes", "--property=PrivateTmp=yes",
+           "--property=ProtectSystem=full", "--property=ProtectKernelTunables=yes", "--property=ProtectKernelModules=yes",
+           "--property=ProtectControlGroups=yes", "--property=RestrictSUIDSGID=yes", "--property=KillMode=control-group",
+           "--property=TimeoutStopSec=120", "--property=StandardInput=null"]
+    for p in cfg.get("deny", []):
+        if isinstance(p, str) and os.path.isabs(p) and not re.search(r"\s", p) and not CONTROL.search(p):
+            cmd.append(f"--property=InaccessiblePaths=-{p}")
+    for k, v in env.items():
+        if not isinstance(k, str) or not ENV_KEY_RE.fullmatch(k) or not isinstance(v, str):
+            die(f"invalid environment variable {k!r}")
+        if k in DROP_ENV or k.startswith(DROP_PREFIX):
+            continue
+        cmd.append(f"--setenv={k}={clean(v, k, allow_tab=True)}")
+    cmd += ["--", *[clean(a, 'argument') for a in command]]
+    return run(cmd, dry)
+
+
+def cmd_systemctl(args: list[str], verb: str, dry: bool) -> int:
+    unit = unit_name(args)
+    if verb == "signal":
+        return run(["/usr/bin/systemctl", "kill", "--kill-whom=main", "--signal=SIGTERM", unit], dry)
+    if verb == "stop":
+        return run(["/usr/bin/systemctl", "stop", "--no-block", unit], dry)
+    return run(["/usr/bin/systemctl", "show", unit, "--property=ActiveState,SubState,Result,MainPID,ExecMainStatus"], dry)
+
+
+def cmd_remove(cfg: dict, args: list[str], dry: bool) -> int:
+    if len(args) != 1:
+        die("remove takes one path")
+    path = clean(args[0], "path", allow_tab=False)
+    if not os.path.isabs(path) or os.path.normpath(path) in ("/", "/home", "/var", "/tmp", "/usr", "/etc"):
+        die("remove needs an absolute path below a folder")
+    return run(as_account(cfg) + ["/bin/rm", "-rf", "--one-file-system", "--", path], dry)
+
+
+CHECK = r"""
+import json, os, sys
+q = json.load(sys.stdin)
+out = {"read": {}, "write": {}}
+for p in q.get("read", [])[:500]:
+    out["read"][p] = os.access(p, os.R_OK | (os.X_OK if os.path.isdir(p) else 0))
+for p in q.get("write", [])[:500]:
+    out["write"][p] = os.path.isdir(p) and os.access(p, os.W_OK | os.X_OK)
+print(json.dumps(out))
+"""
+
+
+def cmd_check(cfg: dict, dry: bool) -> int:
+    data = sys.stdin.read()
+    try:
+        q = json.loads(data or "{}")
+        assert isinstance(q, dict) and all(isinstance(p, str) and not CONTROL.search(p)
+                                          for k in ("read", "write") for p in q.get(k, []))
+    except (ValueError, AssertionError):
+        die("check expects {\"read\": [paths], \"write\": [paths]} on stdin")
+    return run(as_account(cfg) + ["/usr/bin/python3", "-I", "-c", CHECK], dry, stdin=json.dumps(q))
+
+
+def main(argv: list[str]) -> int:
+    dry = "--dry-run" in argv[:1]
+    if dry:
+        argv = argv[1:]
+    if not argv:
+        die("usage: biocompute-runas [--dry-run] start|signal|stop|status|remove|check ...")
+    cfg = load_config()
+    verb, args = argv[0], argv[1:]
+    if verb == "start":
+        return cmd_start(cfg, args, dry)
+    if verb in ("signal", "stop", "status"):
+        return cmd_systemctl(args, verb, dry)
+    if verb == "remove":
+        return cmd_remove(cfg, args, dry)
+    if verb == "check":
+        return cmd_check(cfg, dry)
+    die(f"unknown action {verb!r}")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

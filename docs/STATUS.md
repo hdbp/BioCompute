@@ -103,6 +103,16 @@ These limits apply to everything below.
 | Runs on the controller reserve their CPU cores and memory against its allocation; a run that does not fit waits in the queue (reason on the run page, free capacity in the launch form), first come, first served; HTCondor runs reserve nothing locally. Systemd unit: `OOMPolicy=continue` | Admission rules demonstrated (`test_admission.py`); limits are scheduling limits, not OS-enforced |
 | Machine usage samples pruned after `BIOCOMPUTE_METRICS_RETENTION_DAYS` | Implemented, not tested |
 
+## Separate account for pipeline runs
+
+| Feature | Status |
+|---|---|
+| Pipeline code runs as `biocompute-run` through a root-owned helper (sudo for that helper only): cannot read the database, signing key or configuration; its files stay readable and removable by the controller; cancel and hard stop through the helper | Demonstrated with a real second account and setpriv (`test_run_account.py`); `systemd-run` itself not run here (no systemd in the test container) |
+| Each run a systemd unit with `CPUQuota`, `MemoryMax`, `NoNewPrivileges`, private `/tmp`, the database and keys inaccessible | Unit command checked (`test_run_account.py`, `test_runas_helper.py`); not started under systemd here |
+| Helper refuses other units, relative commands, control characters, privileged or wrong accounts, other callers | Demonstrated (`test_runas_helper.py`) |
+| Preflight as the run account: inputs, tools and output folders reachable, otherwise the fixing command | Demonstrated (`test_run_account.py`) |
+| `scripts/run-account.py` setup / grant / status / remove; `install.sh` runs setup by default | setup, sudo rule, ACL access and denial, status and remove exercised in the test container with stand-in accounts; `install.sh` itself not run |
+
 ## Installation
 
 | Feature | Status |

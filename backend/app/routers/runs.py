@@ -355,10 +355,10 @@ def delete_run(rid: str, results: bool = False, user: User = Depends(require_sci
     rd = Path(r.run_dir).resolve()
     if rd.is_relative_to(get_settings().runs_path.resolve()) and rd.exists():
         freed += runner.dir_size(rd)
-        shutil.rmtree(rd, ignore_errors=True)
+        runner.remove_tree(rd)
     if out is not None and out.exists():
         freed += runner.dir_size(out)
-        shutil.rmtree(out, ignore_errors=True)
+        runner.remove_tree(out)
     from ..models import Project
     for proj in db.query(Project).all():  # the run disappears from projects that listed it
         items = [i for i in (proj.items or []) if not (i.get("kind") == "run" and i.get("ref") == r.id)]

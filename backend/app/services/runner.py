@@ -7,10 +7,13 @@ thread polls active runs, parses progress and records state transitions. On star
 """
 from __future__ import annotations
 
+import csv
+import grp
 import hashlib
 import json
 import os
 import platform
+import shlex
 import shutil
 import signal
 import subprocess
@@ -27,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import SessionLocal
-from ..engines.adapters import ADAPTERS, parse_progress
+from ..engines.adapters import ADAPTERS, Check, parse_progress
 from ..models import Experiment, Pipeline, PipelineVersion, Run, RunEvent
 from . import events, fs, nfschema, samplesheet, tools
 
@@ -279,12 +282,216 @@ def _note_wait(db: Session, run: Run, reason: str) -> None:
             add_event(db, run, "info", reason)
 
 
+# --------------------------------------------------------------------------- run account (separate unix user)
+# never handed to pipeline code: the run account's identity, home and session come from its own account
+_ACCOUNT_DROP_ENV = {"HOME", "USER", "LOGNAME", "SHELL", "MAIL", "PWD", "OLDPWD", "TMPDIR", "NXF_HOME",
+                     "NOTIFY_SOCKET", "INVOCATION_ID", "JOURNAL_STREAM"}
+_ACCOUNT_DROP_PREFIX = ("XDG_", "DBUS_", "SSH_", "SUDO_", "LISTEN_", "SYSTEMD_")
+NEXTFLOW_OVERHEAD_MB = 2048   # Nextflow's own JVM on top of the memory its tasks may use
+BCFLOW_OVERHEAD_MB = 512
+
+
+def run_account() -> str | None:
+    return get_settings().run_as or None
+
+
+def helper(*args: str, stdin: str | None = None, timeout: float = 60) -> str:
+    """Call the root-owned run-account helper (through sudo). Raises RuntimeError with its message on failure."""
+    cmd = shlex.split(get_settings().runas_helper) + list(args)
+    try:
+        p = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"the run-account helper could not be used ({exc})") from None
+    if p.returncode != 0:
+        msg = (p.stderr or p.stdout or "").strip()
+        if "a password is required" in msg or "may not run sudo" in msg:
+            msg = "sudo does not allow BioCompute to use the run-account helper; run scripts/run-account.py setup again"
+        raise RuntimeError(msg[-1500:] or f"the run-account helper failed (exit code {p.returncode})")
+    return p.stdout
+
+
+def _share(path: Path, gid: int, keep_other: bool = False) -> None:
+    """Give the run account's group write access to a folder or file BioCompute owns (setgid on folders, so what
+    is created inside belongs to that group too). Folders and files of others are left alone."""
+    st = path.lstat()
+    if st.st_uid != os.geteuid() or path.is_symlink():
+        return
+    if st.st_gid != gid:
+        os.chown(path, -1, gid, follow_symlinks=False)
+    if path.is_dir():
+        os.chmod(path, 0o2770 | (st.st_mode & 0o005 if keep_other else 0))
+    else:
+        os.chmod(path, (st.st_mode & 0o7777) | 0o060)
+
+
+def share_run_dirs(run: Run) -> None:
+    """The run folder (and the files BioCompute wrote into it), the work folder and the output folder become writable
+    by the run account; the controller keeps access through the shared group."""
+    gid = grp.getgrnam(run_account()).gr_gid
+    rd, wd, out = Path(run.run_dir), Path(run.work_dir), Path(run.output_dir)
+    for d in (rd, wd, out):
+        d.mkdir(parents=True, exist_ok=True)
+    _share(rd, gid)
+    for p in rd.iterdir():
+        if p.is_file() and not p.is_symlink():
+            _share(p, gid)
+    _share(wd, gid)
+    # an output folder that existed before keeps its owner's group and permissions: the run account reaches it through
+    # the ACLs of its data folder (the preflight says so if not)
+    if (run.provenance or {}).get("output_dir_created"):
+        _share(out, gid, keep_other=True)
+
+
+def _input_paths(run: Run) -> list[str]:
+    """Files and folders the run reads: absolute paths among its parameters and in its samplesheets."""
+    seen: list[str] = []
+
+    def add(v: Any) -> None:
+        if isinstance(v, str) and v.startswith("/") and len(v) < 4096 and "\n" not in v and v not in seen and len(seen) < 400:
+            try:
+                if Path(v).exists():
+                    seen.append(v)
+            except OSError:
+                pass
+    for v in (run.params or {}).values():
+        add(v)
+    for sheet in list(Path(run.run_dir).glob("samplesheet*.*")) + list(Path(run.run_dir).glob("experimental_design.tsv")):
+        try:
+            with open(sheet, newline="", errors="replace") as fh:
+                for row in csv.reader(fh, delimiter="\t" if sheet.suffix == ".tsv" else ","):
+                    for cell in row:
+                        add(cell.strip())
+        except OSError:
+            continue
+    return seen
+
+
+def account_checks(run: Run, version: PipelineVersion) -> list[Check]:
+    """Ask the helper, as the run account, whether it can read what the run needs and write where it writes."""
+    acct = run_account()
+    read = [str(version.path), sys.executable, str(WRAPPER)]
+    if run.engine == "nextflow":
+        nf = tools.nextflow_status().get("path") or shutil.which(get_settings().nextflow_bin)
+        if nf:
+            read.append(nf)
+    read += _input_paths(run)
+    write = [run.run_dir, run.work_dir, run.output_dir]
+    res = json.loads(helper("check", stdin=json.dumps({"read": read, "write": write})) or "{}")
+    tool = "scripts/run-account.py"
+    checks: list[Check] = []
+    bad_r = [p for p, ok in res.get("read", {}).items() if not ok]
+    bad_w = [p for p, ok in res.get("write", {}).items() if not ok]
+    for p in bad_r[:10]:
+        checks.append(Check(f"Run account can read {p}", False,
+                            f"{acct} cannot read it. An administrator can allow it: sudo python3 {tool} grant {p}"))
+    for p in bad_w[:10]:
+        checks.append(Check(f"Run account can write {p}", False,
+                            f"{acct} cannot write there. An administrator can allow it: sudo python3 {tool} grant --write {p}"))
+    if not bad_r and not bad_w:
+        checks.append(Check("Run account", True, f"Runs as {acct}: can read the {len(read)} inputs and tools it needs and "
+                                                 f"write its {len(write)} folders", level="info"))
+    return checks
+
+
+def _spawn_as_account(db: Session, run: Run, spec: Any, env: dict[str, str]) -> None:
+    """Start the supervisor as the run account in its own systemd unit, with CPU and memory limits the kernel enforces."""
+    acct = run_account()
+    share_run_dirs(run)
+    rd = Path(run.run_dir)
+    cpus, mem_gb = claim(run)
+    cap_c, cap_m = controller_budget(db)
+    cpus = max(1, cpus or cap_c)
+    overhead = NEXTFLOW_OVERHEAD_MB if run.engine == "nextflow" else BCFLOW_OVERHEAD_MB
+    mem_mb = int((mem_gb or cap_m) * 1024) + overhead
+    unit = f"biocompute-run-{run.id}-{run.attempt}"
+    env = {k: v for k, v in env.items() if k not in _ACCOUNT_DROP_ENV and not k.startswith(_ACCOUNT_DROP_PREFIX)}
+    argv = [sys.executable, str(WRAPPER), "--run-dir", str(rd), "--cwd", spec.cwd, "--", *spec.argv]
+    helper("start", "--unit", unit, "--cpus", str(cpus), "--memory-mb", str(mem_mb), "--cwd", spec.cwd, "--", *argv,
+           stdin=json.dumps(env))
+    pid_file = rd / "wrapper.pid"
+    deadline = time.time() + 20
+    while not pid_file.exists() and not (rd / "exit_code").exists() and time.time() < deadline:
+        time.sleep(0.1)
+    if not pid_file.exists():
+        try:
+            state = helper("status", "--unit", unit).strip().replace("\n", ", ")
+        except RuntimeError as exc:
+            state = str(exc)
+        raise RuntimeError(f"it did not start as {acct} within 20 s ({state}); see journalctl -u {unit}")
+    pid = int(pid_file.read_text().strip())
+    run.pid = pid
+    run.pid_start_time = _pid_start(pid)
+    run.exit_code = None
+    run.error = None
+    run.finished_at = None
+    run.provenance = {**(run.provenance or {}), "run_as": acct, "unit": unit,
+                      "os_limits": {"cpus": cpus, "memory_mb": mem_mb, "enforced_by": "systemd (CPUQuota, MemoryMax)"}}
+    set_status(db, run, "running", f"Started {run.engine} as {acct} (attempt {run.attempt}): at most {cpus} cores and "
+                                   f"{mem_mb / 1024:.1f} GB, enforced by the operating system")
+
+
+_account_status: dict[str, Any] = {"at": 0.0, "value": None}
+
+
+def account_status() -> dict[str, Any]:
+    """Who runs pipeline code, for Settings: the run account (checked through the helper, cached for a minute) or
+    the controller's own account."""
+    acct = run_account()
+    if not acct:
+        return {"account": None, "ok": False,
+                "detail": "Pipelines run under the controller's own account, with its access to BioCompute's database "
+                          "and keys. Set up a separate account: sudo python3 scripts/run-account.py setup (see docs)."}
+    if time.time() - _account_status["at"] < 60 and _account_status["value"]:
+        return _account_status["value"]
+    try:
+        res = json.loads(helper("check", stdin=json.dumps({"read": [str(WRAPPER)], "write": []}), timeout=20) or "{}")
+        ok = all(res.get("read", {}).values()) and bool(res.get("read"))
+        detail = (f"Pipelines run as {acct}, each in its own systemd unit with CPU and memory limits enforced by the "
+                  f"operating system. They cannot read BioCompute's database, signing key or configuration."
+                  if ok else f"{acct} cannot read BioCompute's engine code ({WRAPPER}); run scripts/run-account.py setup again.")
+    except (RuntimeError, ValueError) as exc:
+        ok, detail = False, f"The run-account helper does not work: {exc}"
+    value = {"account": acct, "ok": ok, "detail": detail}
+    _account_status.update(at=time.time(), value=value)
+    return value
+
+
+def harden_state() -> None:
+    """The database and signing key are readable by the controller's account only; with a run account the state
+    folder can be passed through but not listed."""
+    s = get_settings()
+    url = s.database_url
+    paths = [Path(s.state_dir) / "secret.key"]
+    if url.startswith("sqlite:///"):
+        db = Path(url[len("sqlite:///"):])
+        paths += [db, Path(f"{db}-wal"), Path(f"{db}-shm"), Path(f"{db}-journal")]
+    for p in paths:
+        try:
+            if p.exists() and p.stat().st_uid == os.geteuid():
+                os.chmod(p, 0o600)
+        except OSError:
+            pass
+    if s.run_as:
+        try:
+            st = Path(s.state_dir).stat()
+            if st.st_uid == os.geteuid():
+                os.chmod(s.state_dir, (st.st_mode & 0o7700) | 0o011)
+        except OSError:
+            pass
+
+
 def start(db: Session, run: Run) -> None:
     """Preflight then spawn the wrapper (or queue if at capacity)."""
     version = db.get(PipelineVersion, run.pipeline_version_id)
     adapter = ADAPTERS[run.engine]
     set_status(db, run, "preflight")
     checks = adapter.preflight(Path(version.path), run.resources)
+    if run_account():
+        try:
+            share_run_dirs(run)
+            checks += account_checks(run, version)
+        except (OSError, RuntimeError, KeyError) as exc:
+            checks.append(Check("Run account", False, f"The separate run account ({run_account()}) cannot be used: {exc}"))
     failed = [c for c in checks if not c.ok and c.level == "error"]
     add_event(db, run, "preflight", f"{len(checks) - len(failed)}/{len(checks)} preflight checks passed",
               checks=[c.as_dict() for c in checks])
@@ -298,7 +505,11 @@ def start(db: Session, run: Run) -> None:
             run.provenance = {**(run.provenance or {}), "queue_reason": reason}
             set_status(db, run, "queued", reason)
             return
-        _spawn(db, run, version)
+        try:
+            _spawn(db, run, version)
+        except (OSError, RuntimeError) as exc:
+            run.error = f"The run could not be started: {exc}"
+            set_status(db, run, "failed", run.error)
 
 
 def engine_environ() -> dict[str, str]:
@@ -324,6 +535,9 @@ def _spawn(db: Session, run: Run, version: PipelineVersion) -> None:
     env = {**engine_environ(), **spec.env}
     with open(run_dir / "stdout.log", "ab") as fh:
         fh.write(f"[biocompute] attempt {run.attempt} - launching: {' '.join(spec.argv)}\n".encode())
+    if run_account():
+        _spawn_as_account(db, run, spec, env)
+        return
     proc = subprocess.Popen(
         [sys.executable, str(WRAPPER), "--run-dir", str(run_dir), "--cwd", spec.cwd, "--", *spec.argv],
         cwd=spec.cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -348,10 +562,14 @@ def cancel(db: Session, run: Run) -> None:
     deadline = time.time() + 5
     while run.pid and not ready.exists() and time.time() < deadline and _alive(run):
         time.sleep(0.05)  # supervisor still starting; its signal handler is not installed yet
+    unit = (run.provenance or {}).get("unit")
     if run.pid and _alive(run):
         try:  # the supervisor forwards SIGTERM to the engine, which shuts down its tasks gracefully
-            os.kill(run.pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
+            if unit:
+                helper("signal", "--unit", unit)  # it runs as the run account: systemd delivers the signal
+            else:
+                os.kill(run.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, RuntimeError):
             pass
     run.provenance = {**run.provenance, "cancel_requested_at": time.time()}
     set_status(db, run, "cancelling", "Cancellation requested (SIGTERM sent; engine shutting down gracefully)")
@@ -415,8 +633,11 @@ def _poll_run(db: Session, run: Run) -> None:
         t0 = (run.provenance or {}).get("cancel_requested_at", time.time())
         if time.time() - t0 > 60:
             try:
-                os.killpg(os.getpgid(run.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
+                if (run.provenance or {}).get("unit"):
+                    helper("stop", "--unit", run.provenance["unit"])  # every process of the run, as systemd tracks them
+                else:
+                    os.killpg(os.getpgid(run.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, RuntimeError):
                 pass
 
 
@@ -525,8 +746,20 @@ def remove_work_dir(run: Run) -> int:
     if w is None or not w.exists():
         return 0
     size = dir_size(w)
-    shutil.rmtree(w, ignore_errors=True)
+    remove_tree(w)
     return size
+
+
+def remove_tree(path: Path) -> None:
+    """Delete a folder of a run. Files the run account created in folders it made private are deleted as that account."""
+    path = Path(path)
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists() and run_account():
+        try:
+            helper("remove", str(path))
+        except RuntimeError:
+            pass
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _error_excerpt(rd: Path) -> str | None:

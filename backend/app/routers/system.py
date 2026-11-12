@@ -13,7 +13,7 @@ from ..config import get_settings
 from ..db import get_db
 from ..models import AppSetting, Experiment, Node, NodeMetric, Pipeline, Run, RunEvent, User
 from ..security import audit, require_admin, require_media_viewer, require_viewer
-from ..services import cluster, events, fs, tools
+from ..services import cluster, events, fs, runner, tools
 
 router = APIRouter(prefix="/api", tags=["system"])
 
@@ -113,6 +113,7 @@ def get_app_settings(_: User = Depends(require_viewer), db: Session = Depends(ge
         "pipelines_dir": str(s.pipelines_path), "runs_dir": str(s.runs_path),
         "max_concurrent_runs": s.max_concurrent_runs, "allow_custom_code_modules": s.allow_custom_code_modules,
         "enable_demo_engine": s.enable_demo_engine,
+        "run_account": runner.account_status(),
         "database": s.database_url.split("://")[0],
         "software": tools.inventory(),
         "module_tools": tools.module_tools(),

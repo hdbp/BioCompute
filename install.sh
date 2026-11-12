@@ -10,6 +10,8 @@
 #   ./install.sh --uninstall             stop and remove the service (keeps your data and settings)
 #   ./install.sh --yes                   install missing tools (Nextflow, refgenie, module tools) without asking
 #   ./install.sh --no-tools              do not check for or offer those tools
+#   ./install.sh --no-run-account        run pipelines under your account (default: a separate account, biocompute-run,
+#                                        so pipeline code cannot read BioCompute's database or keys; needs sudo once)
 #
 # Runs as you (not root): the service runs under your account, so it can read your data with your permissions.
 # sudo is asked for only to install the system service and to configure `tailscale serve`.
@@ -26,6 +28,7 @@ tailnet=auto
 service=yes
 uninstall=no
 tools=ask
+run_account=yes
 data_dirs=()
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -43,7 +46,8 @@ while [ $# -gt 0 ]; do
     --uninstall) uninstall=yes; shift ;;
     --yes|-y) tools=yes; shift ;;
     --no-tools) tools=no; shift ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-run-account) run_account=no; shift ;;
+    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown option $1 (see ./install.sh --help)" ;;
   esac
 done
@@ -251,6 +255,38 @@ fi
 # commands installed into ~/.local/bin must be visible to the service
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) [ -d "$HOME/.local/bin" ] && PATH="$HOME/.local/bin:$PATH" ;; esac
 
+# ----------------------------------------------------------------------------- run account
+# Pipeline code runs as a separate system account (biocompute-run) in systemd units with OS-enforced CPU and memory
+# limits; it cannot read BioCompute's database, signing key or configuration. scripts/run-account.py does the setup:
+# the account, ACLs on the data folders, a root-owned helper and a sudo rule for that helper only.
+if [ "$run_account" = yes ] && [ "$mode" = system ] && [ "$service" = yes ]; then
+  if ! command -v setfacl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    say "Installing the acl package (setfacl), needed to give the run account access to your data folders"
+    $SUDO apt-get install -y -q acl >/dev/null || warn "Could not install acl"
+  fi
+  if command -v setfacl >/dev/null 2>&1; then
+    say "Setting up the separate account that runs pipelines (biocompute-run)"
+    rtools=()
+    for t in nextflow java conda mamba micromamba apptainer singularity; do
+      p="$(command -v "$t" 2>/dev/null || true)"; [ -n "$p" ] && [ -x "$p" ] && rtools+=(--tool "$p")
+    done
+    if $SUDO python3 "$root/scripts/run-account.py" setup --owner "$(id -un)" --config "$(readlink -f "$config")" \
+         --backend "$backend" "${rtools[@]}"; then
+      :
+    else
+      warn "Setting up the run account failed; pipelines run under your account. Retry: ./install.sh, or see docs/deployment.md"
+      cfg_set BIOCOMPUTE_RUN_AS ""
+    fi
+  else
+    warn "setfacl is missing (package acl): pipelines run under your account. Install acl and run ./install.sh again."
+  fi
+elif [ "$run_account" = no ] && [ -n "$(cfg_get BIOCOMPUTE_RUN_AS)" ]; then
+  say "Pipelines will run under your account again (--no-run-account); remove the helper with: sudo python3 scripts/run-account.py remove"
+  cfg_set BIOCOMPUTE_RUN_AS ""
+elif [ "$mode" = user ]; then
+  warn "User service: pipelines run under your account (a separate run account needs the system service and sudo)."
+fi
+
 # ----------------------------------------------------------------------------- service
 exec_start="$backend/.venv/bin/python -m app.serve --config $config"
 if [ "$service" = no ]; then
@@ -287,7 +323,7 @@ KillMode=process
 OOMPolicy=continue
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=yes
+$( [ -n "$(cfg_get BIOCOMPUTE_RUN_AS)" ] && echo "# no NoNewPrivileges: runs start through sudo and the root-owned helper /usr/local/libexec/biocompute-runas" || echo "NoNewPrivileges=yes" )
 
 [Install]
 WantedBy=$( [ "$mode" = system ] && echo multi-user.target || echo default.target )

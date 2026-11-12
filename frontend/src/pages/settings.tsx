@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, CircleSlash, Copy, KeyRound, RefreshCw, UserPlus } from "lucide-react";
+import { CheckCircle2, CircleSlash, Copy, KeyRound, RefreshCw, ShieldAlert, ShieldCheck, UserPlus } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
@@ -24,6 +24,7 @@ import { StoragePanel } from "@/components/storage-panel";
 interface SettingsData {
   site_name: string; environment: string; database: string; pipelines_dir: string; runs_dir: string; max_concurrent_runs: number;
   allow_custom_code_modules: boolean; enable_demo_engine: boolean;
+  run_account?: { account: string | null; ok: boolean; detail: string };
   data_roots: { name: string; path: string; restricted: boolean; writable: boolean; description: string; exists: boolean; source?: "settings" | "ui" }[];
   software: Record<string, string | null | { available: boolean; version?: string; detail?: string; path?: string }>;
   module_tools?: { tool: string; package: string; modules: string[]; path: string | null }[];
@@ -87,6 +88,15 @@ export default function SettingsPage() {
           )}
         </TabsContent>
         <TabsContent value="execution">
+          {d?.run_account && (
+            <Panel className={cn("mb-5 flex gap-3 p-4", d.run_account.ok ? "" : "border-wait/40 bg-wait/5")}>
+              {d.run_account.ok ? <ShieldCheck className="mt-0.5 size-5 shrink-0 text-ok" /> : <ShieldAlert className="mt-0.5 size-5 shrink-0 text-wait" />}
+              <div className="text-[13px]">
+                <p className="font-medium">{d.run_account.account ? `Pipeline code runs as ${d.run_account.account}` : "Pipeline code runs under the controller's account"}</p>
+                <p className="mt-0.5 text-muted">{d.run_account.detail}</p>
+              </div>
+            </Panel>
+          )}
           {d && (
             <Panel>
               <PanelHeader title="Software detected on the controller" description="What the execution service can see on its PATH. Nextflow runs natively on the host, not in a container."

@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     refgenie_config: str | None = None
     # delete intermediate files of a run once they are no longer needed (a run can keep them: Advanced, "Keep")
     cleanup_intermediates: bool = True
+    # Separate unix account that runs pipeline code (scripts/run-account.py sets it up; empty = the controller's own
+    # account). Each run is then a systemd unit with OS-enforced CPU and memory limits, started through the
+    # root-owned helper below, which the controller may run with sudo and nothing else.
+    run_as: str | None = None
+    runas_helper: str = "sudo -n /usr/local/libexec/biocompute-runas"
     # node monitoring samples older than this are pruned
     metrics_retention_days: int = 7
     # extra folders searched for tools AFTER the service's own PATH (scripts/tools.sh sets it to its bioconda env)

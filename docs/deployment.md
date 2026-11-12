@@ -47,6 +47,38 @@ network from claiming a fresh installation. The screen disappears once an admini
 use `python -m app.cli reset-password <name> --create --role admin`. Set `BIOCOMPUTE_ADMIN_PASSWORD` for unattended
 installs: it creates an `admin` account and skips the screen.
 
+## 2b. Separate account for pipeline runs
+
+`./install.sh` (system service) sets this up by default; `--no-run-account` skips it. Pipeline code then runs as
+the system account `biocompute-run` instead of the controller's account, in systemd units with CPU and memory
+limits enforced by the kernel, and cannot read BioCompute's database, signing key or configuration. What the setup
+changes on the computer, all reversible with `sudo python3 scripts/run-account.py remove [--delete-account]`:
+
+* the account `biocompute-run` (no login shell, home `/var/lib/biocompute-run`, where Nextflow keeps its own files);
+* the controller's account joins the `biocompute-run` group (to read and clean up run files);
+* ACL entries: read on the pipeline store, the engine code, the tools found on your PATH (Nextflow, Java,
+  conda, Apptainer) and the read-only data folders; read and write on the writable data folders; pass-through
+  (`x`) on the folders above them. Nothing else in your home folder becomes readable, but a world-readable file
+  in a folder above a data folder can be opened by name;
+* `/usr/local/libexec/biocompute-runas` (root-owned), `/etc/biocompute/runas.json`, and
+  `/etc/sudoers.d/biocompute-runas` allowing your account to run that helper, and nothing else, without a password;
+* `BIOCOMPUTE_RUN_AS=biocompute-run` in the configuration. The service unit then has no `NoNewPrivileges=`
+  (it would block sudo).
+
+A data folder added later in Settings needs access for the run account too; the first run that uses it stops at
+the preflight with the exact command, for example:
+
+```bash
+sudo python3 scripts/run-account.py grant /data/new-raw-run          # read-only
+sudo python3 scripts/run-account.py grant --write /data/analyses     # results
+sudo python3 scripts/run-account.py status                           # what was given, and a check as the account
+```
+
+With `deploy/install-controller.sh` (dedicated `biocompute` account), run
+`sudo python3 scripts/run-account.py setup --owner biocompute --config /etc/biocompute/biocompute.env --backend /opt/biocompute/backend`
+and remove `NoNewPrivileges=yes` from `/etc/systemd/system/biocompute.service`. Needs systemd, sudo and the `acl`
+package; Docker pipelines are not offered to the run account (the docker group is root-equivalent): use Apptainer.
+
 ## 3. TLS
 
 Choose one of the following:

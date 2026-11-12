@@ -18,6 +18,8 @@ KillMode=process
 OOMPolicy=continue
 Restart=on-failure
 RestartSec=5
+# NoNewPrivileges=yes blocks sudo: leave it out when pipelines run under a separate account
+# (BIOCOMPUTE_RUN_AS, scripts/run-account.py), whose runs start through sudo and the root-owned helper only.
 NoNewPrivileges=yes
 PrivateTmp=no
 ProtectSystem=full

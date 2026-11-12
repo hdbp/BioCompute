@@ -152,12 +152,28 @@ uses Nextflow's HTCondor executor, which needs a shared filesystem.
 * **Subprocesses:** always an argv list. `git clone -- <url>` guards against option injection.
   Profile names and HTCondor hostnames are allow-listed by regex.
   The example pipeline's schema forbids quote characters in free-text values that reach a shell script.
-* **Arbitrary code:** pipelines and Studio custom modules are code. They run with the controller
-  service account's permissions: they can read whatever that account can read, **including BioCompute's
-  own state folder** (database, signing key). The engine's environment has the controller's own settings and
-  keys removed (`BIOCOMPUTE_*`, assistant API keys). The unit written by `install.sh` sets `NoNewPrivileges`
-  only; `deploy/biocompute.service` adds `ProtectSystem`. Only give the scientist role to people you would
-  trust with that account. Admins can disable custom code in Studio.
+* **Arbitrary code:** pipelines and Studio custom modules are code. With a run account (the default of
+  `install.sh`, set up by `scripts/run-account.py`) they run as a separate system account, `biocompute-run`:
+  * each run is a systemd unit (`biocompute-run-<run>-<attempt>`) started through a root-owned helper,
+    `/usr/local/libexec/biocompute-runas`. A sudo rule lets the controller's account run that helper and nothing
+    else; the helper only ever starts processes as the account named in the root-owned `/etc/biocompute/runas.json`,
+    refuses a privileged account (uid 0, sudo, docker, ...), validates every argument and drops the controller's
+    identity from the environment;
+  * the unit has `CPUQuota` and `MemoryMax` from the run's cores and memory (plus room for Nextflow's own JVM),
+    `NoNewPrivileges`, a private `/tmp`, `ProtectSystem=full`, `UMask=0007`, and the database, signing key and
+    configuration made inaccessible on top of their 0600 permissions;
+  * the account reads only what it was given with ACLs (the pipeline store, the engine code, the tools, the
+    read-only data folders) and writes the writable data folders and each run's own folders, which the controller
+    shares with the account's group. The controller is a member of that group, so it still reads results and
+    deletes intermediate files; files it cannot delete are removed by the helper as the run account;
+  * before a run starts, the helper checks as the run account that every input, tool and output folder is
+    reachable; a gap stops the run at the preflight with the command that fixes it.
+
+  Without a run account (user service, `--no-run-account`), pipelines run with the controller account's
+  permissions, including its access to BioCompute's own state folder; Settings says so. The engine's
+  environment has the controller's own settings and keys removed either way (`BIOCOMPUTE_*`, assistant API keys).
+  Only give the scientist role to people you would trust to run code on the controller. Admins can disable custom
+  code in Studio.
 * **SSH enrollment:** this is the only case where BioCompute changes another machine, and it is deliberately narrow.
   * An admin starts it and confirms, for one tailnet member at a time.
   * The target must be that machine's own tailnet address.

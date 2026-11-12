@@ -115,6 +115,7 @@ async def lifespan(app: FastAPI):
     data_roots.reload()
     from .services import refgenie
     refgenie.reload()
+    runner.harden_state()
     if s.environment != "test":
         stats = runner.reconcile()
         print(f"[biocompute] run reconciliation: {stats}", file=sys.stderr)
