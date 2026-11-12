@@ -4,7 +4,7 @@
 # lab workstation as a systemd service (deploy/biocompute.service), because Nextflow needs the
 # host's Java, container runtime, scheduler and data directories. Compose provides:
 #   - db:  PostgreSQL, bound to 127.0.0.1
-#   - web: nginx serving the built UI and proxying /api to the native controller on 127.0.0.1:8000
+#   - web: nginx serving the built UI and proxying /api to the native controller on 127.0.0.1:8045
 # Optional profile "container-backend" runs the API in a container for UI evaluation only
 # (no host Nextflow; only the native engine with read-only example data).
 services:
@@ -25,7 +25,7 @@ services:
   web:
     build: { context: ., dockerfile: frontend/Dockerfile }
     restart: unless-stopped
-    network_mode: host          # reach the native controller on 127.0.0.1:8000 without exposing it
+    network_mode: host          # reach the native controller on 127.0.0.1:8045 without exposing it
     environment:
       BIOCOMPUTE_WEB_PORT: ${BIOCOMPUTE_WEB_PORT:-8080}
     volumes:

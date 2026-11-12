@@ -4,8 +4,8 @@ There are three ways to run BioCompute on your own machine:
 
 | Option | Use it when | Database | Ports |
 |---|---|---|---|
-| **A. Demo** (`scripts/dev.sh`) | You want to try it in 5 minutes on synthetic data | SQLite | UI 5173, API 8000 |
-| **B. Local install** (single process) | You want to use it on one machine with your own data | SQLite or PostgreSQL | 8000 |
+| **A. Demo** (`scripts/dev.sh`) | You want to try it in 5 minutes on synthetic data | SQLite | UI 5173, API 8044 (both changeable; see below) |
+| **B. Local install** (single process) | You want to use it on one machine with your own data | SQLite or PostgreSQL | 8045 |
 | **C. Lab server** | You're setting up the shared lab workstation with systemd, nginx and TLS | PostgreSQL | 8080 |
 
 Option C is covered in [`deployment.md`](deployment.md). This page covers A and B.
@@ -108,8 +108,20 @@ Once it is running:
 
 * Open **http://127.0.0.1:5173**. The first time, BioCompute asks you to **create the administrator account**
   (username and password; no code is needed in a browser on the same computer). A *Getting started* checklist follows.
-* API documentation is at http://127.0.0.1:8000/docs.
+* API documentation is at http://127.0.0.1:8044/docs.
 * Press `Ctrl+C` to stop.
+
+**Ports.** The demo uses API port 8044 and web port 5173. If another program (for example a Docker container)
+already uses one, the next free port is taken and printed at start; it never takes 8045 (the installed service) or
+8765 (worker agents). To change the defaults for good, edit `~/.config/biocompute/dev.env`, created on the first run:
+
+```bash
+BIOCOMPUTE_API_PORT=8044
+BIOCOMPUTE_UI_PORT=5173
+```
+
+A one-off override still works: `BIOCOMPUTE_API_PORT=9000 scripts/dev.sh`. A second demo is refused while one is
+running, since both would use the same database.
 
 All state lives in `var/`. Delete that folder to start over.
 
@@ -124,7 +136,7 @@ To try the main flow:
 
 ## Option B: local install with your own data
 
-This runs one process. The API also serves the built web interface on port 8000.
+This runs one process. The API also serves the built web interface on port 8045.
 
 ### B1. Install
 
@@ -199,18 +211,18 @@ Delete any lines from `.env.example` that you don't need. In particular, delete 
 
 ```bash
 cd backend
-.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8045
 ```
 
-Open **http://127.0.0.1:8000** and log in as `admin`. On first start:
+Open **http://127.0.0.1:8045** and log in as `admin`. On first start:
 
 * the database tables are created automatically, using Alembic migrations;
 * the nf-core catalog and the bundled example pipeline are registered;
 * this computer is registered as the controller node, with its CPUs, RAM and GPUs detected.
 
 To reach it from other computers, keep `--host 127.0.0.1` and put a TLS proxy in front
-(see deployment.md, section 3), or use an SSH tunnel: `ssh -L 8000:127.0.0.1:8000 you@workstation`.
-Do not expose port 8000 directly to a network.
+(see deployment.md, section 3), or use an SSH tunnel: `ssh -L 8045:127.0.0.1:8045 you@workstation`.
+Do not expose port 8045 directly to a network.
 
 ### B4. Keep it running (Linux, systemd user service)
 
@@ -222,7 +234,7 @@ Description=BioCompute (local)
 
 [Service]
 WorkingDirectory=%h/BioCompute/backend
-ExecStart=%h/BioCompute/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+ExecStart=%h/BioCompute/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8045
 # Pipelines keep running if the API restarts:
 KillMode=process
 Restart=on-failure
@@ -318,6 +330,6 @@ This leaves your data roots and analysis outputs untouched.
 | Login fails with 401 | The admin password is only set when the database is first created; changing `.env` later has no effect. Check which database you are using with `cd backend && .venv/bin/python -m app.cli info`, and reset with `.venv/bin/python -m app.cli reset-password` (demo: `scripts/dev.sh admin reset-password`). Also make sure no *other* BioCompute is answering on the same port. |
 | "Data root ... is read-only" when launching | Choose an output folder in a root with `"writable": true` |
 | Nextflow found in a terminal but not by BioCompute | The service has a different PATH. Set `BIOCOMPUTE_NEXTFLOW_BIN` to the full path, or extend `Environment=PATH=` in the unit |
-| Port 8000 already in use | Find the owner with `sudo ss -ltnp 'sport = :8000'`. If it's an earlier BioCompute (dev.sh, manual uvicorn or the systemd service) stop it or use it. Otherwise start with `--port 8010` (demo: `BIOCOMPUTE_API_PORT=8010 scripts/dev.sh`). |
+| Port already in use | Find the owner with `sudo ss -ltnp 'sport = :8045'` (a `docker-proxy` owner is a Docker container: `docker ps`). The demo (`scripts/dev.sh`) skips taken ports by itself and prints the ports it uses; set your own defaults in `~/.config/biocompute/dev.env`. For the service, change `BIOCOMPUTE_PORT` in `~/.config/biocompute/biocompute.env` (or `./install.sh --port N`). |
 
 More: [`troubleshooting.md`](troubleshooting.md). To add other computers as workers, see [`worker-agent.md`](worker-agent.md).

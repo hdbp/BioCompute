@@ -23,7 +23,7 @@ UI_SETTING_KEYS = {"cluster_preset", "default_output_dir", "default_profile", "o
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
     db.execute(__import__("sqlalchemy").text("SELECT 1"))
-    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+    return {"status": "ok", "service": "biocompute", "time": datetime.now(timezone.utc).isoformat()}
 
 
 @router.get("/dashboard")

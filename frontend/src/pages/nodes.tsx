@@ -776,7 +776,7 @@ function TokenDialog({ open, onOpenChange, initial, controllerTailnet }: {
             <p className="text-xs text-muted">
               The <code className="font-mono">--controller</code> address must be reachable from that machine{local ? " (this browser is using a local address)" : ""}.
               {tsHost ? <> Over Tailscale use <code className="font-mono">{tsHost}</code>.</> : " Use the controller's LAN name, tailnet name or public TLS address."}
-              {" "}The API itself listens on 127.0.0.1, so point agents at the nginx/TLS front end (port 8080 or 443), not port 8000.
+              {" "}The API itself listens on 127.0.0.1, so point agents at the nginx/TLS front end (port 8080 or 443), not the API port (8045).
             </p>
             <p className="text-xs text-muted">Then install the background service with <code className="font-mono">install.sh</code> (systemd on Linux, launchd on macOS). See docs/worker-agent.md. The node joins with participation switched off.</p>
           </div>

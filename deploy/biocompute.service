@@ -11,7 +11,7 @@ User=biocompute
 Group=biocompute
 EnvironmentFile=/etc/biocompute/biocompute.env
 WorkingDirectory=/opt/biocompute/backend
-ExecStart=/opt/biocompute/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
+ExecStart=/opt/biocompute/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8045 --proxy-headers
 # Runs are detached supervisors; do not kill them when the API restarts.
 KillMode=process
 Restart=on-failure

@@ -83,7 +83,7 @@ Set `BIOCOMPUTE_ALLOW_SSH_ENROLLMENT=false` to turn the feature off.
     systemd install. `BIOCOMPUTE_AGENT_LISTEN=<ip>:<port>` binds a specific address.
   * The enrollment form pre-fills the right address, e.g. `http://<controller>.<tailnet>.ts.net:8765`.
   * `Connection refused` in the "reach the controller" step means the address you entered has no BioCompute
-    listening for other machines. Typical causes: port 8000, or the listener isn't enabled.
+    listening for other machines. Typical causes: pointing the agent at the API port, or the listener isn't enabled.
 * **macOS background service:** to install the launchd service over SSH, someone must be logged in to the Mac's
   desktop. Otherwise the agent is still enrolled; run `install.sh` once when logged in.
 
@@ -111,7 +111,7 @@ Enrolling a computer always takes deliberate steps. Discovery alone never makes 
    ./install.sh        # systemd user service (Linux) or launchd agent (macOS)
    ```
    The `--controller` address must be reachable from that machine. Use the nginx or TLS front end
-   (port 8080 or 443), not port 8000, because the API only listens on 127.0.0.1. When the machine was
+   (port 8080 or 443), not the API port (8045), because the API only listens on 127.0.0.1. When the machine was
    already discovered (for example through Tailscale), enrolling merges into that same entry.
 5. **Allocate.** The node appears as *Online* with participation **off**. An admin sets cores, memory,
    hours, idle-only and AC-power rules, and the data policy, then enables participation.
