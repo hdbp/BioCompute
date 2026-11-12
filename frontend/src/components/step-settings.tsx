@@ -74,7 +74,7 @@ export function StepForm({ info, current, value, onChange, editable, compact }: 
         <Switch checked={value.enabled !== false} disabled={disabled || !info.supports_when} onCheckedChange={(on) => set({ enabled: on ? undefined : false })} className="mt-0.5" />
         <span className="text-[12.5px]">
           <span className="font-medium">Run this step</span>
-          {!info.supports_when && <span className="block text-[11.5px] text-muted">This step has no on/off switch (no <code>when:</code> using <code>task.ext.when</code>); turn it off in the code.</span>}
+          {!info.supports_when && <span className="block text-[11.5px] text-muted" title="Its code has no “when: task.ext.when” condition, which is what this switch sets.">This step cannot be switched off here, because its code has no on/off condition. Remove the step, or change it in the code.</span>}
         </span>
       </label>
       {value.enabled !== false && (
@@ -102,7 +102,7 @@ export function StepForm({ info, current, value, onChange, editable, compact }: 
                 onChange={(e) => set({ time: e.target.value })} aria-label="Time limit" /></label>
           </div>
           {!compact && info.resource_label && <p className="text-[11px] text-muted">Empty: the pipeline's defaults for “{info.resource_label}”.</p>}
-          <label className="block space-y-1"><span className="text-[11.5px] text-muted">Container image</span>
+          <label className="block space-y-1"><span className="text-[11.5px] text-muted" title="The packaged software environment (Docker or Singularity image) this step runs in">Container image</span>
             <Input className={cn(field, "font-mono")} disabled={disabled} value={value.container ?? ""} placeholder={info.container ? `pipeline: ${info.container}` : "pipeline default"}
               onChange={(e) => set({ container: e.target.value })} aria-label="Container image" /></label>
         </>

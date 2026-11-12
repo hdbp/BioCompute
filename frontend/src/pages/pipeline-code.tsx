@@ -2,22 +2,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronDown, ChevronRight, FileCode2, FilePlus2, FileText, Folder, GitFork, Info, Lock, Network, Save, Search, Trash2, Undo2, Workflow } from "lucide-react";
-import { api, errMsg, qs } from "@/lib/api";
+import { ArrowLeft, ChevronDown, ChevronRight, FileCode2, FilePlus2, FileText, Folder, FolderTree, GitFork, Lock, Save, Search, Trash2, Undo2, Workflow, X } from "lucide-react";
+import { api, ApiError, errMsg, qs } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { PipelineDetail } from "@/lib/types";
-import { cn, when } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { useUnsavedGuard } from "@/hooks/unsaved";
+import { QueryError, usePageTitle } from "@/components/page";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
-import { Badge, Tip } from "@/components/ui/misc";
+import { confirmDialog, promptDialog } from "@/components/ui/confirm";
+import { Badge, Empty, Tip } from "@/components/ui/misc";
 import { ForkDialog } from "@/components/fork-dialog";
+import { PipelineTabs, VersionSelect } from "@/components/pipeline-tabs";
 
 interface FileEntry { path: string; size: number; text: boolean }
 interface FilesResponse { version_id: string; version: string; editable: boolean; files: FileEntry[] }
 
 const FIRST = ["main.nf", "nextflow.config", "nextflow_schema.json", "conf/base.config", "conf/modules.config"];
 
-/** A pipeline's code. Your own copies are editable; each save is a new version. Originals are read-only. */
+/** The Code tab of a pipeline. Your own copies are editable; each save is a new version. Originals are read-only. */
 export default function PipelineCodePage() {
   const { id = "" } = useParams();
   const [sp, setSp] = useSearchParams();
@@ -27,6 +30,7 @@ export default function PipelineCodePage() {
   const versionId = sp.get("version") ?? undefined;
   const files = useQuery({ queryKey: ["pipeline-files", id, versionId ?? null], queryFn: () => api.get<FilesResponse>(`/api/pipelines/${id}/files${qs({ version_id: versionId })}`) });
   const d = p.data;
+  usePageTitle(d ? "Code" : null, [{ label: "Pipelines", to: "/pipelines" }, ...(d ? [{ label: d.name, to: `/pipelines/${d.id}/map` }] : [])]);
   const fs = files.data;
   const editable = !!fs?.editable;
 
@@ -36,6 +40,8 @@ export default function PipelineCodePage() {
   const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [forkOpen, setForkOpen] = useState(false);
+  const [treeOpen, setTreeOpen] = useState(false); // the file list as a drawer on small screens
+  const [tabLeaves, setTabLeaves] = useState(false); // after Esc in the editor, Tab moves focus instead of indenting
   const dirty = Object.keys(changes).length > 0;
   useEffect(() => { setChanges({}); setAdded([]); setOpen(null); }, [fs?.version_id]);
   useEffect(() => {
@@ -43,12 +49,8 @@ export default function PipelineCodePage() {
     const first = FIRST.find((f) => fs.files.some((x) => x.path === f)) ?? fs.files.find((x) => x.text)?.path ?? null;
     setOpen(first);
   }, [fs, open]);
-  useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); };
-    window.addEventListener("beforeunload", h);
-    return () => window.removeEventListener("beforeunload", h);
-  }, [dirty]);
+  // leaving the page (in the app, or closing the tab) with unsaved edits asks first
+  useUnsavedGuard(dirty, "code changes");
 
   const content = useQuery({
     queryKey: ["pipeline-file", id, fs?.version_id, open], enabled: !!fs && !!open && !added.includes(open ?? ""),
@@ -78,26 +80,42 @@ export default function PipelineCodePage() {
     return () => window.removeEventListener("keydown", h);
   });
 
-  const newFile = () => {
-    const path = window.prompt("Path of the new file, e.g. modules/local/my_tool/main.nf");
-    if (!path?.trim()) return;
+  const pickFile = (path: string) => { setOpen(path); setTreeOpen(false); };
+  const newFile = async () => {
+    setTreeOpen(false);
+    const path = await promptDialog({
+      title: "New file", label: "Path inside the pipeline", placeholder: "modules/local/my_tool/main.nf",
+      hint: `Folders are created as needed. The file becomes part of ${nextLabel || "the next version"} when you save.`, confirmLabel: "Create file",
+    });
+    if (!path) return;
     const clean = path.trim().replace(/^\/+/, "");
+    if (!clean) return;
     if (fs?.files.some((f) => f.path === clean) || added.includes(clean)) { setOpen(clean); return; }
     setAdded((a) => [...a, clean]);
     setChanges((c) => ({ ...c, [clean]: "" }));
     setOpen(clean);
   };
-  const del = (path: string) => {
-    if (!window.confirm(`Delete ${path} in the next version? Earlier versions keep it.`)) return;
+  const del = async (path: string) => {
+    const isNew = added.includes(path);
+    if (!(await confirmDialog({
+      title: `Delete ${path}?`,
+      body: isNew ? "This new file and what you typed in it are discarded. It was never saved."
+        : `The file is left out of ${nextLabel || "the next version"} when you save. Earlier versions keep it, and until you save you can bring it back with “Keep file”.`,
+      confirmLabel: "Delete file", danger: true,
+    }))) return;
     if (added.includes(path)) {
       setAdded((a) => a.filter((x) => x !== path));
       setChanges((c) => { const n = { ...c }; delete n[path]; return n; });
     } else setChanges((c) => ({ ...c, [path]: null }));
   };
   const revert = (path: string) => setChanges((c) => { const n = { ...c }; delete n[path]; return n; });
-  const switchVersion = (vid: string) => {
-    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
-    setSp(vid === d?.latest_version?.id ? {} : { version: vid }, { replace: true });
+  const switchVersion = async (vid: string | undefined) => {
+    const n = Object.keys(changes).length;
+    if (dirty && !(await confirmDialog({
+      title: "Discard unsaved code changes?", body: `You changed ${n} file${n === 1 ? "" : "s"} without saving. Switching to another version discards these changes.`,
+      confirmLabel: "Discard and switch", cancelLabel: "Keep editing", danger: true,
+    }))) return;
+    setSp(vid ? { version: vid } : {}, { replace: true });
   };
 
   const all = useMemo(() => [...(fs?.files ?? []), ...added.map((path) => ({ path, size: 0, text: true }))], [fs, added]);
@@ -108,20 +126,16 @@ export default function PipelineCodePage() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2">
-        <Button asChild size="icon" variant="ghost" aria-label="Back to the map" title="Back to the map"><Link to={`/pipelines/${id}/map${qs({ version: versionId })}`}><ArrowLeft /></Link></Button>
+        <Button size="sm" variant={treeOpen ? "secondary" : "ghost"} className="md:hidden" onClick={() => setTreeOpen((o) => !o)}
+          aria-expanded={treeOpen} aria-controls="pipeline-file-list" title="Show the list of files"><FolderTree />Files</Button>
+        <Button asChild size="icon" variant="ghost" aria-label="All pipelines" title="All pipelines"><Link to="/pipelines"><ArrowLeft /></Link></Button>
         <FileCode2 className="size-4 text-accent" />
         <span className="max-w-[28ch] truncate text-[14px] font-semibold" title={d?.name}>{d?.name ?? "Pipeline"}</span>
         {fs && (editable ? <Badge tone="ok">your copy</Badge> : <Tip content="Originals are never changed. Edit as new pipeline makes your own copy."><Badge tone="wait" className="cursor-help"><Lock className="size-3" />read-only original</Badge></Tip>)}
-        {d && d.versions.length > 0 && (
-          <Select className="h-8 w-auto" aria-label="Version" value={current} onChange={(e) => switchVersion(e.target.value)}>
-            {[...d.versions].reverse().map((v) => <option key={v.id} value={v.id}>{v.version}{v.id === d.latest_version?.id ? " (current)" : ""} · {when(v.created_at)}</option>)}
-          </Select>
-        )}
-        {dirty && <Badge tone="wait">{Object.keys(changes).length} unsaved</Badge>}
+        {d && <VersionSelect d={d} value={current} onChange={switchVersion} />}
+        {dirty && <Badge tone="wait" title="Files changed, added or deleted since the last save">{Object.keys(changes).length} unsaved</Badge>}
         <div className="flex-1" />
-        {editable && <Button asChild size="sm" variant="ghost"><Link to={`/studio/pipeline/${id}${qs({ version: versionId })}`}><Workflow />Pipeline Studio</Link></Button>}
-        <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${id}/map${qs({ version: versionId })}`}><Network />Map</Link></Button>
-        <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${id}`}><Info />Details</Link></Button>
+        {editable && <Button asChild size="sm" variant="ghost" title="Opens the step editor of Pipeline Studio: switch steps off, change their settings, add or remove steps"><Link to={`/studio/pipeline/${id}${qs({ version: versionId })}`}><Workflow />Edit in Pipeline Studio</Link></Button>}
         {!editable && can(user, "scientist") && d && <Button size="sm" variant="primary" onClick={() => setForkOpen(true)}><GitFork />Edit as new pipeline</Button>}
         {editable && (
           <Tip content={`Saves your changes as ${nextLabel} of this copy (Ctrl+S). ${fs?.version ?? ""} and every earlier version stay as they are.`}>
@@ -129,27 +143,43 @@ export default function PipelineCodePage() {
           </Tip>
         )}
       </div>
-      <div className="flex min-h-0 flex-1">
-        <FileTree files={all} open={open} onOpen={setOpen} changes={changes} added={added} editable={editable} onNew={newFile} loading={files.isLoading} />
+      {d && (
+        <div className="border-b border-line bg-surface px-1.5">
+          <PipelineTabs compact pid={id} kind={d.kind} hasReadme={!!d.readme} runCount={d.run_count} active="code" versionId={versionId} />
+        </div>
+      )}
+      <div className="relative flex min-h-0 flex-1">
+        {treeOpen && <div className="absolute inset-0 z-[25] bg-black/50 md:hidden" onClick={() => setTreeOpen(false)} aria-hidden />}
+        <FileTree files={all} open={open} onOpen={pickFile} changes={changes} added={added} editable={editable} onNew={newFile} loading={files.isLoading}
+          drawer={treeOpen} onClose={() => setTreeOpen(false)} />
         <div className="flex min-w-0 flex-1 flex-col bg-ink/40">
-          {open ? (
+          {files.isError && !fs ? (
+            files.error instanceof ApiError && files.error.status === 404
+              ? <Empty title="Pipeline not found" action={<Button asChild><Link to="/pipelines">All pipelines</Link></Button>}>It was deleted, or it is private to someone else.</Empty>
+              : <div className="max-w-xl p-6"><QueryError error={files.error} onRetry={() => files.refetch()} what="the files of this pipeline" /></div>
+          ) : open ? (
             <>
               <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5 text-[12.5px]">
-                <span className="min-w-0 flex-1 truncate font-mono">{open}</span>
+                <span className="min-w-0 flex-1 truncate font-mono" title={open}>{open}</span>
+                {editable && !deleted && (
+                  <span id="code-tab-hint" aria-live="polite" className={cn("hidden shrink-0 text-[11.5px] sm:inline", tabLeaves ? "text-accent" : "text-muted")}>
+                    {tabLeaves ? "Tab now leaves the editor" : "Tab indents · Esc, then Tab to leave"}
+                  </span>
+                )}
                 {open in changes && changes[open] !== null && !added.includes(open) && <Button size="sm" variant="ghost" onClick={() => revert(open)}><Undo2 />Undo changes</Button>}
                 {deleted && <Button size="sm" variant="ghost" onClick={() => revert(open)}><Undo2 />Keep file</Button>}
-                {editable && !deleted && <Button size="sm" variant="ghost" onClick={() => del(open)} aria-label={`Delete ${open}`}><Trash2 /></Button>}
+                {editable && !deleted && <Button size="sm" variant="ghost" onClick={() => del(open)} aria-label={`Delete ${open}`} title="Delete this file"><Trash2 /></Button>}
               </div>
               {deleted ? <p className="p-6 text-[13px] text-muted">{open} will be deleted in {nextLabel}.</p>
-                : content.isError && !added.includes(open) ? <p className="p-6 text-[13px] text-muted">{errMsg(content.error)}</p>
-                : <CodeEditor value={text} onChange={setText} readOnly={!editable} loading={content.isLoading && !added.includes(open)} />}
+                : content.isError && !added.includes(open) ? <div className="max-w-xl p-6"><QueryError error={content.error} onRetry={() => content.refetch()} what={open} /></div>
+                : <CodeEditor value={text} onChange={setText} readOnly={!editable} loading={content.isLoading && !added.includes(open)} tabLeaves={tabLeaves} setTabLeaves={setTabLeaves} />}
             </>
-          ) : <p className="p-6 text-[13px] text-muted">{files.isLoading ? "Loading files…" : "Choose a file on the left."}</p>}
+          ) : <p className="p-6 text-[13px] text-muted">{files.isLoading ? "Loading files…" : <>Choose a file <span className="hidden md:inline">on the left</span><span className="md:hidden">with the Files button</span>.</>}</p>}
         </div>
       </div>
       <div className="flex items-center gap-3 border-t border-line bg-surface px-3 py-1.5 text-[12px] text-muted">
-        <span>{all.length} files</span>
-        <span className="min-w-0 flex-1">
+        <span className="shrink-0">{all.length} file{all.length === 1 ? "" : "s"}</span>
+        <span className="hidden min-w-0 flex-1 sm:block">
           {editable ? "Your copy: every save is a new version in its own folder; nothing is written over an earlier version, and the pipeline you copied is never changed."
             : "Read-only: this is an original. Use Edit as new pipeline to adapt it."}
         </span>
@@ -159,9 +189,10 @@ export default function PipelineCodePage() {
   );
 }
 
-function FileTree({ files, open, onOpen, changes, added, editable, onNew, loading }: {
+/** The file list: a column from md up; below md a drawer over the editor, opened from the toolbar (`drawer`). */
+function FileTree({ files, open, onOpen, changes, added, editable, onNew, loading, drawer, onClose }: {
   files: FileEntry[]; open: string | null; onOpen: (p: string) => void; changes: Record<string, string | null>; added: string[];
-  editable: boolean; onNew: () => void; loading: boolean;
+  editable: boolean; onNew: () => void; loading: boolean; drawer: boolean; onClose: () => void;
 }) {
   const [q, setQ] = useState("");
   const [closed, setClosed] = useState<Set<string>>(() => new Set(["tests", "modules", "subworkflows", "assets", "docs", ".github"]));
@@ -209,8 +240,14 @@ function FileTree({ files, open, onOpen, changes, added, editable, onNew, loadin
     ...d.files.sort((a, b) => a.path.localeCompare(b.path)).map((f) => row(f, depth)),
   ];
   return (
-    <aside className="hidden w-72 shrink-0 flex-col border-r border-line bg-surface md:flex" aria-label="Files">
+    <aside id="pipeline-file-list" aria-label="Files" onKeyDown={(e) => { if (e.key === "Escape" && drawer) onClose(); }}
+      className={cn("w-72 shrink-0 flex-col border-r border-line bg-surface md:static md:flex md:max-w-none md:shadow-none",
+        drawer ? "absolute inset-y-0 left-0 z-30 flex max-w-[85vw] shadow-2xl shadow-black/40" : "hidden")}>
       <div className="space-y-2 border-b border-line p-3">
+        <div className="flex items-center justify-between md:hidden">
+          <span className="text-[13px] font-medium">Files</span>
+          <button onClick={onClose} aria-label="Close the file list" className="rounded p-1 text-muted hover:bg-raised hover:text-text"><X className="size-4" /></button>
+        </div>
         <label className="relative block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a file" aria-label="Find a file"
@@ -221,13 +258,21 @@ function FileTree({ files, open, onOpen, changes, added, editable, onNew, loadin
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
         {loading && <p className="px-3 py-2 text-[13px] text-muted">Loading…</p>}
         {ql ? files.filter((f) => f.path.toLowerCase().includes(ql)).map((f) => row(f, 0, f.path)) : render(tree, "", 0)}
+        {ql && !files.some((f) => f.path.toLowerCase().includes(ql)) && <p className="px-3 py-2 text-[13px] text-muted">No file matches.</p>}
       </div>
     </aside>
   );
 }
 
-/** Plain-text editor with line numbers (no external editor library). Tab inserts four spaces. */
-function CodeEditor({ value, onChange, readOnly, loading }: { value: string; onChange: (v: string) => void; readOnly: boolean; loading: boolean }) {
+const MODIFIERS = ["Shift", "Control", "Alt", "Meta", "CapsLock"];
+
+/**
+ * Plain-text editor with line numbers (no external editor library). Tab inserts four spaces; so that the keyboard is
+ * not trapped, Esc releases it: the next Tab (or Shift+Tab) moves focus as usual. Typing or coming back re-arms it.
+ */
+function CodeEditor({ value, onChange, readOnly, loading, tabLeaves, setTabLeaves }: {
+  value: string; onChange: (v: string) => void; readOnly: boolean; loading: boolean; tabLeaves: boolean; setTabLeaves: (v: boolean) => void;
+}) {
   const ta = useRef<HTMLTextAreaElement>(null);
   const gutter = useRef<HTMLDivElement>(null);
   const lines = useMemo(() => value.split("\n").length, [value]);
@@ -237,11 +282,15 @@ function CodeEditor({ value, onChange, readOnly, loading }: { value: string; onC
       <div ref={gutter} aria-hidden className="w-14 shrink-0 select-none overflow-hidden border-r border-line/60 bg-surface/60 py-3 pr-2 text-right text-muted/70">
         {Array.from({ length: lines }, (_, i) => <div key={i}>{i + 1}</div>)}
       </div>
-      <textarea ref={ta} value={value} readOnly={readOnly} spellCheck={false} aria-label="File contents"
+      <textarea ref={ta} value={value} readOnly={readOnly} spellCheck={false} aria-label="File contents" aria-describedby={readOnly ? undefined : "code-tab-hint"}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setTabLeaves(false)} onBlur={() => setTabLeaves(false)}
         onScroll={(e) => { if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop; }}
         onKeyDown={(e) => {
-          if (e.key !== "Tab" || readOnly) return;
+          if (readOnly) return;
+          if (e.key === "Escape") { setTabLeaves(true); return; }
+          if (e.key !== "Tab") { if (tabLeaves && !MODIFIERS.includes(e.key)) setTabLeaves(false); return; }
+          if (tabLeaves || e.ctrlKey || e.metaKey || e.altKey) return; // released with Esc: let the browser move focus
           e.preventDefault();
           const el = e.currentTarget; const s = el.selectionStart; const t = el.selectionEnd;
           onChange(value.slice(0, s) + "    " + value.slice(t));

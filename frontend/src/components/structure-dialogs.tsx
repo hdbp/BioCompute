@@ -86,6 +86,8 @@ export function AddStepDialog({ open, onOpenChange, pid, baseVersionId, nextLabe
             </label>
             <div className="max-h-64 overflow-y-auto rounded-md border border-line" role="listbox" aria-label="Modules">
               {mods.isLoading && <p className="p-3 text-[12.5px] text-muted">Loading…</p>}
+              {mods.isError && <p className="p-3 text-[12.5px] text-bad">Could not load the modules: {errMsg(mods.error)} <button className="underline" onClick={() => mods.refetch()}>Try again</button></p>}
+              {mods.data && shown.length === 0 && <p className="p-3 text-[12.5px] text-muted">No module matches.</p>}
               {shown.map((m) => (
                 <button key={m.id} role="option" aria-selected={moduleId === m.id} onClick={() => { setModuleId(m.id); setPreview(null); }}
                   className={cn("block w-full px-3 py-1.5 text-left hover:bg-raised", moduleId === m.id && "bg-accent/10")}>

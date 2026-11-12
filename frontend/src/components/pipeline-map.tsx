@@ -6,11 +6,13 @@ import {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow,
   type Edge, type Node, type NodeProps, type NodeTypes,
 } from "@xyflow/react";
-import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, Plus, RotateCcw, Save, Search, Trash2, Workflow } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, ListTree, Plus, RotateCcw, Save, Search, Trash2, Workflow, X } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import type { StudioModule } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/theme";
+import { useUnsavedGuard } from "@/hooks/unsaved";
+import { QueryError } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/misc";
 import { nodeTypes as studioNodeTypes } from "@/components/studio/module-node";
@@ -89,7 +91,7 @@ function useMapView(m: MapResponse | undefined): { view: MapView | null; loading
               ))}</dl> : <p className="text-muted">Default settings.</p>}
             </Section>
             {(spec.inputs.length > 0 || spec.outputs.length > 0) && (
-              <Section title="Ports">
+              <Section title="Inputs and outputs">
                 {spec.inputs.length > 0 && <p><span className="text-muted">in</span> {spec.inputs.map((p) => `${p.name} (${portTypes[p.type]?.label ?? p.type})`).join(", ")}</p>}
                 {spec.outputs.length > 0 && <p><span className="text-muted">out</span> {spec.outputs.map((p) => `${p.name} (${portTypes[p.type]?.label ?? p.type})`).join(", ")}</p>}
               </Section>
@@ -113,8 +115,8 @@ function useMapView(m: MapResponse | undefined): { view: MapView | null; loading
       if (!n) return null;
       return (
         <>
-          <Section title={n.kind === "input" ? "Input" : n.kind === "subworkflow" ? "Subworkflow" : "Process"}>
-            {n.name && n.name !== n.label && <p>{n.kind === "subworkflow" ? "workflow" : "process"} <span className="font-mono">{n.name}</span></p>}
+          <Section title={n.kind === "input" ? "Input" : n.kind === "subworkflow" ? "Group of steps" : "Step"}>
+            {n.name && n.name !== n.label && <p><span className="text-muted">{n.kind === "subworkflow" ? "named in the code (workflow)" : "named in the code (process)"}</span> <span className="font-mono">{n.name}</span></p>}
             {n.detail && <p className="text-muted">{n.detail}</p>}
             {n.file && <p className="break-all font-mono text-[11.5px] text-muted">{n.file}</p>}
           </Section>
@@ -124,7 +126,7 @@ function useMapView(m: MapResponse | undefined): { view: MapView | null; loading
               {n.resource_label && <p><span className="text-muted">resources</span> {n.resource_label}</p>}
             </Section>
           )}
-          {n.condition && <Section title="Condition"><p className="font-mono text-[11.5px] text-wait">{n.condition}</p></Section>}
+          {n.condition && <Section title="Only runs if"><p className="font-mono text-[11.5px] text-wait">{n.condition}</p></Section>}
           {n.steps?.length ? <Section title={`Steps inside (${n.steps.length})`}><ul className="space-y-0.5 font-mono text-[11.5px]">{n.steps.map((s) => <li key={s}>{s}</li>)}</ul></Section> : null}
           {n.outputs?.length ? <Section title="Outputs"><p className="font-mono text-[11.5px]">{n.outputs.join(", ")}</p></Section> : null}
         </>
@@ -232,13 +234,22 @@ function Canvas({ view, selected, onSelect, focus, states }: {
   return <div ref={box} className="h-full w-full">{view.ctx ? <StudioContext.Provider value={view.ctx}>{flow}</StudioContext.Provider> : flow}</div>;
 }
 
-function StepList({ view, selected, onPick, onAdd }: { view: MapView; selected: string | null; onPick: (id: string) => void; onAdd?: () => void }) {
+/** The step list: a column from md up; below md a drawer over the canvas, opened from the toolbar (`open`). */
+function StepList({ view, selected, onPick, onAdd, open, onClose }: {
+  view: MapView; selected: string | null; onPick: (id: string) => void; onAdd?: () => void; open: boolean; onClose: () => void;
+}) {
   const [q, setQ] = useState("");
   const ql = q.trim().toLowerCase();
   const shown = view.items.filter((i) => !ql || `${i.label} ${i.sub ?? ""}`.toLowerCase().includes(ql));
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-surface md:flex" aria-label="Steps">
+    <aside id="pipeline-step-list" aria-label="Steps" onKeyDown={(e) => { if (e.key === "Escape" && open) onClose(); }}
+      className={cn("w-64 shrink-0 flex-col border-r border-line bg-surface md:static md:flex md:max-w-none md:shadow-none",
+        open ? "absolute inset-y-0 left-0 z-30 flex max-w-[85vw] shadow-2xl shadow-black/40" : "hidden")}>
       <div className="space-y-2 border-b border-line p-3">
+        <div className="flex items-center justify-between md:hidden">
+          <span className="text-[13px] font-medium">Steps</span>
+          <button onClick={onClose} aria-label="Close the step list" className="rounded p-1 text-muted hover:bg-raised hover:text-text"><X className="size-4" /></button>
+        </div>
         <label className="relative block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a step" aria-label="Find a step"
@@ -274,7 +285,7 @@ function StepList({ view, selected, onPick, onAdd }: { view: MapView; selected: 
   );
 }
 
-function Inspector({ view, id, onPick, extra }: { view: MapView; id: string; onPick: (id: string) => void; extra?: ReactNode }) {
+function Inspector({ view, id, onPick, onClose, extra }: { view: MapView; id: string; onPick: (id: string) => void; onClose: () => void; extra?: ReactNode }) {
   const item = view.items.find((i) => i.id === id);
   if (!item) return null;
   const name = (x: string) => view.items.find((i) => i.id === x)?.label ?? x;
@@ -290,11 +301,13 @@ function Inspector({ view, id, onPick, extra }: { view: MapView; id: string; onP
     </div>
   );
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-line bg-surface" aria-label="Step details">
+    <aside aria-label="Step details"
+      className="absolute inset-y-0 right-0 z-20 flex w-80 max-w-[90vw] shrink-0 flex-col border-l border-line bg-surface shadow-2xl shadow-black/40 md:static md:max-w-none md:shadow-none">
       <div className="flex items-center gap-2 border-b border-line px-4 py-3">
         <item.icon className="size-4 shrink-0 text-muted" />
-        <span className="min-w-0 flex-1 truncate font-medium">{item.label}</span>
+        <span className="min-w-0 flex-1 truncate font-medium" title={item.label}>{item.label}</span>
         <Badge>{item.group === "Steps" ? "step" : item.group === "Inputs" ? "input" : "output"}</Badge>
+        <button onClick={onClose} aria-label="Close the step details" title="Close" className="-mr-1.5 rounded p-1 text-muted hover:bg-raised hover:text-text"><X className="size-4" /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {extra}
@@ -325,11 +338,11 @@ function Explanation({ m, mode }: { m: MapResponse; mode: "view" | "edit" }) {
   }
   const nf = m.nextflow;
   return (
-    <>Read from the Nextflow code: workflow <span className="font-mono text-text">{nf?.workflow}</span> in <span className="font-mono">{nf?.file}</span>.
-      Arrows follow the channels in the code; dashed steps only run when their condition holds.
+    <>Read from the pipeline's Nextflow code (workflow <span className="font-mono text-text">{nf?.workflow}</span> in <span className="font-mono">{nf?.file}</span>).
+      Arrows show which step passes data to which; dashed steps only run when their condition holds.
       {!m.can_edit_code ? keep : mode === "edit"
         ? <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: click a step to switch it off or change its arguments, resources or container; <b className="font-medium text-text">Edit code</b> for anything else. Each save is a new version.</>
-        : <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: change it in <b className="font-medium text-text">Pipeline Studio</b>.</>}</>
+        : <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: <b className="font-medium text-text">Edit in Pipeline Studio</b> to change its steps.</>}</>
   );
 }
 
@@ -338,8 +351,8 @@ function Actions({ m, pid, canFork, onFork, size, mode }: { m: MapResponse; pid:
   if (mode === "view" && m.can_edit_code) {
     return (
       <>
-        <Button asChild size={size} variant="primary"><Link to={`/studio/pipeline/${pid}${qs({ version: m.version_id })}`}><Workflow />Edit in Pipeline Studio</Link></Button>
-        {forkable && <Button size={size} variant="ghost" onClick={onFork} title="Edit as new pipeline: another copy; this one is not changed"><GitFork /></Button>}
+        <Button asChild size={size} variant="primary" title="Opens the step editor of Pipeline Studio: switch steps off, change their settings, add or remove steps"><Link to={`/studio/pipeline/${pid}${qs({ version: m.version_id })}`}><Workflow />Edit in Pipeline Studio</Link></Button>
+        {forkable && <Button size={size} variant="ghost" onClick={onFork} aria-label="Edit as new pipeline" title="Edit as new pipeline: another copy; this one is not changed"><GitFork /></Button>}
       </>
     );
   }
@@ -360,14 +373,16 @@ function Actions({ m, pid, canFork, onFork, size, mode }: { m: MapResponse; pid:
 // ---------------------------------------------------------------------------- full view (its own page)
 export function PipelineMapFull(props: {
   pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void; onDirty?: (d: boolean) => void;
-  /** view: the pipeline's map; edit: Pipeline Studio for your own Nextflow copy (step settings are editable) */
+  /** view: the pipeline's map; edit: Pipeline Studio's step editor for your own Nextflow copy (step settings are editable) */
   mode?: "view" | "edit";
+  /** a second toolbar row, e.g. the pipeline's tab strip */
+  tabs?: ReactNode;
 }) {
   return <ReactFlowProvider><Full {...props} /></ReactFlowProvider>;
 }
 
-function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view" }: {
-  pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void; onDirty?: (d: boolean) => void; mode?: "view" | "edit";
+function Full({ pid, versionId, toolbar, tabs, canFork, onFork, onDirty, mode = "view" }: {
+  pid: string; versionId?: string; toolbar: ReactNode; tabs?: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void; onDirty?: (d: boolean) => void; mode?: "view" | "edit";
 }) {
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -376,7 +391,8 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view"
   const [sel, setSel] = useState<string | null>(null);
   const [focus, setFocus] = useState(0);
   useEffect(() => setSel(null), [pid, versionId]);
-  const pick = (id: string | null) => { setSel(id); if (id) setFocus((f) => f + 1); };
+  const [listOpen, setListOpen] = useState(false); // the step list as a drawer on small screens
+  const pick = (id: string | null) => { setSel(id); setListOpen(false); if (id) setFocus((f) => f + 1); };
   const m = q.data;
   const nf = m?.kind === "nextflow" ? m.nextflow : undefined;
   const steps = useStepSettings(pid, versionId, !!nf?.ok);
@@ -386,12 +402,8 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view"
   const saved = steps.data?.overrides ?? {};
   const dirty = JSON.stringify(normalize(pending)) !== JSON.stringify(normalize(saved));
   useEffect(() => { onDirty?.(dirty); }, [dirty, onDirty]);
-  useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", h);
-    return () => window.removeEventListener("beforeunload", h);
-  }, [dirty]);
+  // leaving the page (in the app, or closing the tab) with unsaved step settings asks first
+  useUnsavedGuard(dirty, "step settings");
   const states = useMemo(() => (nf?.ok ? stepStates(nf.nodes, nf.edges, normalize(pending)) : undefined), [nf, pending]);
   const editable = mode === "edit" && !!steps.data?.editable;
   const [addOpen, setAddOpen] = useState(false);
@@ -400,7 +412,7 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view"
   useEffect(() => {
     if (selectAfterLoad && nf?.nodes.some((n) => n.id === selectAfterLoad)) { setSel(selectAfterLoad); setFocus((f) => f + 1); setSelectAfterLoad(null); }
   }, [nf, selectAfterLoad]);
-  const guard = (fn: () => void) => () => (dirty ? toast.message("Save or discard your step settings first.") : fn());
+  const guard = (fn: () => void) => () => { if (dirty) toast.message("Save or discard your step settings first."); else fn(); };
   const structureDone = (verb: string) => (r: { step: string; version?: string }) => {
     toast.success(`${verb} ${r.step} as ${r.version}. Earlier versions are kept as they were.`);
     qc.invalidateQueries({ queryKey: ["pipeline", pid] });
@@ -478,21 +490,28 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view"
         </>
       )}
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2">
+        {view && (
+          <Button size="sm" variant={listOpen ? "secondary" : "ghost"} className="md:hidden" onClick={() => setListOpen((o) => !o)}
+            aria-expanded={listOpen} aria-controls="pipeline-step-list" title="Show the list of steps"><ListTree />Steps</Button>
+        )}
         {toolbar}
         <div className="flex-1" />
         {dirty && <Button size="sm" variant="ghost" onClick={() => setPending(saved)} title="Discard unsaved step settings"><RotateCcw /><span className="hidden 2xl:inline">Discard</span></Button>}
-        {m && <Actions m={m} pid={pid} canFork={canFork} onFork={() => onFork(m)} size="sm" mode={mode} />}
+        {m && <Actions m={m} pid={pid} canFork={canFork} onFork={guard(() => onFork(m))} size="sm" mode={mode} />}
         {editable && (
           <Button size="sm" variant="primary" disabled={!dirty} loading={saving} onClick={save} title={`Saves the step settings as ${nextLabel} of your copy; earlier versions stay as they are`}>
             <Save />{dirty ? `Save as ${nextLabel}` : "Saved"}
           </Button>
         )}
       </div>
-      <div className="flex min-h-0 flex-1">
-        {view && <StepList view={view} selected={sel} onPick={pick} onAdd={editable ? guard(() => setAddOpen(true)) : undefined} />}
+      {tabs && <div className="border-b border-line bg-surface px-1.5">{tabs}</div>}
+      <div className="relative flex min-h-0 flex-1">
+        {listOpen && <div className="absolute inset-0 z-[25] bg-black/50 md:hidden" onClick={() => setListOpen(false)} aria-hidden />}
+        {view && <StepList view={view} selected={sel} onPick={pick} open={listOpen} onClose={() => setListOpen(false)}
+          onAdd={editable ? guard(() => { setListOpen(false); setAddOpen(true); }) : undefined} />}
         <div className="relative min-w-0 flex-1 bg-ink/40">
           {(q.isLoading || loading) && <div className="flex h-full items-center justify-center text-[13px] text-muted">Loading the map…</div>}
-          {q.isError && <p className="p-6 text-[13px] text-bad">{errMsg(q.error)}</p>}
+          {q.isError && !m && <div className="max-w-xl p-6"><QueryError error={q.error} onRetry={() => q.refetch()} what="the map of this pipeline" /></div>}
           {m && (m.kind === "none" || (!view && !loading)) && <p className="p-6 text-[13px] text-muted">No map for this pipeline{m.reason ? `: ${m.reason}` : ""}.</p>}
           {view && <Canvas view={view} selected={sel} onSelect={setSel} focus={focus} states={states} />}
           {editable && !sel && view && (
@@ -501,13 +520,13 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view"
             </div>
           )}
         </div>
-        {view && sel && <Inspector view={view} id={sel} onPick={pick} extra={extra} />}
+        {view && sel && <Inspector view={view} id={sel} onPick={pick} onClose={() => setSel(null)} extra={extra} />}
       </div>
       {m && view && (
         <div className="flex items-center gap-3 border-t border-line bg-surface px-3 py-1.5 text-[12px] text-muted">
-          <span className="tabular-nums">{plural(view.items.filter((i) => i.group === "Steps").length, "step")}, {plural(view.edges.length, "connection")}</span>
+          <span className="shrink-0 tabular-nums">{plural(view.items.filter((i) => i.group === "Steps").length, "step")}, {plural(view.edges.length, "connection")}</span>
           {states && Object.values(states).some((x) => x === "off") && <span className="text-bad">{plural(Object.values(states).filter((x) => x === "off").length, "step")} off</span>}
-          <span className="min-w-0 flex-1"><Explanation m={m} mode={mode} /></span>
+          <span className="hidden min-w-0 flex-1 sm:block"><Explanation m={m} mode={mode} /></span>
         </div>
       )}
     </div>
