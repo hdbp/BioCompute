@@ -70,6 +70,7 @@ class PipelineOut(ORM):
     studio_workflow_id: str | None
     owner: str | None = None
     visibility: str = "lab"
+    archived: bool = False
     created_at: datetime
     updated_at: datetime
 

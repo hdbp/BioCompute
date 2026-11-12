@@ -260,6 +260,7 @@ def publish(wid: str, user: User = Depends(require_scientist), db: Session = Dep
     (dest / "studio_graph.json").write_text(json.dumps({"workflow_id": w.id, "name": w.name, "graph": w.graph}))
     p = psvc.register_from_dir(db, dest, source_type="studio", name=w.name, category="Studio", version=f"v{n}",
                                pipeline=existing, studio_workflow_id=w.id)
+    p.archived = False  # publishing again installs an uninstalled Studio pipeline again
     p.description = w.description or p.description
     p.owner = w.created_by or user.username  # the pipeline belongs to the workflow's author and follows its sharing
     p.visibility = w.visibility

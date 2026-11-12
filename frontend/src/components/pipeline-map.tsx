@@ -3,10 +3,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow,
+  Background, BackgroundVariant, ControlButton, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow,
   type Edge, type Node, type NodeProps, type NodeTypes,
 } from "@xyflow/react";
-import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, ListTree, Plus, RotateCcw, Save, Search, Trash2, Workflow, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, LayoutGrid, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, ListTree, Plus, RotateCcw, Save, Search, Trash2, Workflow, X } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import type { StudioModule } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -183,14 +183,50 @@ const nfNodeTypes: NodeTypes = { nf: NfNodeView };
 
 // ---------------------------------------------------------------------------- pieces
 const READABLE = 0.85; // below this zoom node text is too small to read
-function Canvas({ view, selected, onSelect, focus, states }: {
-  view: MapView; selected: string | null; onSelect: (id: string | null) => void; focus: number; states?: Record<string, string>;
+
+/** Where the user moved the steps of a pipeline (this browser only; the arrangement is not part of the pipeline). */
+type Layout = Record<string, { x: number; y: number }>;
+const layoutStore = (key: string) => `bc.map-layout.${key}`;
+function readLayout(key: string): Layout {
+  try { return JSON.parse(localStorage.getItem(layoutStore(key)) || "{}") as Layout; } catch { return {}; }
+}
+function writeLayout(key: string, l: Layout) {
+  try {
+    if (Object.keys(l).length) localStorage.setItem(layoutStore(key), JSON.stringify(l));
+    else localStorage.removeItem(layoutStore(key));
+  } catch { /* storage off: the arrangement lasts until the page is left */ }
+}
+const arranged = (ns: Node[], l: Layout) => ns.map((n) => (l[n.id] ? { ...n, position: l[n.id] } : n));
+
+function Canvas({ view, selected, onSelect, focus, states, layoutKey }: {
+  view: MapView; selected: string | null; onSelect: (id: string | null) => void; focus: number; states?: Record<string, string>; layoutKey: string;
 }) {
   const { theme } = useTheme();
   const rf = useReactFlow();
+  const layout = useRef<Layout>(readLayout(layoutKey));
+  const [moved, setMoved] = useState(() => Object.keys(layout.current).length > 0);
   // React Flow's own node state, so it can record the measured sizes (needed before placing the view)
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(view.nodes);
-  useEffect(() => setNodes(view.nodes), [view.nodes, setNodes]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(arranged(view.nodes, layout.current));
+  useEffect(() => {
+    layout.current = readLayout(layoutKey);
+    setMoved(Object.keys(layout.current).length > 0);
+    setNodes(arranged(view.nodes, layout.current));
+  }, [view.nodes, layoutKey, setNodes]);
+  const saveDrag = (dragged: Node[]) => {
+    for (const n of dragged) layout.current[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
+    writeLayout(layoutKey, layout.current);
+    setMoved(true);
+  };
+  const resetLayout = () => {
+    layout.current = {};
+    writeLayout(layoutKey, {});
+    setMoved(false);
+    setNodes((ns) => ns.map((n) => {
+      const auto = view.nodes.find((v) => v.id === n.id);
+      return auto ? { ...n, position: auto.position } : n;
+    }));
+    setTimeout(() => rf.fitView({ padding: 0.12, maxZoom: 1, duration: 300 }), 30);
+  };
   useEffect(() => setNodes((ns) => ns.map((n) => (n.selected === (n.id === selected) ? n : { ...n, selected: n.id === selected }))), [selected, view.nodes, setNodes]);
   useEffect(() => setNodes((ns) => ns.map((n) => {
     const st = states?.[n.id];
@@ -222,11 +258,15 @@ function Canvas({ view, selected, onSelect, focus, states }: {
   }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
   const flow = (
     <ReactFlow nodes={nodes} edges={view.edges} nodeTypes={view.nodeTypes} colorMode={theme} onNodesChange={onNodesChange}
-      nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} deleteKeyCode={null} multiSelectionKeyCode={null}
+      nodesDraggable nodeDragThreshold={4} nodesConnectable={false} edgesFocusable={false} deleteKeyCode={null} multiSelectionKeyCode={null}
+      onNodeDragStop={(_, _n, dragged) => saveDrag(dragged)}
       onNodeClick={(_, n) => onSelect(n.id)} onPaneClick={() => onSelect(null)}
       minZoom={0.1} maxZoom={2} proOptions={{ hideAttribution: true }}>
       <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="rgb(var(--line))" />
-      <Controls position="bottom-left" showInteractive={false} />
+      <Controls position="bottom-left" showInteractive={false}>
+        <ControlButton onClick={resetLayout} disabled={!moved} title={moved ? "Arrange the steps automatically again" : "Drag steps to arrange them; this button puts them back"}
+          aria-label="Arrange the steps automatically"><LayoutGrid /></ControlButton>
+      </Controls>
       <MiniMap position="bottom-right" pannable zoomable className="!rounded-md !border !border-line"
         nodeColor={(n) => (n.id === selected ? "rgb(var(--wait))" : "rgb(var(--accent))")} maskColor="rgb(var(--ink) / 0.6)" />
     </ReactFlow>
@@ -513,7 +553,7 @@ function Full({ pid, versionId, toolbar, tabs, canFork, onFork, onDirty, mode = 
           {(q.isLoading || loading) && <div className="flex h-full items-center justify-center text-[13px] text-muted">Loading the map…</div>}
           {q.isError && !m && <div className="max-w-xl p-6"><QueryError error={q.error} onRetry={() => q.refetch()} what="the map of this pipeline" /></div>}
           {m && (m.kind === "none" || (!view && !loading)) && <p className="p-6 text-[13px] text-muted">No map for this pipeline{m.reason ? `: ${m.reason}` : ""}.</p>}
-          {view && <Canvas view={view} selected={sel} onSelect={setSel} focus={focus} states={states} />}
+          {view && <Canvas view={view} selected={sel} onSelect={setSel} focus={focus} states={states} layoutKey={`${pid}.${view.kind}`} />}
           {editable && !sel && view && (
             <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md border border-line bg-surface/95 px-3 py-1.5 text-[12.5px] text-muted shadow">
               Click a step to change it

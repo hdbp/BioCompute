@@ -947,6 +947,7 @@
                     "pipelines"
                 ],
                 "summary": "List Pipelines",
+                "description": "Installed pipelines and catalog entries; with archived=true only the uninstalled ones that runs still refer to.",
                 "operationId": "list_pipelines_api_pipelines_get",
                 "security": [
                     {
@@ -1026,6 +1027,16 @@
                                 }
                             ],
                             "title": "Owner"
+                        }
+                    },
+                    {
+                        "name": "archived",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false,
+                            "title": "Archived"
                         }
                     }
                 ],
@@ -1163,6 +1174,7 @@
                     "pipelines"
                 ],
                 "summary": "Delete Pipeline",
+                "description": "Uninstall a pipeline. Without runs it is deleted with its files. With runs it is archived: hidden from the\nlists and from launching, while the versions those runs used stay (their records, Resume and provenance need\nthem); the other versions and their files are deleted. Files outside BioCompute's pipeline store (a folder you\nimported from) are never touched. A catalog entry cannot be uninstalled (it is not installed).",
                 "operationId": "delete_pipeline_api_pipelines__pid__delete",
                 "security": [
                     {
@@ -1186,6 +1198,54 @@
                         "content": {
                             "application/json": {
                                 "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pipelines/{pid}/restore": {
+            "post": {
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Restore Pipeline",
+                "description": "Install an uninstalled pipeline again (with the versions that were kept for its runs).",
+                "operationId": "restore_pipeline_api_pipelines__pid__restore_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "pid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Pid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PipelineSummary"
+                                }
                             }
                         }
                     },
@@ -10602,6 +10662,11 @@
                         "title": "Visibility",
                         "default": "lab"
                     },
+                    "archived": {
+                        "type": "boolean",
+                        "title": "Archived",
+                        "default": false
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time",
@@ -10798,6 +10863,11 @@
                         "type": "string",
                         "title": "Visibility",
                         "default": "lab"
+                    },
+                    "archived": {
+                        "type": "boolean",
+                        "title": "Archived",
+                        "default": false
                     },
                     "created_at": {
                         "type": "string",

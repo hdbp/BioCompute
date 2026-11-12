@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Download, FileDiff, GitBranch, GitFork, Pin, Play, Plus, Save, Star, Trash2, Wand2 } from "lucide-react";
+import { Archive, ArchiveRestore, Download, FileDiff, GitBranch, GitFork, Pin, Play, Plus, Save, Star, Trash2, Wand2 } from "lucide-react";
 import { api, ApiError, errMsg, qs } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { setLaunchPrefill } from "@/lib/handoff";
@@ -20,6 +20,7 @@ import { ShareButton, SharingBadge, type Visibility } from "@/components/sharing
 import { ForkDialog } from "@/components/fork-dialog";
 import { DETAIL_TABS, PipelineTabs, pipelineTabHref, VersionSelect, type DetailTab } from "@/components/pipeline-tabs";
 import { ImportDialog } from "@/pages/pipelines";
+import { usePipelineUninstall } from "@/components/uninstall";
 
 /** Filled in by BioCompute at launch, so never part of "edited parameters". */
 const MANAGED = ["input", "outdir"];
@@ -85,11 +86,7 @@ export default function PipelineDetailPage() {
     onSuccess: (_r, v) => { toast.success(`Deleted version ${v.version}`); refresh(); },
     onError: (e) => toast.error(`The version was not deleted: ${errMsg(e)}`),
   });
-  const del = useMutation({
-    mutationFn: () => api.del(`/api/pipelines/${id}`),
-    onSuccess: () => { toast.success(`Deleted ${p.data?.name ?? "the pipeline"}`); refresh(); nav("/pipelines"); },
-    onError: (e) => toast.error(errMsg(e)),
-  });
+  const uninstall = usePipelineUninstall((_p, r) => { if (r.result === "deleted") nav("/pipelines"); });
   const fav = useMutation({
     mutationFn: () => api.patch(`/api/pipelines/${id}`, { favorite: !p.data?.favorite }),
     onSuccess: refresh,
@@ -131,13 +128,7 @@ export default function PipelineDetailPage() {
     }))) return;
     go({ version: vid ?? null });
   };
-  const askDelete = async () => {
-    if (await confirmDialog({
-      title: `Delete “${d.name}”?`,
-      body: "The pipeline, all its versions and its parameter presets are removed and cannot be restored. A pipeline that has runs cannot be deleted, so that those runs stay traceable.",
-      confirmLabel: "Delete pipeline", danger: true,
-    })) del.mutate();
-  };
+
   const askDeletePreset = async (pr: Preset) => {
     if (await confirmDialog({ title: `Delete the preset “${pr.name}”?`, body: "The saved parameter values are removed for everyone who uses this pipeline. Runs that used them are not affected.", confirmLabel: "Delete preset", danger: true })) delPreset.mutate(pr);
   };
@@ -151,11 +142,19 @@ export default function PipelineDetailPage() {
         actions={!isTemplate && <>
           {d.can_edit && d.owner && <ShareButton visibility={d.visibility} onChange={(v) => share.mutate(v)} loading={share.isPending} size="md" />}
           {sci && <Button variant="ghost" onClick={() => setForkOpen(true)} title="Your own copy of this version to change; this pipeline is never changed"><GitFork />Edit as new pipeline</Button>}
-          {d.can_edit && <Button variant="ghost" loading={del.isPending} onClick={askDelete}><Trash2 />Delete</Button>}
-          {edited
+          {sci && d.can_edit && !d.archived && <Button variant="ghost" loading={uninstall.uninstall.isPending} onClick={() => uninstall.ask(d)}><Trash2 />Uninstall</Button>}
+          {d.archived
+            ? (d.can_edit && <Button variant="primary" loading={uninstall.restore.isPending} onClick={() => uninstall.restore.mutate(d)}><ArchiveRestore />Restore</Button>)
+            : edited
             ? <Button variant="primary" onClick={runWithParams} title="Opens the launch form with the parameter values you set on this page"><Play />Run with these parameters</Button>
             : <Button asChild variant="primary"><Link to={launchHref}><Play />Configure and run</Link></Button>}
         </>}>
+        {d.archived && (
+          <p className="mt-3 flex gap-2 rounded-md border border-wait/40 bg-wait/5 px-3 py-2 text-[13px]" role="status">
+            <Archive className="mt-0.5 size-4 shrink-0 text-wait" />
+            <span>Uninstalled: kept only for its {d.run_count} run{d.run_count === 1 ? "" : "s"} (the versions they used). It is not offered for new runs{d.can_edit ? "; Restore installs it again" : ""}.</span>
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {d.versions.length > 1 && ver && <VersionSelect d={d} value={ver.id} onChange={switchVersion} className="h-7 text-[12px]" />}
           {d.versions.length === 1 && ver && <Badge title="The only version of this pipeline">{ver.version}</Badge>}

@@ -11,7 +11,7 @@ export interface Pipeline {
   id: string; slug: string; name: string; description: string; category: string;
   kind: "installed" | "template" | "studio"; source_type: string; source_url: string | null; engine: string;
   favorite: boolean; tags: string[]; studio_workflow_id: string | null; created_at: string; updated_at: string;
-  owner: string | null; visibility: "private" | "lab"; can_edit: boolean;
+  owner: string | null; visibility: "private" | "lab"; can_edit: boolean; archived?: boolean;
   latest_version: PipelineVersion | null; has_schema: boolean; run_count: number; last_run_status: string | null; preset_count: number;
 }
 export interface InputColumn {

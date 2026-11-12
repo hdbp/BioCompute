@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Download, GitBranch, FolderInput, Search, Star, Boxes, Workflow } from "lucide-react";
+import { ArchiveRestore, Download, GitBranch, FolderInput, MoreHorizontal, Search, Star, Boxes, Trash2, Workflow } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Pipeline } from "@/lib/types";
@@ -16,6 +16,8 @@ import { PathInput } from "@/components/file-browser";
 import { RunStatusBadge } from "@/components/status";
 import { StudioDrafts } from "@/components/studio-drafts";
 import { SharingBadge } from "@/components/sharing";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/menu";
+import { usePipelineUninstall } from "@/components/uninstall";
 
 const WHOSE = [["all", "Everything"], ["mine", "Mine"], ["others", "Lab & catalog"]] as const;
 type Whose = (typeof WHOSE)[number][0];
@@ -24,6 +26,7 @@ const KINDS = [
   { id: "installed", label: "Installed" },
   { id: "studio", label: "Built in Studio" },
   { id: "template", label: "Catalog" },
+  { id: "archived", label: "Uninstalled" },
 ];
 
 export default function PipelinesPage() {
@@ -53,6 +56,8 @@ export default function PipelinesPage() {
   const me = user?.username;
   const [importOpen, setImportOpen] = useState<null | { url?: string; name?: string; category?: string }>(null);
   const list = useQuery({ queryKey: ["pipelines"], queryFn: () => api.get<Pipeline[]>("/api/pipelines") });
+  const archived = useQuery({ queryKey: ["pipelines-archived"], queryFn: () => api.get<Pipeline[]>("/api/pipelines?archived=true"), enabled: kind === "archived" });
+  const { ask: askUninstall, restore } = usePipelineUninstall();
 
   const categories = useMemo(() => [...new Set((list.data ?? []).map((p) => p.category))].sort(), [list.data]);
   const items = useMemo(() => {
@@ -105,6 +110,7 @@ export default function PipelinesPage() {
       <Tabs value={kind} onValueChange={(k) => setFilter({ kind: k === "all" ? null : k })}>
         <TabsList className="mb-5">{KINDS.map((k) => <TabsTrigger key={k.id} value={k.id}>{k.label}</TabsTrigger>)}</TabsList>
         <TabsContent value={kind}>
+          {kind === "archived" ? <Uninstalled q={q} query={archived} onRestore={(p) => restore.mutate(p)} restoring={restore.isPending ? restore.variables?.id : undefined} /> : <>
           {list.isLoading && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-40" />)}</div>}
           {(kind === "all" || kind === "studio") && whose !== "others" && <StudioDrafts query={q} />}
           {list.isError && !list.data && <QueryError error={list.error} onRetry={() => list.refetch()} what="the pipelines" />}
@@ -117,7 +123,7 @@ export default function PipelinesPage() {
           )}
           {installed.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-8">
-              {installed.map((p) => <PipelineCard key={p.id} p={p} onFav={() => fav.mutate(p)} />)}
+              {installed.map((p) => <PipelineCard key={p.id} p={p} onFav={() => fav.mutate(p)} onUninstall={can(user, "scientist") && p.can_edit ? () => askUninstall(p) : undefined} />)}
             </div>
           )}
           {templates.length > 0 && (
@@ -138,6 +144,7 @@ export default function PipelinesPage() {
               </Panel>
             </>
           )}
+          </>}
         </TabsContent>
       </Tabs>
       <ImportDialog init={importOpen} onClose={() => setImportOpen(null)} onDone={(id) => nav(`/pipelines/${id}`)} />
@@ -145,7 +152,33 @@ export default function PipelinesPage() {
   );
 }
 
-function PipelineCard({ p, onFav }: { p: Pipeline; onFav: () => void }) {
+/** Pipelines uninstalled while runs still refer to them: kept for those runs, restorable. */
+function Uninstalled({ q, query, onRestore, restoring }: {
+  q: string; query: { data?: Pipeline[]; isLoading: boolean; isError: boolean; error: unknown; refetch: () => unknown };
+  onRestore: (p: Pipeline) => void; restoring?: string;
+}) {
+  const ql = q.toLowerCase();
+  const rows = (query.data ?? []).filter((p) => !ql || p.name.toLowerCase().includes(ql));
+  if (query.isLoading) return <Skeleton className="h-32" />;
+  if (query.isError) return <QueryError error={query.error} onRetry={() => query.refetch()} what="the uninstalled pipelines" />;
+  if (!rows.length) return <Panel><Empty icon={<Boxes />} title="No uninstalled pipelines">A pipeline you uninstall after it has run stays here, with the versions its runs used, so you can restore it.</Empty></Panel>;
+  return (
+    <Panel className="divide-y divide-line/60">
+      <p className="px-4 py-2.5 text-[12.5px] text-muted">Hidden from the lists and the launch form. Their runs keep working (records, results, Resume); only the versions those runs used were kept.</p>
+      {rows.map((p) => (
+        <div key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[13.5px] font-medium"><Link to={`/pipelines/${p.id}`} className="hover:underline">{p.name}</Link></p>
+            <p className="text-[12px] text-muted">{p.run_count} run{p.run_count === 1 ? "" : "s"} · {p.category}{p.owner ? ` · ${p.owner}` : ""}</p>
+          </div>
+          {p.can_edit && <Button size="sm" variant="secondary" loading={restoring === p.id} onClick={() => onRestore(p)}><ArchiveRestore />Restore</Button>}
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
+function PipelineCard({ p, onFav, onUninstall }: { p: Pipeline; onFav: () => void; onUninstall?: () => void }) {
   const v = p.latest_version;
   return (
     <Panel className="flex flex-col p-4 hover:border-muted/60 transition-colors">
@@ -176,7 +209,15 @@ function PipelineCard({ p, onFav }: { p: Pipeline; onFav: () => void }) {
         <Button asChild size="sm" variant="primary"><Link to={`/jobs/new?pipeline=${p.id}`}>Configure and run</Link></Button>
         {p.kind !== "template" && <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${p.id}/map`}>Map</Link></Button>}
         <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${p.id}`} title="Parameters, inputs and outputs, versions and runs">Parameters</Link></Button>
-        <span className="ml-auto self-center text-[11px] text-muted">updated <Ago ts={p.updated_at} /></span>
+        <span className="ml-auto self-center whitespace-nowrap text-[11px] text-muted">updated <Ago ts={p.updated_at} /></span>
+        {onUninstall && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" aria-label={`More actions for ${p.name}`}><MoreHorizontal /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem danger onSelect={onUninstall}><Trash2 />Uninstall…</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </Panel>
   );

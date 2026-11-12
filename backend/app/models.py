@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, false, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -77,6 +77,8 @@ class Pipeline(TimestampMixin, Base):
     # who added it (None: catalog, bundled examples, items from before ownership) and who may see it
     owner: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     visibility: Mapped[str] = mapped_column(String(10), default="lab")  # private | lab
+    # uninstalled while runs still refer to it: hidden from the lists and from launching; the versions runs used stay
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     versions: Mapped[list[PipelineVersion]] = relationship(
         back_populates="pipeline", cascade="all, delete-orphan", order_by="PipelineVersion.created_at"

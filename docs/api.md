@@ -59,6 +59,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `POST   /api/pipelines/{pid}/files`
 - `POST   /api/pipelines/{pid}/fork`
 - `POST   /api/pipelines/{pid}/presets`
+- `POST   /api/pipelines/{pid}/restore`
 - `POST   /api/pipelines/{pid}/steps`
 - `POST   /api/pipelines/{pid}/structure`
 - `POST   /api/pipelines/{pid}/versions/update`

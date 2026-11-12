@@ -74,9 +74,10 @@ def get_version(p: Pipeline, version_id: str | None) -> PipelineVersion:
 
 @router.get("", response_model=list[PipelineSummary])
 def list_pipelines(q: str | None = None, kind: str | None = None, category: str | None = None,
-                   favorites: bool = False, owner: str | None = None, user: User = Depends(require_viewer),
-                   db: Session = Depends(get_db)):
-    query = db.query(Pipeline)
+                   favorites: bool = False, owner: str | None = None, archived: bool = False,
+                   user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    """Installed pipelines and catalog entries; with archived=true only the uninstalled ones that runs still refer to."""
+    query = db.query(Pipeline).filter(Pipeline.archived.is_(archived))
     f = access.visible_filter(user, Pipeline.owner, Pipeline.visibility)
     if f is not None:
         query = query.filter(f)
@@ -133,17 +134,58 @@ def update_pipeline(pid: str, body: PipelineUpdate, user: User = Depends(require
 
 @router.delete("/{pid}")
 def delete_pipeline(pid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Uninstall a pipeline. Without runs it is deleted with its files. With runs it is archived: hidden from the
+    lists and from launching, while the versions those runs used stay (their records, Resume and provenance need
+    them); the other versions and their files are deleted. Files outside BioCompute's pipeline store (a folder you
+    imported from) are never touched. A catalog entry cannot be uninstalled (it is not installed)."""
     p = get_pipeline(db, pid, user, edit=True)
-    if db.query(Run).filter(Run.pipeline_id == p.id).count():
-        raise HTTPException(409, "Pipeline has execution history; it cannot be deleted (provenance)")
+    if p.kind == "template":
+        raise HTTPException(409, "This is a catalog entry, not an installed pipeline")
     managed = get_settings().pipelines_path
-    for v in p.versions:
-        if v.path and Path(v.path).resolve().is_relative_to(managed):
+    used = {vid for (vid,) in db.query(Run.pipeline_version_id).filter(Run.pipeline_id == p.id).distinct()}
+    freed = 0
+    removed = 0
+    for v in list(p.versions):
+        if v.id in used:
+            continue
+        if v.path and Path(v.path).resolve().is_relative_to(managed) and Path(v.path).resolve() != managed:
+            freed += _tree_size(Path(v.path))
             shutil.rmtree(v.path, ignore_errors=True)
-    audit(db, user.username, "pipeline.delete", p.slug)
-    db.delete(p)
+        removed += 1
+        if used:
+            db.delete(v)
+    favs = [f for f in ((user.prefs or {}).get("favorite_pipelines") or []) if f != p.id]
+    user.prefs = {**(user.prefs or {}), "favorite_pipelines": favs}
+    if not used:
+        audit(db, user.username, "pipeline.delete", p.slug, freed=freed)
+        db.delete(p)
+        db.commit()
+        return {"ok": True, "result": "deleted", "freed": freed, "kept_versions": 0, "removed_versions": removed}
+    p.archived = True
+    audit(db, user.username, "pipeline.uninstall", p.slug, kept_versions=len(used), removed_versions=removed, freed=freed)
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "result": "archived", "freed": freed, "kept_versions": len(used), "removed_versions": removed}
+
+
+@router.post("/{pid}/restore", response_model=PipelineSummary)
+def restore_pipeline(pid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Install an uninstalled pipeline again (with the versions that were kept for its runs)."""
+    p = get_pipeline(db, pid, user, edit=True)
+    p.archived = False
+    audit(db, user.username, "pipeline.restore", p.slug)
+    db.commit()
+    return _summary(db, p, user)
+
+
+def _tree_size(p: Path) -> int:
+    total = 0
+    for f in p.rglob("*"):
+        try:
+            if f.is_file() and not f.is_symlink():
+                total += f.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 @router.post("/import/local", response_model=PipelineSummary)
