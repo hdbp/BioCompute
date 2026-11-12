@@ -28,8 +28,8 @@ export function ForkDialog({ open, onOpenChange, pid, name, version, versionId, 
         toast.success(`“${n.trim()}” is your copy of ${r.from}. Publish it in Studio to add it to Pipelines; the original is not changed.`, { duration: 10000 });
         nav(`/studio/${r.workflow_id}`);
       } else {
-        toast.success(`“${n.trim()}” is your copy of ${r.from}. Click a step on the map to change it, or Edit code for anything else; each save is a new version of your copy.`, { duration: 10000 });
-        nav(`/pipelines/${r.pipeline_id}/map`);
+        toast.success(`“${n.trim()}” is your copy of ${r.from}, open in Pipeline Studio. Click a step to change it, or Edit code for anything else; each save is a new version of your copy.`, { duration: 10000 });
+        nav(`/studio/pipeline/${r.pipeline_id}`);
       }
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
@@ -38,11 +38,11 @@ export function ForkDialog({ open, onOpenChange, pid, name, version, versionId, 
       <DialogContent title="Edit as new pipeline"
         description={studio
           ? `Copies ${version ?? "this version"} of “${name}” into a new Studio workflow of yours. Change it in Studio and publish it as a new pipeline. “${name}” stays exactly as it is.`
-          : `Copies ${version ?? "this version"} of “${name}” into a new pipeline of yours. On its map you switch steps off and change their arguments, resources or containers; the code can be edited too. Every save is a new version of your copy. “${name}” stays exactly as it is.`}>
+          : `Copies ${version ?? "this version"} of “${name}” into a new pipeline of yours and opens it in Pipeline Studio, where you switch steps off and change their arguments, resources or containers (the code can be edited too). Every save is a new version of your copy. “${name}” stays exactly as it is.`}>
         <Field label="Name of the new pipeline"><Input autoFocus value={n} onChange={(e) => setN(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && n.trim()) go(); }} /></Field>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button variant="primary" loading={busy} disabled={!n.trim()} onClick={go}>{studio ? "Copy and open in Studio" : "Copy and edit"}</Button>
+          <Button variant="primary" loading={busy} disabled={!n.trim()} onClick={go}>Copy and open in Studio</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

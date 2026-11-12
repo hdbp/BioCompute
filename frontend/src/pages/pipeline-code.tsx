@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronDown, ChevronRight, FileCode2, FilePlus2, FileText, Folder, GitFork, Info, Lock, Network, Save, Search, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, FileCode2, FilePlus2, FileText, Folder, GitFork, Info, Lock, Network, Save, Search, Trash2, Undo2, Workflow } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { PipelineDetail } from "@/lib/types";
@@ -119,6 +119,7 @@ export default function PipelineCodePage() {
         )}
         {dirty && <Badge tone="wait">{Object.keys(changes).length} unsaved</Badge>}
         <div className="flex-1" />
+        {editable && <Button asChild size="sm" variant="ghost"><Link to={`/studio/pipeline/${id}${qs({ version: versionId })}`}><Workflow />Pipeline Studio</Link></Button>}
         <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${id}/map${qs({ version: versionId })}`}><Network />Map</Link></Button>
         <Button asChild size="sm" variant="ghost"><Link to={`/pipelines/${id}`}><Info />Details</Link></Button>
         {!editable && can(user, "scientist") && d && <Button size="sm" variant="primary" onClick={() => setForkOpen(true)}><GitFork />Edit as new pipeline</Button>}

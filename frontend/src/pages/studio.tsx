@@ -600,6 +600,7 @@ function StudioInner() {
   }, [dirty]);
 
   const workflows = (workflowsQ.data ?? []).filter((w) => w.graph?.meta?.kind !== "subworkflow");
+  const nfCopies = (pipelinesQ.data ?? []).filter((p) => p.kind !== "studio" && p.can_edit && /^(copy|duplicate):/.test(p.source_url ?? ""));
   const subworkflows = (workflowsQ.data ?? []).filter((w) => w.graph?.meta?.kind === "subworkflow");
   const ctx = useMemo(() => ({ modules: modIndex, portTypes, issuesByNode }), [modIndex, portTypes, issuesByNode]);
 
@@ -813,6 +814,21 @@ function StudioInner() {
                 </li>
               ))}
             </ul>
+          )}
+          {nfCopies.length > 0 && (
+            <div className="mt-3 border-t border-line pt-3">
+              <p className="mb-1 text-[11.5px] font-medium uppercase tracking-wide text-muted">Your Nextflow pipeline copies</p>
+              <ul className="max-h-64 divide-y divide-line overflow-y-auto">
+                {nfCopies.map((p) => (
+                  <li key={p.id} className="py-2">
+                    <button className="w-full text-left" onClick={() => { setOpenDlg(false); if (confirmDiscard()) navigate(`/studio/pipeline/${p.id}`); }}>
+                      <p className="truncate text-[13.5px] font-medium hover:text-accent">{p.name}</p>
+                      <p className="truncate text-xs text-muted">{p.latest_version?.version} · copy of {(p.source_url ?? "").replace(/^(copy|duplicate):/, "")}</p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </DialogContent>
       </Dialog>

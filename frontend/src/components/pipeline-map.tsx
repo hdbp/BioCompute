@@ -6,7 +6,7 @@ import {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow,
   type Edge, type Node, type NodeProps, type NodeTypes,
 } from "@xyflow/react";
-import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, RotateCcw, Save, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, RotateCcw, Save, Search, Workflow } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import type { StudioModule } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -309,7 +309,7 @@ function Inspector({ view, id, onPick, extra }: { view: MapView; id: string; onP
 }
 
 /** What this map is and what can be done with it. */
-function Explanation({ m }: { m: MapResponse }) {
+function Explanation({ m, mode }: { m: MapResponse; mode: "view" | "edit" }) {
   const s = m.studio;
   const keep = <> <b className="font-medium text-text">Edit as new pipeline</b> makes your own copy; the original is never changed.</>;
   if (m.kind === "studio" && s) {
@@ -325,12 +325,22 @@ function Explanation({ m }: { m: MapResponse }) {
   return (
     <>Read from the Nextflow code: workflow <span className="font-mono text-text">{nf?.workflow}</span> in <span className="font-mono">{nf?.file}</span>.
       Arrows follow the channels in the code; dashed steps only run when their condition holds.
-      {m.can_edit_code ? <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: click a step to switch it off or change its arguments, resources or container; <b className="font-medium text-text">Edit code</b> for anything else. Each save is a new version.</> : keep}</>
+      {!m.can_edit_code ? keep : mode === "edit"
+        ? <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: click a step to switch it off or change its arguments, resources or container; <b className="font-medium text-text">Edit code</b> for anything else. Each save is a new version.</>
+        : <> This is your copy{m.copy_of ? <> of <span className="font-mono">{m.copy_of}</span></> : null}: change it in <b className="font-medium text-text">Pipeline Studio</b>.</>}</>
   );
 }
 
-function Actions({ m, pid, canFork, onFork, size }: { m: MapResponse; pid: string; canFork: boolean; onFork: () => void; size?: "sm" }) {
+function Actions({ m, pid, canFork, onFork, size, mode }: { m: MapResponse; pid: string; canFork: boolean; onFork: () => void; size?: "sm"; mode: "view" | "edit" }) {
   const forkable = canFork && (m.kind === "nextflow" || !!m.studio?.graph);
+  if (mode === "view" && m.can_edit_code) {
+    return (
+      <>
+        <Button asChild size={size} variant="primary"><Link to={`/studio/pipeline/${pid}${qs({ version: m.version_id })}`}><Workflow />Edit in Pipeline Studio</Link></Button>
+        {forkable && <Button size={size} variant="ghost" onClick={onFork} title="Edit as new pipeline: another copy; this one is not changed"><GitFork /></Button>}
+      </>
+    );
+  }
   return (
     <>
       {m.can_edit_code && (
@@ -348,12 +358,14 @@ function Actions({ m, pid, canFork, onFork, size }: { m: MapResponse; pid: strin
 // ---------------------------------------------------------------------------- full view (its own page)
 export function PipelineMapFull(props: {
   pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void; onDirty?: (d: boolean) => void;
+  /** view: the pipeline's map; edit: Pipeline Studio for your own Nextflow copy (step settings are editable) */
+  mode?: "view" | "edit";
 }) {
   return <ReactFlowProvider><Full {...props} /></ReactFlowProvider>;
 }
 
-function Full({ pid, versionId, toolbar, canFork, onFork, onDirty }: {
-  pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void; onDirty?: (d: boolean) => void;
+function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view" }: {
+  pid: string; versionId?: string; toolbar: ReactNode; canFork: boolean; onFork: (m: MapResponse) => void; onDirty?: (d: boolean) => void; mode?: "view" | "edit";
 }) {
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -379,7 +391,7 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty }: {
     return () => window.removeEventListener("beforeunload", h);
   }, [dirty]);
   const states = useMemo(() => (nf?.ok ? stepStates(nf.nodes, nf.edges, normalize(pending)) : undefined), [nf, pending]);
-  const editable = !!steps.data?.editable;
+  const editable = mode === "edit" && !!steps.data?.editable;
   const setStep = (id: string, o: StepOverride) => setPending((p) => {
     const n = { ...p };
     const c = cleanOverride(o);
@@ -398,7 +410,7 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty }: {
       qc.invalidateQueries({ queryKey: ["pipeline-map", pid] });
       qc.invalidateQueries({ queryKey: ["pipeline-steps", pid] });
       onDirty?.(false);
-      nav(`/pipelines/${pid}/map`, { replace: true });
+      nav(`/studio/pipeline/${pid}`, { replace: true });
     } catch (e) { toast.error(errMsg(e)); } finally { setSaving(false); }
   };
   const nextLabel = (() => {
@@ -412,7 +424,7 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty }: {
   const extra = node && node.kind !== "input" && steps.data ? (
     <section className="space-y-3 border-b border-line/60 bg-raised/30 px-4 py-3">
       <h4 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted">
-        Settings{!editable && <span className="normal-case tracking-normal text-muted/80">· read-only original</span>}
+        Settings{!editable && <span className="normal-case tracking-normal text-muted/80">· {steps.data.editable ? "view" : "read-only original"}</span>}
       </h4>
       {node.kind === "process" ? (
         <StepForm info={node} current={steps.data.current[node.id] ?? []} value={pending[node.id] ?? {}} onChange={(o) => setStep(node.id, o)} editable={editable} />
@@ -426,7 +438,9 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty }: {
           </div>
         </details>
       ))}
-      {!editable && <p className="text-[11.5px] text-muted">Use <b className="font-medium text-text">Edit as new pipeline</b> to change it in your own copy.</p>}
+      {!editable && (steps.data.editable
+        ? <p className="text-[11.5px] text-muted"><Link className="text-accent hover:underline" to={`/studio/pipeline/${pid}${qs({ version: versionId })}`}>Edit in Pipeline Studio</Link> to change it.</p>
+        : <p className="text-[11.5px] text-muted">Use <b className="font-medium text-text">Edit as new pipeline</b> to change it in your own copy.</p>)}
     </section>
   ) : null;
 
@@ -436,7 +450,7 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty }: {
         {toolbar}
         <div className="flex-1" />
         {dirty && <Button size="sm" variant="ghost" onClick={() => setPending(saved)} title="Discard unsaved step settings"><RotateCcw /><span className="hidden 2xl:inline">Discard</span></Button>}
-        {m && <Actions m={m} pid={pid} canFork={canFork} onFork={() => onFork(m)} size="sm" />}
+        {m && <Actions m={m} pid={pid} canFork={canFork} onFork={() => onFork(m)} size="sm" mode={mode} />}
         {editable && (
           <Button size="sm" variant="primary" disabled={!dirty} loading={saving} onClick={save} title={`Saves the step settings as ${nextLabel} of your copy; earlier versions stay as they are`}>
             <Save />{dirty ? `Save as ${nextLabel}` : "Saved"}
@@ -462,7 +476,7 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty }: {
         <div className="flex items-center gap-3 border-t border-line bg-surface px-3 py-1.5 text-[12px] text-muted">
           <span className="tabular-nums">{plural(view.items.filter((i) => i.group === "Steps").length, "step")}, {plural(view.edges.length, "connection")}</span>
           {states && Object.values(states).some((x) => x === "off") && <span className="text-bad">{plural(Object.values(states).filter((x) => x === "off").length, "step")} off</span>}
-          <span className="min-w-0 flex-1"><Explanation m={m} /></span>
+          <span className="min-w-0 flex-1"><Explanation m={m} mode={mode} /></span>
         </div>
       )}
     </div>

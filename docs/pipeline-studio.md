@@ -62,8 +62,9 @@ The toolbar picks the version and links to *Details* (parameters, versions, hist
 
 * A Studio pipeline is copied into a new Studio workflow of yours (from the version you are viewing). Change it in
   Studio and **Publish**: that creates a separate pipeline.
-* A Nextflow pipeline (that version) is copied into a new pipeline of yours, and its **map** opens for editing. Click a
-  step and change it in the panel on the right:
+* A Nextflow pipeline (that version) is copied into a new pipeline of yours and opens in **Pipeline Studio**
+  (`/studio/pipeline/<id>`; Studio's *Open* dialog lists your copies, and their map has *Edit in Pipeline Studio*).
+  Click a step and change it in the panel on the right:
   * **Run this step** off. nf-core modules skip themselves (`ext.when = false`); steps whose only input came from a
     step that is off are shown as *no input*. Steps without a `when:` switch say so and can be changed in the code.
   * **Tool arguments** (`ext.args`, the extra command-line arguments nf-core modules pass to the tool). The
