@@ -283,6 +283,8 @@ Environment=HOME=$HOME
 ExecStart=$exec_start
 # analyses run in detached supervisors: restarting or stopping the service does not kill them
 KillMode=process
+# a pipeline step killed for using too much memory must not stop BioCompute or the other analyses
+OOMPolicy=continue
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes

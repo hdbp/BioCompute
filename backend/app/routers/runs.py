@@ -280,6 +280,17 @@ def _detail(db: Session, r: Run, user: User | None = None) -> RunDetail:
                 events=[{"id": e.id, "ts": e.ts, "kind": e.kind, "message": e.message, "data": e.data} for e in evs])
 
 
+@router.get("/capacity")
+def capacity(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    """CPU cores and memory runs on the controller may use together, and how much running analyses reserve.
+    A new run that does not fit waits in the queue until enough is free."""
+    cap_c, cap_m = runner.controller_budget(db)
+    used_c, used_m, n = runner.local_load(db)
+    return {"cpus": cap_c, "memory_gb": cap_m, "used_cpus": used_c, "used_memory_gb": round(used_m, 2), "running": n,
+            "queued": db.query(Run).filter(Run.status == "queued").count(),
+            "max_concurrent_runs": get_settings().max_concurrent_runs}
+
+
 @router.get("/{rid}", response_model=RunDetail)
 def run_detail(rid: str, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
     return _detail(db, get_run(db, rid, user), user)

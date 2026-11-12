@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ChevronDown, CircleAlert, Cpu, Lock, Network, Play, Rocket, RotateCcw, Server, ShieldCheck, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, CircleAlert, Clock, Cpu, Lock, Network, Play, Rocket, RotateCcw, Server, ShieldCheck, X } from "lucide-react";
 import { api, ApiError, errMsg, qs } from "@/lib/api";
 import type { ClusterNode, Experiment, FormSchema, Issue, PipelineDetail, Pipeline, Preset, Project, RunDetail } from "@/lib/types";
 import { bytes, cn } from "@/lib/utils";
@@ -137,6 +137,7 @@ export default function LaunchPage() {
     if (next.toString() !== sp.toString()) setSp(next, { replace: true });
   }, [pipelineId, versionId, experimentId, sp, setSp]);
 
+  const capacity = useQuery({ queryKey: ["run-capacity"], queryFn: () => api.get<{ cpus: number; memory_gb: number; used_cpus: number; used_memory_gb: number; running: number; queued: number }>("/api/runs/capacity"), refetchInterval: 15_000 });
   const controller = nodes.data?.find((n) => n.is_controller);
   const capC = controller?.allocation?.max_cpus ?? 1;
   const capM = controller?.allocation?.max_memory_gb ?? 1;
@@ -477,6 +478,21 @@ export default function LaunchPage() {
               </Field>
             </div>
 
+            {(() => {
+              const c = capacity.data;
+              if (!c || multiNode || c.running === 0) return null;
+              const freeC = Math.max(0, c.cpus - c.used_cpus), freeM = Math.max(0, c.memory_gb - c.used_memory_gb);
+              const waits = (cpus || capC) > freeC || (mem || capM) > freeM + 1e-6;
+              return (
+                <p className={cn("mt-5 flex gap-2 rounded-lg border px-4 py-2.5 text-[13px]", waits ? "border-wait/40 bg-wait/5" : "border-line text-muted")}>
+                  <Clock className={cn("mt-0.5 size-4 shrink-0", waits ? "text-wait" : "text-muted")} />
+                  <span>
+                    {plural(c.running, "analysis", "analyses")} running on the controller reserve {c.used_cpus} of {c.cpus} cores and {c.used_memory_gb} of {c.memory_gb} GB; {freeC} cores and {Math.floor(freeM * 10) / 10} GB are free.
+                    {waits ? <> This run asks for {cpus || capC} cores and {mem || capM} GB, so it waits in the queue until enough is free. Lower its cores and memory under Advanced to start it now.</> : " This run fits and starts right away."}
+                  </span>
+                </p>
+              );
+            })()}
             <div className="mt-5 rounded-lg border border-line">
               <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left" aria-expanded={advanced} aria-controls="launch-advanced" onClick={() => setAdvanced(!advanced)}>
                 <span className="min-w-0 flex-1">

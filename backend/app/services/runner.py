@@ -213,6 +213,72 @@ def active_count(db: Session) -> int:
     return db.query(Run).filter(Run.status.in_(("running", "cancelling"))).count()
 
 
+# --------------------------------------------------------------------------- admission (CPU / memory accounting)
+LOCAL_ACTIVE = ("running", "cancelling")
+
+
+def controller_budget(db: Session) -> tuple[int, float]:
+    """CPU cores and memory (GB) that runs on the controller may use together: the controller's allocation
+    (Nodes, controller, Allocation), or the whole machine when it has none."""
+    from ..models import Node
+    cnode = db.query(Node).filter(Node.is_controller.is_(True)).first()
+    if cnode is not None and cnode.allocation is not None and cnode.allocation.enabled:
+        return max(1, int(cnode.allocation.max_cpus)), max(0.5, float(cnode.allocation.max_memory_gb))
+    return os.cpu_count() or 1, round(psutil.virtual_memory().total / 1024 ** 3, 1)
+
+
+def claim(run: Run) -> tuple[int, float]:
+    """What a run reserves on the controller: its CPU and memory ceilings (the limits its engine is given).
+    Runs sent to HTCondor run their tasks on other computers and reserve nothing here."""
+    r = run.resources or {}
+    if r.get("executor") == "condor":
+        return 0, 0.0
+    cpus = int(r.get("max_cpus") or (1 if run.engine == "bcflow" else os.cpu_count() or 1))
+    mem = float(r.get("max_memory_gb") or (0 if run.engine == "bcflow" else 4))
+    return cpus, mem
+
+
+def local_load(db: Session, exclude: str | None = None) -> tuple[int, float, int]:
+    """CPU cores and memory reserved by runs active on the controller, and how many such runs there are."""
+    cpus, mem, n = 0, 0.0, 0
+    for r in db.query(Run).filter(Run.status.in_(LOCAL_ACTIVE)).all():
+        if r.id == exclude:
+            continue
+        c, m = claim(r)
+        if c or m:
+            cpus, mem, n = cpus + c, mem + m, n + 1
+    return cpus, mem, n
+
+
+def wait_reason(db: Session, run: Run) -> str | None:
+    """Why the run cannot start now, or None. A run that alone needs more than the budget (the allocation was
+    lowered after it was launched) starts when nothing else runs, so it cannot wait forever."""
+    limit = get_settings().max_concurrent_runs
+    if active_count(db) >= limit:
+        return f"Waiting for a free execution slot: {limit} run{'s' if limit != 1 else ''} at a time (BIOCOMPUTE_MAX_CONCURRENT_RUNS)"
+    c, m = claim(run)
+    if not c and not m:
+        return None
+    used_c, used_m, n = local_load(db, exclude=run.id)
+    if n == 0:
+        return None
+    cap_c, cap_m = controller_budget(db)
+    if used_c + c > cap_c:
+        return (f"Waiting for CPU cores: running analyses reserve {used_c} of the {cap_c} cores allowed on the controller "
+                f"and this run needs {c}")
+    if used_m + m > cap_m + 1e-6:
+        return (f"Waiting for memory: running analyses reserve {used_m:g} of the {cap_m:g} GB allowed on the controller "
+                f"and this run needs {m:g} GB")
+    return None
+
+
+def _note_wait(db: Session, run: Run, reason: str) -> None:
+    if (run.provenance or {}).get("queue_reason") != reason:
+        run.provenance = {**(run.provenance or {}), "queue_reason": reason}
+        if run.status == "queued":
+            add_event(db, run, "info", reason)
+
+
 def start(db: Session, run: Run) -> None:
     """Preflight then spawn the wrapper (or queue if at capacity)."""
     version = db.get(PipelineVersion, run.pipeline_version_id)
@@ -227,8 +293,10 @@ def start(db: Session, run: Run) -> None:
         set_status(db, run, "failed", run.error)
         return
     with _launch_lock:
-        if active_count(db) >= get_settings().max_concurrent_runs:
-            set_status(db, run, "queued", "Waiting for a free execution slot")
+        reason = wait_reason(db, run)
+        if reason:
+            run.provenance = {**(run.provenance or {}), "queue_reason": reason}
+            set_status(db, run, "queued", reason)
             return
         _spawn(db, run, version)
 
@@ -240,6 +308,8 @@ def engine_environ() -> dict[str, str]:
 
 
 def _spawn(db: Session, run: Run, version: PipelineVersion) -> None:
+    if "queue_reason" in (run.provenance or {}):
+        run.provenance = {k: v for k, v in run.provenance.items() if k != "queue_reason"}
     run_dir = Path(run.run_dir)
     for f in ("exit_code", "cancelled", "wrapper.pid", "child.pid"):
         (run_dir / f).unlink(missing_ok=True)
@@ -382,11 +452,15 @@ def _poll_once() -> None:
         for rid in queued:
             try:
                 with _launch_lock:
-                    if active_count(db) >= get_settings().max_concurrent_runs:
-                        break
                     run = db.get(Run, rid)
                     if run is None or run.status != "queued":
                         continue
+                    reason = wait_reason(db, run)
+                    if reason:
+                        # first come, first served: a later, smaller run does not overtake one that waits for room
+                        _note_wait(db, run, reason)
+                        db.commit()
+                        break
                     _spawn(db, run, db.get(PipelineVersion, run.pipeline_version_id))
                 db.commit()
             except Exception as exc:  # noqa: BLE001 - a run that cannot start must not block the queue behind it

@@ -14,6 +14,8 @@ WorkingDirectory=/opt/biocompute/backend
 ExecStart=/opt/biocompute/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8045 --proxy-headers
 # Runs are detached supervisors; do not kill them when the API restarts.
 KillMode=process
+# a pipeline step killed for using too much memory must not stop BioCompute or the other analyses
+OOMPolicy=continue
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes

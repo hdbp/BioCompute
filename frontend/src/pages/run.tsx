@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowDownToLine, ArrowLeft, Ban, CheckCircle2, CircleAlert, Eraser, FileText, FolderOpen, MoreHorizontal, RotateCw, SlidersHorizontal, Telescope, Trash2 } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, Ban, CheckCircle2, CircleAlert, Clock, Eraser, FileText, FolderOpen, MoreHorizontal, RotateCw, SlidersHorizontal, Telescope, Trash2 } from "lucide-react";
 import { api, ApiError, authed, errMsg, qs, ensureMediaCookie } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { setLaunchPrefill } from "@/lib/handoff";
@@ -102,6 +102,12 @@ export default function RunPage() {
         </>} />
       {run.isError && <p className="mb-4 text-[13px] text-wait" role="status">This page could not be refreshed ({errMsg(run.error)}); it shows the last known state. <button type="button" className="text-accent hover:underline" onClick={() => run.refetch()}>Try again</button></p>}
 
+      {r.status === "queued" && (
+        <p className="mb-5 flex gap-2 rounded-lg border border-wait/40 bg-wait/5 px-4 py-3 text-[13px]" role="status">
+          <Clock className="mt-0.5 size-4 shrink-0 text-wait" />
+          <span>{typeof r.provenance?.queue_reason === "string" ? r.provenance.queue_reason : "Waiting to start"}. It starts by itself, in launch order, as soon as enough is free.</span>
+        </p>
+      )}
       {failed && <FailurePanel r={r} checks={checks} mayAct={mayAct} resuming={resume.isPending} onResume={() => resume.mutate()} onRunAgain={runAgain} onShowLog={showLog} />}
 
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">

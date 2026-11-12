@@ -4013,6 +4013,31 @@
                 }
             }
         },
+        "/api/runs/capacity": {
+            "get": {
+                "tags": [
+                    "runs"
+                ],
+                "summary": "Capacity",
+                "description": "CPU cores and memory runs on the controller may use together, and how much running analyses reserve.\nA new run that does not fit waits in the queue until enough is free.",
+                "operationId": "capacity_api_runs_capacity_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
         "/api/runs/{rid}": {
             "get": {
                 "tags": [

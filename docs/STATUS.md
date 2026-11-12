@@ -100,6 +100,7 @@ These limits apply to everything below.
 | Run page: delete intermediate files, delete a run (with its results folder only when BioCompute created it and no other run writes there) | Demonstrated (`test_storage_cleanup.py`) |
 | Settings, Storage (admins): space used by work folders, logs and pipeline versions, free disk per folder, bulk clean-up of finished runs, deleting unused pipeline versions | Demonstrated (`test_storage_cleanup.py`) |
 | Pipeline versions: unchanged files shared by hard links inside the store only, written by replace-on-save; a version no run used can be deleted | Demonstrated (`test_storage_cleanup.py`) |
+| Runs on the controller reserve their CPU cores and memory against its allocation; a run that does not fit waits in the queue (reason on the run page, free capacity in the launch form), first come, first served; HTCondor runs reserve nothing locally. Systemd unit: `OOMPolicy=continue` | Admission rules demonstrated (`test_admission.py`); limits are scheduling limits, not OS-enforced |
 | Machine usage samples pruned after `BIOCOMPUTE_METRICS_RETENTION_DAYS` | Implemented, not tested |
 
 ## Installation

@@ -55,6 +55,11 @@
    * When `exit_code` appears, it records the final state.
    * If the supervisor has disappeared without an exit code, the run is marked `lost`.
    * Queued runs start when a slot frees up (`BIOCOMPUTE_MAX_CONCURRENT_RUNS`).
+   * Runs on the controller also reserve their CPU cores and memory ceilings (the limits their engine is
+     given) against the controller's allocation. A run that does not fit waits in the queue with the reason
+     shown, and queued runs start first come, first served. Runs sent to HTCondor reserve nothing on the
+     controller. These are scheduling limits, not OS-enforced ones; the systemd unit has `OOMPolicy=continue`
+     so a step killed for memory does not stop the service.
 5. **Restart.** `runner.reconcile()` re-attaches to runs whose supervisor is still alive.
    It checks the PID together with the process start time, to avoid matching a reused PID.
 6. **Cancel.** SIGTERM goes to the supervisor, which forwards it to the engine for a graceful shutdown.

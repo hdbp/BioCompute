@@ -126,6 +126,7 @@ File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 - `DELETE /api/runs/{rid}`
 - `GET    /api/jobs`
 - `GET    /api/runs`
+- `GET    /api/runs/capacity`
 - `GET    /api/runs/{rid}`
 - `GET    /api/runs/{rid}/files/{name}`
 - `GET    /api/runs/{rid}/log`
