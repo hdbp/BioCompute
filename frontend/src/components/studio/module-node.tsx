@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { AlertTriangle, Code2, Database, FileInput, FolderOutput, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { effective, useStudio, type StudioNode } from "./model";
+import { effective, LINK_LABEL, useLink, useStudio, type StudioNode } from "./model";
 
 function ModuleNodeImpl({ id, data, selected }: NodeProps<StudioNode>) {
   const { modules, portTypes, issuesByNode } = useStudio();
@@ -14,27 +14,33 @@ function ModuleNodeImpl({ id, data, selected }: NodeProps<StudioNode>) {
   const typeName = (t: string) => portTypes[t]?.label ?? t;
   const Icon = mod?.kind === "source" ? (mod.id === "input_file" ? Database : FileInput) : mod?.kind === "sink" ? FolderOutput : mod?.custom ? Code2 : Layers;
   const rows = Math.max(spec.inputs.length, spec.outputs.length);
+  const linkSide = useLink(id);
+  const link = selected ? undefined : linkSide;
 
   return (
     <div
       className={cn(
         "min-w-[210px] max-w-[260px] rounded-lg border shadow-lg shadow-black/20 text-[12.5px] transition-colors",
-        selected ? "border-accent bg-accent/10 ring-2 ring-accent/50" : cn("bg-surface", errors.length ? "border-bad/60" : "border-line"),
+        selected ? "border-accent bg-accent/10 ring-2 ring-accent/50" : link ? "border-link bg-link/10 ring-2 ring-link/50"
+          : cn("bg-surface", errors.length ? "border-bad/60" : "border-line"),
       )}
       aria-selected={selected}
+      data-linked={link}
     >
       <div className={cn("flex items-center gap-2 rounded-t-[7px] border-b px-2.5 py-2",
-        selected ? "border-accent bg-accent text-accent-ink" : cn("border-line", mod?.kind === "source" ? "bg-run/10" : mod?.kind === "sink" ? "bg-ok/10" : "bg-raised/60"))}>
-        <Icon className={cn("size-3.5 shrink-0", selected ? "text-accent-ink" : "text-muted")} />
+        selected ? "border-accent bg-accent text-accent-ink" : link ? "border-link bg-link text-link-ink"
+          : cn("border-line", mod?.kind === "source" ? "bg-run/10" : mod?.kind === "sink" ? "bg-ok/10" : "bg-raised/60"))}>
+        <Icon className={cn("size-3.5 shrink-0", selected ? "text-accent-ink" : link ? "text-link-ink" : "text-muted")} />
         <span className="min-w-0 flex-1 leading-tight">
-          <span className={cn("block truncate font-medium", selected ? "text-accent-ink" : "text-text")} title={data.label}>{data.label}</span>
-          {mod && mod.name !== data.label && <span className={cn("block truncate text-[10.5px] font-normal", selected ? "text-accent-ink/75" : "text-muted")}>{mod.name}</span>}
+          <span className={cn("block truncate font-medium", selected ? "text-accent-ink" : link ? "text-link-ink" : "text-text")} title={data.label}>{data.label}</span>
+          {mod && mod.name !== data.label && <span className={cn("block truncate text-[10.5px] font-normal", selected ? "text-accent-ink/75" : link ? "text-link-ink/75" : "text-muted")}>{mod.name}</span>}
         </span>
+        {link && <span className="shrink-0 rounded bg-link-ink/15 px-1 text-[10px] font-medium text-link-ink">{LINK_LABEL[link]}</span>}
         {errors.length > 0 && (
-          <span title={errors.map((e) => e.message).join("\n")} className={selected ? "text-accent-ink" : "text-bad"}><AlertTriangle className="size-3.5" /></span>
+          <span title={errors.map((e) => e.message).join("\n")} className={selected || link ? "text-current" : "text-bad"}><AlertTriangle className="size-3.5" /></span>
         )}
         {!errors.length && issues.length > 0 && (
-          <span title={issues.map((e) => e.message).join("\n")} className={selected ? "text-accent-ink" : "text-wait"}><AlertTriangle className="size-3.5" /></span>
+          <span title={issues.map((e) => e.message).join("\n")} className={selected || link ? "text-current" : "text-wait"}><AlertTriangle className="size-3.5" /></span>
         )}
       </div>
       <div className="px-0 py-1.5">

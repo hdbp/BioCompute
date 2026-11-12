@@ -21,6 +21,8 @@
   --ok: 92 201 138;         /* green - completed */
   --bad: 240 106 123;       /* red   - failed */
   --wait: 232 176 75;       /* amber - queued / warning */
+  --link: 255 105 180;      /* hot pink - steps connected to the selected one */
+  --link-ink: 10 10 11;
   --well-off: 40 40 44;
   /* discovery-source tags: filled chips sampled from viridis t=0.46..1.0 (bright half, stands out on black);
      text is near-black. Every chip >= 3.8:1 against the page, text >= 4.5:1 against the chip. */
@@ -49,6 +51,8 @@
   --ok: 20 116 66;        /* AA contrast on white */
   --bad: 200 50 70;
   --wait: 146 94 8;       /* AA contrast on white */
+  --link: 214 31 128;     /* AA contrast on white */
+  --link-ink: 255 255 255;
   --well-off: 226 226 230;
   /* viridis t=0.0..0.44 (dark half, stands out on white); text is white */
   --src-controller: 68 1 84;
@@ -76,6 +80,8 @@
   --color-ok: rgb(var(--ok));
   --color-bad: rgb(var(--bad));
   --color-wait: rgb(var(--wait));
+  --color-link: rgb(var(--link));
+  --color-link-ink: rgb(var(--link-ink));
   --color-well-off: rgb(var(--well-off));
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;

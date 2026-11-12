@@ -16,7 +16,7 @@ import { QueryError } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/misc";
 import { nodeTypes as studioNodeTypes } from "@/components/studio/module-node";
-import { deserialize, effective, StudioContext, type PortTypes, type StudioCtx } from "@/components/studio/model";
+import { deserialize, effective, LINK_LABEL, LinkContext, linkedTo, linkEdgeStyle, StudioContext, useLink, type PortTypes, type StudioCtx } from "@/components/studio/model";
 import { AddStepDialog, RemoveStepDialog } from "@/components/structure-dialogs";
 import { cleanOverride, StepForm, stepStates, useStepSettings, type Overrides, type StepInfo, type StepOverride } from "@/components/step-settings";
 
@@ -150,21 +150,27 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 // ---------------------------------------------------------------------------- Nextflow node
 type NfFlowNode = Node<NfNode, "nf">;
-const NfNodeView = memo(function NfNodeView({ data, selected }: NodeProps<NfFlowNode>) {
+const NfNodeView = memo(function NfNodeView({ id, data, selected }: NodeProps<NfFlowNode>) {
   const Icon = data.kind === "input" ? Database : data.kind === "subworkflow" ? Layers : Box;
+  const linkSide = useLink(id);
+  const link = selected ? undefined : linkSide;
+  const lit = selected || !!link;
   return (
-    <div aria-selected={selected} className={cn("w-[220px] rounded-lg border text-[12px] shadow-lg shadow-black/20 transition-colors",
-      selected ? "border-accent bg-accent/10 ring-2 ring-accent/50" : cn("bg-surface", data.state === "edited" ? "border-wait/70" : "border-line"),
-      data.condition && !selected && "border-dashed", (data.state === "off" || data.state === "starved") && !selected && "opacity-45")}>
+    <div aria-selected={selected} data-linked={link} className={cn("w-[220px] rounded-lg border text-[12px] shadow-lg shadow-black/20 transition-colors",
+      selected ? "border-accent bg-accent/10 ring-2 ring-accent/50" : link ? "border-link bg-link/10 ring-2 ring-link/50"
+        : cn("bg-surface", data.state === "edited" ? "border-wait/70" : "border-line"),
+      data.condition && !lit && "border-dashed", (data.state === "off" || data.state === "starved") && !lit && "opacity-45")}>
       {data.kind !== "input" && <Handle type="target" position={Position.Left} className="!size-2 !border-0 !bg-muted" />}
       <div className={cn("flex items-center gap-2 rounded-t-[7px] px-2.5 py-2",
-        selected ? "bg-accent text-accent-ink" : data.kind === "input" ? "bg-run/10" : data.kind === "subworkflow" ? "bg-accent/10" : "bg-raised/60")}>
-        <Icon className={cn("size-3.5 shrink-0", selected ? "text-accent-ink" : "text-muted")} />
+        selected ? "bg-accent text-accent-ink" : link ? "bg-link text-link-ink"
+          : data.kind === "input" ? "bg-run/10" : data.kind === "subworkflow" ? "bg-accent/10" : "bg-raised/60")}>
+        <Icon className={cn("size-3.5 shrink-0", selected ? "text-accent-ink" : link ? "text-link-ink" : "text-muted")} />
         <span className="min-w-0 flex-1 leading-tight">
           <span className="block truncate font-medium" title={data.label}>{data.label}</span>
-          {data.name && data.name !== data.label && <span className={cn("block truncate text-[10.5px]", selected ? "text-accent-ink/75" : "text-muted")}>{data.name}</span>}
-          {data.kind === "input" && <span className={cn("block truncate text-[10.5px]", selected ? "text-accent-ink/75" : "text-muted")}>{data.detail}</span>}
+          {data.name && data.name !== data.label && <span className={cn("block truncate text-[10.5px]", selected ? "text-accent-ink/75" : link ? "text-link-ink/75" : "text-muted")}>{data.name}</span>}
+          {data.kind === "input" && <span className={cn("block truncate text-[10.5px]", selected ? "text-accent-ink/75" : link ? "text-link-ink/75" : "text-muted")}>{data.detail}</span>}
         </span>
+        {link && <span className="shrink-0 rounded bg-link-ink/15 px-1 text-[10px] font-medium">{LINK_LABEL[link]}</span>}
         {data.state === "off" ? <span className="rounded bg-bad/15 px-1 text-[10px] font-medium text-bad">off</span>
           : data.state === "starved" ? <span className="rounded bg-ink/40 px-1 text-[10px] text-muted" title="Everything this step reads comes from steps that are off">no input</span>
           : data.state === "edited" ? <span className="rounded bg-wait/15 px-1 text-[10px] font-medium text-wait">edited</span>
@@ -258,8 +264,11 @@ function Canvas({ view, selected, onSelect, focus, states, layoutKey }: {
     const t = setTimeout(() => rf.fitView({ nodes: [{ id: selected }], maxZoom: 1.1, minZoom: READABLE, padding: 0.5, duration: 350 }), 60);
     return () => clearTimeout(t);
   }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  const linked = useMemo(() => (selected ? linkedTo(new Set([selected]), view.edges) : {}), [selected, view.edges]);
+  const edges = useMemo(() => (selected ? view.edges.map((e) => (e.source === selected || e.target === selected
+    ? { ...e, animated: true, zIndex: 1, style: { ...e.style, ...linkEdgeStyle } } : e)) : view.edges), [selected, view.edges]);
   const flow = (
-    <ReactFlow nodes={nodes} edges={view.edges} nodeTypes={view.nodeTypes} colorMode={theme} onNodesChange={onNodesChange}
+    <ReactFlow nodes={nodes} edges={edges} nodeTypes={view.nodeTypes} colorMode={theme} onNodesChange={onNodesChange}
       nodesDraggable nodeDragThreshold={4} nodesConnectable={false} edgesFocusable={false} deleteKeyCode={null} multiSelectionKeyCode={null}
       onNodeDragStop={(_, _n, dragged) => saveDrag(dragged)}
       onNodeClick={(_, n) => onSelect(n.id)} onPaneClick={() => onSelect(null)}
@@ -270,10 +279,14 @@ function Canvas({ view, selected, onSelect, focus, states, layoutKey }: {
           aria-label="Arrange the steps automatically"><LayoutGrid /></ControlButton>
       </Controls>
       <MiniMap position="bottom-right" pannable zoomable className="!rounded-md !border !border-line"
-        nodeColor={(n) => (n.id === selected ? "rgb(var(--wait))" : "rgb(var(--muted) / 0.6)")} maskColor="rgb(var(--ink) / 0.6)" />
+        nodeColor={(n) => (n.id === selected ? "rgb(var(--accent))" : linked[n.id] ? "rgb(var(--link))" : "rgb(var(--muted) / 0.6)")} maskColor="rgb(var(--ink) / 0.6)" />
     </ReactFlow>
   );
-  return <div ref={box} className="h-full w-full">{view.ctx ? <StudioContext.Provider value={view.ctx}>{flow}</StudioContext.Provider> : flow}</div>;
+  return (
+    <div ref={box} className="h-full w-full">
+      <LinkContext.Provider value={linked}>{view.ctx ? <StudioContext.Provider value={view.ctx}>{flow}</StudioContext.Provider> : flow}</LinkContext.Provider>
+    </div>
+  );
 }
 
 /** The step list: a column from md up; below md a drawer over the canvas, opened from the toolbar (`open`). */

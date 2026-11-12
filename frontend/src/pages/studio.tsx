@@ -33,7 +33,7 @@ import { ToolFinder } from "@/components/studio/tool-finder";
 import { AssistantPanel } from "@/components/studio/assistant-panel";
 import { chipseqExample, portableExample } from "@/components/studio/examples";
 import {
-  deserialize, effective, makeNode, newId, serialize, StudioContext, type Graph, type ModuleData, type PortTypes, type StudioNode,
+  deserialize, effective, LinkContext, linkedTo, linkEdgeStyle, makeNode, newId, serialize, StudioContext, type Graph, type ModuleData, type PortTypes, type StudioNode,
 } from "@/components/studio/model";
 
 interface ModulesResponse { modules: StudioModule[]; port_types: PortTypes; custom_code_allowed: boolean }
@@ -238,16 +238,23 @@ function StudioInner() {
     setEdges((es) => addEdge({ ...c, id: newId("e") }, es));
   }, [setEdges, snapshot]);
 
+  // keyed on the ids, so moving a step does not rebuild the highlight (and re-render every step)
+  const selKey = nodes.filter((n) => n.selected).map((n) => n.id).join("\n");
+  const selectedIds = useMemo(() => new Set(selKey ? selKey.split("\n") : []), [selKey]);
+  const linked = useMemo(() => linkedTo(selectedIds, edges), [selectedIds, edges]);
   const styledEdges = useMemo(() => edges.map((e) => {
     const out = portOf(e.source, e.sourceHandle, "out");
     const bad = issueEdges.has(e.id);
+    const lit = selectedIds.has(e.source) || selectedIds.has(e.target);
     return {
       ...e,
-      animated: false,
-      style: { stroke: bad ? "rgb(var(--bad))" : portTypes[out?.type ?? "any"]?.color ?? "rgb(var(--muted))", strokeWidth: e.selected ? 2.5 : 1.75, strokeDasharray: bad ? "5 4" : undefined },
+      animated: lit,
+      zIndex: lit ? 1 : 0,
+      style: lit && !bad ? { ...linkEdgeStyle, strokeDasharray: undefined }
+        : { stroke: bad ? "rgb(var(--bad))" : portTypes[out?.type ?? "any"]?.color ?? "rgb(var(--muted))", strokeWidth: e.selected ? 2.5 : 1.75, strokeDasharray: bad ? "5 4" : undefined },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [edges, issueEdges, portTypes, portOf, nodes]);
+  }), [edges, issueEdges, portTypes, portOf, nodes, selectedIds]);
 
   // ------------------------------------------------------------------ add / insert
   const viewportCenter = useCallback(() => {
@@ -656,7 +663,7 @@ function StudioInner() {
   usePageTitle(wfId || nodes.length ? name.trim() || "Untitled workflow" : "Pipeline Studio", wfId || nodes.length ? [{ label: "Pipeline Studio" }] : []);
 
   return (
-    <StudioContext.Provider value={ctx}>
+    <StudioContext.Provider value={ctx}><LinkContext.Provider value={linked}>
       <div className="flex h-full flex-col">
         {/* toolbar */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-line bg-surface px-3 py-2">
@@ -767,7 +774,7 @@ function StudioInner() {
                 <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="rgb(var(--line))" />
                 <Controls position="bottom-left" showInteractive={false} />
                 <MiniMap position="bottom-right" pannable zoomable className="!rounded-md !border !border-line"
-                  nodeColor={(n) => (issuesByNode[n.id]?.some((i) => i.level === "error") ? "rgb(var(--bad))" : "rgb(var(--accent))")}
+                  nodeColor={(n) => (n.selected ? "rgb(var(--accent))" : linked[n.id] ? "rgb(var(--link))" : issuesByNode[n.id]?.some((i) => i.level === "error") ? "rgb(var(--bad))" : "rgb(var(--muted) / 0.6)")}
                   maskColor="rgb(var(--ink) / 0.6)" />
               </ReactFlow>
 
@@ -977,7 +984,7 @@ function StudioInner() {
           </form>
         </DialogContent>
       </Dialog>
-    </StudioContext.Provider>
+    </LinkContext.Provider></StudioContext.Provider>
   );
 }
 

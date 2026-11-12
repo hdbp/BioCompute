@@ -33,6 +33,26 @@ export interface StudioCtx {
 export const StudioContext = createContext<StudioCtx>({ modules: {}, portTypes: {}, issuesByNode: {} });
 export const useStudio = () => useContext(StudioContext);
 
+/** Steps connected to the selected step(s): "up" feeds it, "down" reads from it, "both" does both (a loop). */
+export type LinkSide = "up" | "down" | "both";
+export const LinkContext = createContext<Record<string, LinkSide>>({});
+export const useLink = (id: string): LinkSide | undefined => useContext(LinkContext)[id];
+export function linkedTo(selected: Set<string>, edges: { source: string; target: string }[]): Record<string, LinkSide> {
+  const out: Record<string, LinkSide> = {};
+  const mark = (id: string, side: "up" | "down") => {
+    if (selected.has(id)) return;
+    out[id] = out[id] && out[id] !== side ? "both" : side;
+  };
+  for (const e of edges) {
+    if (selected.has(e.target)) mark(e.source, "up");
+    if (selected.has(e.source)) mark(e.target, "down");
+  }
+  return out;
+}
+/** A connection touching the selected step(s): pink, thicker and moving, drawn above the others. */
+export const linkEdgeStyle = { stroke: "rgb(var(--link))", strokeWidth: 2.75 };
+export const LINK_LABEL: Record<LinkSide, string> = { up: "upstream", down: "downstream", both: "up & downstream" };
+
 /** Effective spec of a node = module definition + per-node custom overrides (mirrors backend Graph._spec). */
 export function effective(mod: StudioModule | undefined, data: ModuleData) {
   const inputs: Port[] = data.custom?.inputs ?? mod?.inputs ?? [];
