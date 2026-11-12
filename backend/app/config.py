@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     explorer_public_hubs_url: str = "https://api.genome.ucsc.edu/list/publicHubs"
     # refgenie genome_config.yaml to read reference genomes from (also: Settings, $REFGENIE, common locations)
     refgenie_config: str | None = None
+    # extra folders searched for tools AFTER the service's own PATH (scripts/tools.sh sets it to its bioconda env)
+    tools_path: str | None = None
     enable_demo_engine: bool = True  # BioCompute native engine for bcflow manifests
 
     # --- cluster / discovery ---------------------------------------------

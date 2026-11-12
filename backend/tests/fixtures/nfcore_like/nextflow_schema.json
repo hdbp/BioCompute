@@ -1,0 +1,17 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "nf-core/demo pipeline parameters",
+    "type": "object",
+    "$defs": {
+        "input_output_options": {
+            "title": "Input/output options",
+            "type": "object",
+            "required": ["input", "outdir"],
+            "properties": {
+                "input": {"type": "string", "format": "file-path", "description": "Samplesheet"},
+                "outdir": {"type": "string", "format": "directory-path", "description": "Output directory"}
+            }
+        }
+    },
+    "allOf": [{"$ref": "#/$defs/input_output_options"}]
+}

@@ -23,6 +23,7 @@ interface SettingsData {
   allow_custom_code_modules: boolean; enable_demo_engine: boolean;
   data_roots: { name: string; path: string; restricted: boolean; writable: boolean; description: string; exists: boolean; source?: "settings" | "ui" }[];
   software: Record<string, string | null | { available: boolean; version?: string; detail?: string; path?: string }>;
+  module_tools?: { tool: string; package: string; modules: string[]; path: string | null }[];
   discovery: { authorized_cidrs: string[]; mdns: boolean; tailscale: boolean; htcondor: boolean; neighbors: boolean };
   ui: { default_output_dir?: string | null };
 }
@@ -88,7 +89,27 @@ export default function SettingsPage() {
                   );
                 })}
               </div>
-              <p className="p-4 text-xs text-muted">Install Nextflow (Java 17+) for the user that runs the BioCompute service, then click Re-detect. See docs/deployment.md.</p>
+              <p className="p-4 text-xs text-muted">Missing something? On the controller, run <code className="font-mono">scripts/tools.sh</code> in the BioCompute folder: it offers to install Nextflow (with Java), refgenie and the module tools this computer does not have yet. Then click Re-detect.</p>
+            </Panel>
+          )}
+          {d?.module_tools && (
+            <Panel className="mt-5">
+              <PanelHeader title="Tools of the built-in pipeline modules"
+                description={d.module_tools.every((t) => t.path) ? "All present: every built-in module can run on this controller."
+                  : `${d.module_tools.filter((t) => !t.path).length} missing: the modules that need them cannot run on this controller until they are installed.`} />
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3">
+                {d.module_tools.map((t) => (
+                  <div key={t.tool} className="flex items-start gap-2.5 border-b border-line/60 px-4 py-3">
+                    {t.path ? <CheckCircle2 className="mt-0.5 size-4 text-ok" /> : <CircleSlash className="mt-0.5 size-4 text-wait" />}
+                    <div className="min-w-0"><p className="font-medium text-[13.5px]">{t.tool}</p>
+                      <p className="text-xs text-muted break-all">{t.path ?? `not found (${t.package.replace(/^.*::/, "")})`}</p>
+                      <p className="text-[11px] text-muted">used by {t.modules.join(", ")}</p></div>
+                  </div>
+                ))}
+              </div>
+              {d.module_tools.some((t) => !t.path) && (
+                <p className="p-4 text-xs text-muted">To install only the missing ones: <code className="font-mono">scripts/tools.sh</code> on the controller (a private bioconda environment; your own programs are not touched and keep priority), then Re-detect.</p>
+              )}
             </Panel>
           )}
         </TabsContent>

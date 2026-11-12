@@ -1612,6 +1612,62 @@
                 }
             }
         },
+        "/api/pipelines/{pid}/structure": {
+            "post": {
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Change Structure",
+                "description": "Add or remove a step of your own Nextflow copy. dry_run returns the code change; otherwise a new version.",
+                "operationId": "change_structure_api_pipelines__pid__structure_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "pid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Pid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/StructureIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/pipelines/{pid}/map": {
             "get": {
                 "tags": [
@@ -11692,6 +11748,87 @@
                     "overrides"
                 ],
                 "title": "StepSettingsIn"
+            },
+            "StructureIn": {
+                "properties": {
+                    "base_version_id": {
+                        "type": "string",
+                        "title": "Base Version Id"
+                    },
+                    "op": {
+                        "type": "string",
+                        "pattern": "^(add|remove)$",
+                        "title": "Op"
+                    },
+                    "step": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Step"
+                    },
+                    "connect": {
+                        "type": "boolean",
+                        "title": "Connect",
+                        "default": false
+                    },
+                    "module_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Module Id"
+                    },
+                    "after": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "After"
+                    },
+                    "output": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Output"
+                    },
+                    "extra_params": {
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "type": "object",
+                        "title": "Extra Params",
+                        "default": {}
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "title": "Dry Run",
+                        "default": true
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "base_version_id",
+                    "op"
+                ],
+                "title": "StructureIn"
             },
             "StudioCompileIn": {
                 "properties": {

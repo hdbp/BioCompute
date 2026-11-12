@@ -75,6 +75,7 @@ These limits apply to everything below.
 | Pipeline map: Studio graph per published version, edit a version in Studio and publish it as the next version, copies of others' Studio pipelines stay editable | Demonstrated (`test_pipeline_map.py`, browser) |
 | Edit as new pipeline: Studio copy as a new workflow, Nextflow copy with a code editor; saves are new version folders of the copy; originals refused by the server | Demonstrated (`test_edit_as_new_pipeline_never_touches_the_original`, browser) |
 | Interactive step settings on the map of a Nextflow copy (off, tool arguments, CPUs/memory/time, container; steps left without input shown), saved as a config on a new version | Demonstrated (`test_step_settings_on_the_map_are_a_config_on_a_new_version`, browser); the generated config was **not run with Nextflow** here (no Nextflow on the dev controller) |
+| Add a library module as a step / remove a step of a Nextflow copy from Studio (code rewritten, previewed as a diff, saved as a new version, re-parsed to confirm) | Demonstrated on the nf-core-shaped fixture (`test_add_and_remove_steps_of_a_nextflow_copy`, browser); the rewritten code was **not run with Nextflow** here |
 | Read-only map of Nextflow DSL2 pipelines from their code (processes, subworkflows, aliases, conditions, channel flow) | Demonstrated on the bundled pipeline and an nf-core-shaped fixture (`test_pipeline_map.py`, browser); not yet checked against real nf-core releases (not downloadable here) |
 | Import arbitrary Nextflow scripts back into a graph | Not supported by design |
 | User modules for installed software: scan PATH, 15 templates (Genrich, SEACR, HOMER, epic2, GoPeaks, …), builder with live checks, edit/export/import/delete | Demonstrated (`test_custom_modules.py`, browser); a user-made module ran end to end on the native engine |
@@ -96,6 +97,12 @@ These limits apply to everything below.
 | Feature | Status |
 |---|---|
 | `./install.sh`: prerequisites, venv, UI build, config, `--data` folders, systemd service as the user, health check, `tailscale serve` + public URL, re-run updates, `--uninstall` | Tested end to end as a normal user with `systemctl`/`sudo`/`tailscale` stand-ins (no systemd in the dev sandbox); generated unit passes `systemd-analyze verify`. **Not yet run on a real systemd host or a real tailnet.** |
+
+## Tools check at install
+
+| Feature | Status |
+|---|---|
+| `scripts/tools.sh` (called by `install.sh`): reports Nextflow, Java, refgenie and the built-in modules' programs, and offers to install only the missing ones (Nextflow installer, distro OpenJDK, refgenie into BioCompute's venv, bioconda environment via conda/mamba/micromamba); writes paths to the configuration; Settings lists module tools | Flow demonstrated with stand-ins for the downloads (fake installer, pip and conda); the real downloads were **not executed** in the dev sandbox |
 
 ## First run
 

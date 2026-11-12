@@ -6,7 +6,7 @@ import {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow,
   type Edge, type Node, type NodeProps, type NodeTypes,
 } from "@xyflow/react";
-import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, RotateCcw, Save, Search, Workflow } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, Database, FileCode2, FileInput, FolderOutput, GitFork, Layers, Plus, RotateCcw, Save, Search, Trash2, Workflow } from "lucide-react";
 import { api, errMsg, qs } from "@/lib/api";
 import type { StudioModule } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -15,12 +15,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/misc";
 import { nodeTypes as studioNodeTypes } from "@/components/studio/module-node";
 import { deserialize, effective, StudioContext, type PortTypes, type StudioCtx } from "@/components/studio/model";
+import { AddStepDialog, RemoveStepDialog } from "@/components/structure-dialogs";
 import { cleanOverride, StepForm, stepStates, useStepSettings, type Overrides, type StepInfo, type StepOverride } from "@/components/step-settings";
 
 // ---------------------------------------------------------------------------- data
 interface NfNode extends Record<string, unknown> {
   id: string; kind: "input" | "process" | "subworkflow"; label: string; name?: string; file?: string | null; detail?: string;
-  outputs?: string[]; container?: string | null; resource_label?: string | null; condition?: string | null; steps?: string[] | null;
+  outputs?: string[]; output_shapes?: Record<string, string>; container?: string | null; resource_label?: string | null; condition?: string | null; steps?: string[] | null;
   step_info?: StepInfo[] | null; supports_when?: boolean; supports_args?: boolean; state?: "off" | "starved" | "edited";
   position: { x: number; y: number };
 }
@@ -231,7 +232,7 @@ function Canvas({ view, selected, onSelect, focus, states }: {
   return <div ref={box} className="h-full w-full">{view.ctx ? <StudioContext.Provider value={view.ctx}>{flow}</StudioContext.Provider> : flow}</div>;
 }
 
-function StepList({ view, selected, onPick }: { view: MapView; selected: string | null; onPick: (id: string) => void }) {
+function StepList({ view, selected, onPick, onAdd }: { view: MapView; selected: string | null; onPick: (id: string) => void; onAdd?: () => void }) {
   const [q, setQ] = useState("");
   const ql = q.trim().toLowerCase();
   const shown = view.items.filter((i) => !ql || `${i.label} ${i.sub ?? ""}`.toLowerCase().includes(ql));
@@ -243,6 +244,7 @@ function StepList({ view, selected, onPick }: { view: MapView; selected: string 
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a step" aria-label="Find a step"
             className="h-8 w-full rounded-md border border-line bg-ink/40 pl-8 pr-2 text-[13px] placeholder:text-muted/70 focus:border-accent focus:outline-none" />
         </label>
+        {onAdd && <Button size="sm" variant="secondary" className="w-full" onClick={onAdd}><Plus />Add step</Button>}
         <p className="text-[11.5px] text-muted">{plural(view.items.filter((i) => i.group === "Steps").length, "step")} · click one to find it on the map</p>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -392,6 +394,23 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view"
   }, [dirty]);
   const states = useMemo(() => (nf?.ok ? stepStates(nf.nodes, nf.edges, normalize(pending)) : undefined), [nf, pending]);
   const editable = mode === "edit" && !!steps.data?.editable;
+  const [addOpen, setAddOpen] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [selectAfterLoad, setSelectAfterLoad] = useState<string | null>(null);
+  useEffect(() => {
+    if (selectAfterLoad && nf?.nodes.some((n) => n.id === selectAfterLoad)) { setSel(selectAfterLoad); setFocus((f) => f + 1); setSelectAfterLoad(null); }
+  }, [nf, selectAfterLoad]);
+  const guard = (fn: () => void) => () => (dirty ? toast.message("Save or discard your step settings first.") : fn());
+  const structureDone = (verb: string) => (r: { step: string; version?: string }) => {
+    toast.success(`${verb} ${r.step} as ${r.version}. Earlier versions are kept as they were.`);
+    qc.invalidateQueries({ queryKey: ["pipeline", pid] });
+    qc.invalidateQueries({ queryKey: ["pipelines"] });
+    qc.invalidateQueries({ queryKey: ["pipeline-map", pid] });
+    qc.invalidateQueries({ queryKey: ["pipeline-steps", pid] });
+    setSel(null);
+    if (verb === "Added") setSelectAfterLoad(r.step);
+    nav(`/studio/pipeline/${pid}`, { replace: true });
+  };
   const setStep = (id: string, o: StepOverride) => setPending((p) => {
     const n = { ...p };
     const c = cleanOverride(o);
@@ -438,14 +457,26 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view"
           </div>
         </details>
       ))}
+      {editable && (
+        <Button size="sm" variant="danger" onClick={guard(() => setRemoving(node.id))}><Trash2 />Remove this step</Button>
+      )}
       {!editable && (steps.data.editable
         ? <p className="text-[11.5px] text-muted"><Link className="text-accent hover:underline" to={`/studio/pipeline/${pid}${qs({ version: versionId })}`}>Edit in Pipeline Studio</Link> to change it.</p>
         : <p className="text-[11.5px] text-muted">Use <b className="font-medium text-text">Edit as new pipeline</b> to change it in your own copy.</p>)}
     </section>
   ) : null;
 
+  const structNodes = (nf?.nodes ?? []).map((n) => ({ id: n.id, kind: n.kind, label: n.label, outputs: n.outputs, output_shapes: n.output_shapes as Record<string, string> | undefined }));
   return (
     <div className="flex h-full flex-col">
+      {editable && steps.data && (
+        <>
+          <AddStepDialog open={addOpen} onOpenChange={setAddOpen} pid={pid} baseVersionId={steps.data.version_id} nextLabel={nextLabel}
+            nodes={structNodes} defaultAfter={sel} onDone={structureDone("Added")} />
+          {removing && <RemoveStepDialog open onOpenChange={(o) => !o && setRemoving(null)} pid={pid} baseVersionId={steps.data.version_id} nextLabel={nextLabel}
+            step={removing} onDone={structureDone("Removed")} />}
+        </>
+      )}
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2">
         {toolbar}
         <div className="flex-1" />
@@ -458,7 +489,7 @@ function Full({ pid, versionId, toolbar, canFork, onFork, onDirty, mode = "view"
         )}
       </div>
       <div className="flex min-h-0 flex-1">
-        {view && <StepList view={view} selected={sel} onPick={pick} />}
+        {view && <StepList view={view} selected={sel} onPick={pick} onAdd={editable ? guard(() => setAddOpen(true)) : undefined} />}
         <div className="relative min-w-0 flex-1 bg-ink/40">
           {(q.isLoading || loading) && <div className="flex h-full items-center justify-center text-[13px] text-muted">Loading the map…</div>}
           {q.isError && <p className="p-6 text-[13px] text-bad">{errMsg(q.error)}</p>}

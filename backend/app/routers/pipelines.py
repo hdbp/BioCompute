@@ -20,6 +20,8 @@ from ..security import audit, require_scientist, require_viewer
 from ..services import access, fs, nf_map, nfschema
 from ..services import pipeline_edit as pedit
 from ..services import step_settings
+from ..services import custom_modules as cm
+from ..services import nf_edit
 from ..services import pipelines as svc
 
 STUDIO_SNAPSHOT = "studio_graph.json"  # written next to each published Studio version
@@ -376,6 +378,70 @@ def step_settings_save(pid: str, body: StepSettingsIn, user: User = Depends(requ
     db.refresh(p)
     newv = next(x for x in p.versions if x.version == label)
     return {"version_id": newv.id, "version": label, "steps": steps}
+
+
+# --------------------------------------------------------------------------- add / remove steps (code edits)
+class StructureIn(BaseModel):
+    base_version_id: str
+    op: str = Field(pattern="^(add|remove)$")
+    step: str | None = None            # remove: the step; add: the new step's name (optional)
+    connect: bool = False              # remove: steps reading its output read its input instead
+    module_id: str | None = None       # add: library module
+    after: str | None = None           # add: the step it follows
+    output: str | None = None          # add: which output of `after` it reads
+    extra_params: dict[str, str] = {}  # add: other file inputs -> new pipeline parameter names
+    dry_run: bool = True
+
+
+@router.post("/{pid}/structure")
+def change_structure(pid: str, body: StructureIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Add or remove a step of your own Nextflow copy. dry_run returns the code change; otherwise a new version."""
+    p = get_pipeline(db, pid, user, edit=True)
+    if not pedit.is_copy(p) or p.source_type == "studio":
+        raise HTTPException(403, "Originals are never changed: use “Edit as new pipeline” to make your own copy first")
+    base = get_version(p, body.base_version_id)
+    root = Path(base.path)
+    if body.op == "remove":
+        if not body.step:
+            raise HTTPException(400, "Which step?")
+        plan = nf_edit.plan_remove(root, body.step, connect=body.connect)
+    else:
+        if not (body.module_id and body.after and body.output):
+            raise HTTPException(400, "Choose a module, the step it follows and that step's output")
+        mod = cm.index(db, user).get(body.module_id)
+        if not mod:
+            raise HTTPException(404, f"No module {body.module_id}")
+        plan = nf_edit.plan_add(root, mod, body.after, body.output, body.step, body.extra_params)
+    if body.dry_run or not plan.get("ok"):
+        return nf_edit.preview(plan)
+    files = dict(plan["files"])
+    if body.op == "remove":
+        # step settings of the removed step (and of steps inside it) go too
+        steps = step_settings.load(root)
+        node = next((n for n in nf_map.build_map(root).get("nodes", []) if n["id"] == body.step), {})
+        gone = {body.step, *[s["id"] for s in node.get("step_info") or []]}
+        if any(k in steps for k in gone):
+            for k, v in step_settings.changes_for(root, {k: v for k, v in steps.items() if k not in gone}).items():
+                if k != "nextflow.config":
+                    files[k] = v
+    dest, label = pedit.new_version_dir(p)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        pedit.write_version(base, dest, files)
+        after_map = nf_map.build_map(dest)
+        ids = {n["id"] for n in after_map.get("nodes", [])}
+        if not after_map.get("ok") or (body.op == "remove" and plan["step"] in ids) or (body.op == "add" and plan["step"] not in ids):
+            raise HTTPException(409, "BioCompute could not confirm the change in the new code; nothing was saved. Use Edit code instead.")
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    svc.register_from_dir(db, dest, source_type=p.source_type, name=p.name, version=label, pipeline=p)
+    audit(db, user.username, f"pipeline.step_{body.op}", p.slug, version=label, base=base.version, step=plan["step"],
+          module=body.module_id, after=body.after, connect=body.connect)
+    db.commit()
+    db.refresh(p)
+    newv = next(x for x in p.versions if x.version == label)
+    return {**nf_edit.preview(plan), "version_id": newv.id, "version": label}
 
 
 # --------------------------------------------------------------------------- map

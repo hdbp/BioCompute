@@ -1,4 +1,5 @@
 """Pipeline maps: the Studio graph of each published version, and maps read from Nextflow code."""
+import json
 import shutil
 from pathlib import Path
 
@@ -172,3 +173,60 @@ def test_step_settings_on_the_map_are_a_config_on_a_new_version(client, auth):
     s3 = client.post(f"/api/pipelines/{cid}/steps", headers=auth, json={"base_version_id": s["version_id"], "overrides": {}}).json()
     p3 = {v["version"]: Path(v["path"]) for v in client.get(f"/api/pipelines/{cid}", headers=auth).json()["versions"]}[s3["version"]]
     assert (p3 / "nextflow.config").read_text().count("biocompute_steps.config") == 1
+
+
+def test_add_and_remove_steps_of_a_nextflow_copy(client, auth):
+    shutil.copytree(FIXTURE, RAW / "nfcore_struct", dirs_exist_ok=True)
+    orig = client.post("/api/pipelines/import/local", headers=auth, json={"path": "raw:nfcore_struct", "name": "Struct demo"}).json()
+    v0 = client.get(f"/api/pipelines/{orig['id']}", headers=auth).json()["versions"][0]["id"]
+    assert client.post(f"/api/pipelines/{orig['id']}/structure", headers=auth,
+                       json={"base_version_id": v0, "op": "remove", "step": "FASTQC"}).status_code == 403
+    cid = client.post(f"/api/pipelines/{orig['id']}/fork", headers=auth, json={"name": "Struct demo (mine)"}).json()["pipeline_id"]
+    v1 = client.get(f"/api/pipelines/{cid}", headers=auth).json()["versions"][0]["id"]
+    # settings on TRIMGALORE are dropped with it
+    s = client.post(f"/api/pipelines/{cid}/steps", headers=auth, json={"base_version_id": v1, "overrides": {"TRIMGALORE": {"cpus": 2}, "FASTQC": {"cpus": 3}}}).json()
+
+    def struct(**kw):
+        return client.post(f"/api/pipelines/{cid}/structure", headers=auth, json=kw)
+
+    # removing a step another step reads from needs "connect"
+    r = struct(base_version_id=s["version_id"], op="remove", step="TRIMGALORE").json()
+    assert r["ok"] is False and r["consumers"] == ["FASTQC_TRIMMED"] and r["input"] == "ch_samplesheet"
+    dry = struct(base_version_id=s["version_id"], op="remove", step="TRIMGALORE", connect=True).json()
+    assert dry["ok"] and "-        TRIMGALORE ( ch_samplesheet )" in dry["diff"] and "+        FASTQC_TRIMMED ( ch_samplesheet )" in dry["diff"]
+    assert "version" not in dry  # a preview saves nothing
+    done = struct(base_version_id=s["version_id"], op="remove", step="TRIMGALORE", connect=True, dry_run=False).json()
+    assert done["version"] == "v3"
+    m = client.get(f"/api/pipelines/{cid}/map", headers=auth).json()["nextflow"]
+    ids = {n["id"] for n in m["nodes"]}
+    assert "TRIMGALORE" not in ids and ("take:ch_samplesheet", "FASTQC_TRIMMED") in {(e["source"], e["target"]) for e in m["edges"]}
+    steps = client.get(f"/api/pipelines/{cid}/steps", headers=auth).json()
+    assert steps["overrides"] == {"FASTQC": {"cpus": 3}}
+
+    # add MACS3 (library module) after BOWTIE2_ALIGN's bam, and an all-samples step with an extra file input
+    bad = struct(base_version_id=done["version_id"], op="add", module_id="macs3", after="MULTIQC", output="report")
+    assert bad.status_code == 400 and "per-sample" in bad.text
+    add = struct(base_version_id=done["version_id"], op="add", module_id="macs3", after="BOWTIE2_ALIGN", output="bam", dry_run=False).json()
+    assert add["ok"] and add["step"] == "MACS3" and add["version"] == "v4"
+    paths = {v["version"]: Path(v["path"]) for v in client.get(f"/api/pipelines/{cid}", headers=auth).json()["versions"]}
+    v4 = paths["v4"]
+    assert "MACS3 ( BOWTIE2_ALIGN.out.bam.map { [ it[0], it[1] ] } )" in (v4 / "workflows/demo.nf").read_text()
+    assert "include { MACS3 } from '../modules/local/biocompute/macs3/main'" in (v4 / "workflows/demo.nf").read_text()
+    assert (v4 / "modules/local/biocompute/macs3/main.nf").is_file() and (v4 / "bin/bc_macs3.sh").stat().st_mode & 0o111
+    cfg = (v4 / "nextflow.config").read_text()
+    assert "macs3_gsize = 'hs'" in cfg and cfg.rstrip().endswith("includeConfig 'conf/biocompute_steps.config'")
+    schema = json.loads((v4 / "nextflow_schema.json").read_text())
+    assert "macs3_qvalue" in schema["$defs"]["biocompute_added_steps"]["properties"]
+    assert {"$ref": "#/$defs/biocompute_added_steps"} in schema["allOf"]
+    m4 = client.get(f"/api/pipelines/{cid}/map", headers=auth).json()["nextflow"]
+    assert ("BOWTIE2_ALIGN", "MACS3") in {(e["source"], e["target"]) for e in m4["edges"]}
+    assert next(n for n in m4["nodes"] if n["id"] == "MACS3")["supports_when"]  # can be switched off on the map
+    # same name again is refused; a name is generated otherwise
+    assert struct(base_version_id=add["version_id"], op="add", module_id="macs3", after="BOWTIE2_ALIGN", output="bam", step="MACS3").status_code == 409
+    again = struct(base_version_id=add["version_id"], op="add", module_id="macs3", after="BOWTIE2_ALIGN", output="bam").json()
+    assert again["step"] == "MACS3_2"
+    # the added step can be removed again
+    rm = struct(base_version_id=add["version_id"], op="remove", step="MACS3", dry_run=False).json()
+    assert rm["ok"] and "MACS3" not in {n["id"] for n in client.get(f"/api/pipelines/{cid}/map", headers=auth).json()["nextflow"]["nodes"]}
+    # the original never changed
+    assert "TRIMGALORE ( ch_samplesheet )" in (RAW / "nfcore_struct/workflows/demo.nf").read_text()

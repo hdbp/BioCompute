@@ -115,6 +115,7 @@ def get_app_settings(_: User = Depends(require_viewer), db: Session = Depends(ge
         "enable_demo_engine": s.enable_demo_engine,
         "database": s.database_url.split("://")[0],
         "software": tools.inventory(),
+        "module_tools": tools.module_tools(),
         "discovery": {"authorized_cidrs": s.discovery_authorized_cidrs, "mdns": s.discovery_enable_mdns,
                       "tailscale": s.discovery_enable_tailscale, "htcondor": s.discovery_enable_htcondor,
                       "neighbors": s.discovery_enable_neighbors},
@@ -137,6 +138,7 @@ def put_ui_settings(body: dict, admin: User = Depends(require_admin), db: Sessio
 
 @router.post("/settings/refresh-tools")
 def refresh_tools(_: User = Depends(require_admin)):
+    tools.extend_tool_path()  # tools installed since the service started (scripts/tools.sh)
     tools.clear_cache()
     return tools.inventory()
 

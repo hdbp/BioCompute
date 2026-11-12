@@ -8,6 +8,8 @@
 #   ./install.sh --user                  user service (no sudo); starts at boot only if lingering is allowed
 #   ./install.sh --no-service            prepare everything but do not install a service (print how to start)
 #   ./install.sh --uninstall             stop and remove the service (keeps your data and settings)
+#   ./install.sh --yes                   install missing tools (Nextflow, refgenie, module tools) without asking
+#   ./install.sh --no-tools              do not check for or offer those tools
 #
 # Runs as you (not root): the service runs under your account, so it can read your data with your permissions.
 # sudo is asked for only to install the system service and to configure `tailscale serve`.
@@ -23,6 +25,7 @@ mode=system
 tailnet=auto
 service=yes
 uninstall=no
+tools=ask
 data_dirs=()
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -38,7 +41,9 @@ while [ $# -gt 0 ]; do
     --tailnet) tailnet=yes; shift ;;
     --no-service) service=no; shift ;;
     --uninstall) uninstall=yes; shift ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --yes|-y) tools=yes; shift ;;
+    --no-tools) tools=no; shift ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown option $1 (see ./install.sh --help)" ;;
   esac
 done
@@ -83,7 +88,6 @@ python3 -c 'import venv, ensurepip' 2>/dev/null || die "Python's venv module is 
 command -v npm >/dev/null || die "Node.js (18 or newer) and npm are needed to build the web interface: e.g. sudo apt install nodejs npm, or https://nodejs.org"
 node -e 'process.exit(parseInt(process.versions.node) >= 18 ? 0 : 1)' || die "Node.js 18 or newer is needed (found $(node --version))."
 command -v systemctl >/dev/null || [ "$service" = no ] || die "systemd is needed for the service (or use --no-service)."
-command -v nextflow >/dev/null || warn "Nextflow is not on your PATH: nf-core pipelines need it (the built-in engine still works). See docs/deployment.md."
 
 # ----------------------------------------------------------------------------- python + ui
 say "Installing the Python environment"
@@ -237,6 +241,15 @@ mkdir -p "$state_dir"
 if [ "$tailnet" != no ] && tailscale_up && [ -z "$(cfg_get BIOCOMPUTE_AGENT_LISTEN)" ]; then
   cfg_set BIOCOMPUTE_AGENT_LISTEN tailscale   # workers on the tailnet enroll and report through it
 fi
+
+# ----------------------------------------------------------------------------- tools (Nextflow, refgenie, module tools)
+# Reports what is there and offers to install what is missing; nothing is installed without a yes.
+if [ "$tools" != no ]; then
+  targs=(--config "$config"); [ "$tools" = yes ] && targs+=(--yes)
+  "$root/scripts/tools.sh" "${targs[@]}" || warn "Checking the tools failed; run scripts/tools.sh later."
+fi
+# commands installed into ~/.local/bin must be visible to the service
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) [ -d "$HOME/.local/bin" ] && PATH="$HOME/.local/bin:$PATH" ;; esac
 
 # ----------------------------------------------------------------------------- service
 exec_start="$backend/.venv/bin/python -m app.serve --config $config"

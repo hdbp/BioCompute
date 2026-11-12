@@ -72,6 +72,23 @@ The toolbar picks the version and links to *Details* (parameters, versions, hist
   * **CPUs, memory, time limit, container image.**
   * Steps inside a subworkflow are listed in its panel, each with the same settings.
 
+  **Add step** (above the step list) inserts a module from BioCompute's library, including your own modules, right
+  after a step of the pipeline, reading one of its outputs. BioCompute writes the process
+  (`modules/local/biocompute/<name>/main.nf`, the same process Studio generates) and its script in `bin/`, adds the
+  `include` and the call, and turns the module's settings into pipeline parameters (`nextflow.config`,
+  `nextflow_schema.json`). Inputs the previous step cannot provide (an index, an annotation) become file
+  parameters set at launch. Per-sample modules need a per-sample output (`tuple val(meta), …`).
+
+  **Remove this step** (in the step's panel) deletes its call and tidies what depended on it: collections such as
+  `ch_multiqc_files.mix(STEP.out…)` lose that part, a channel re-assigned from its output keeps its earlier value,
+  an `emit:` of its output becomes empty. If another step is called with its output, you choose whether that step
+  should read what the removed step was given instead; otherwise remove that step first. Anything BioCompute cannot
+  rewrite safely is refused with the reason, and the code editor remains.
+
+  Both show the exact code change before anything is saved, save as a new version, and are checked afterwards by
+  re-reading the new code (the step must be gone, or present). The generated code was **not run with Nextflow** in
+  development: do a first run on a small dataset.
+
   **Save as v2** writes them as `conf/biocompute_steps.config` (plus `conf/biocompute_steps.json`), included last
   from `nextflow.config` so they win over the pipeline's own settings. It reuses the selector the pipeline already
   uses for each step (for example nf-core's fully qualified `withName` names), otherwise `(.*:)?NAME`. The code is

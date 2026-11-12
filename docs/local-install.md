@@ -93,6 +93,22 @@ cd BioCompute
 
 The rest of this page describes doing the same by hand.
 
+## Tools BioCompute works with
+
+`./install.sh` ends its setup with a tools check (`scripts/tools.sh`; run it again any time). It reports what this
+computer has and **offers** to install only what is missing. Nothing is installed without your yes
+(`./install.sh --yes` accepts everything, `--no-tools` skips the check, `scripts/tools.sh --check` only reports).
+
+| Tool | Needed for | Where it goes |
+|---|---|---|
+| Nextflow (and Java 17+) | nf-core and other Nextflow pipelines | `~/.local/bin/nextflow` (official installer); Java from your distribution's packages (sudo) |
+| refgenie | reference genomes | BioCompute's Python environment, linked as `~/.local/bin/refgenie`; optionally an empty genome folder `~/refgenie` |
+| FastQC, fastp, Bowtie2, samtools, MACS3, deepTools, featureCounts, MultiQC, R | the built-in Studio modules | a private bioconda environment, `~/.local/share/biocompute/tools` (micromamba is offered if you have no conda) |
+
+Programs you already have are never replaced: the private environment is searched after your own `PATH`.
+Settings → Execution environment shows what the service sees; *Re-detect* picks up tools installed later.
+Containers (Docker, Apptainer) for nf-core pipelines are not installed by this script.
+
 ## Option A: demo in one command
 
 ```bash

@@ -25,6 +25,7 @@ from .services import setup as setup_svc
 from .services import hostinfo
 from .services import pipelines as pipeline_svc
 from .services import runner
+from .services import tools
 from . import agent_listener
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -99,6 +100,7 @@ def _controller_sampler(interval: float = 30.0) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    tools.extend_tool_path()
     s = get_settings()
     migrate()
     bootstrap()

@@ -101,6 +101,9 @@ def _process_info(raw: str, clean: str) -> dict[str, Any]:
         end = re.search(r"(?m)^\s*(when|script|shell|exec|stub|input):\s*$", clean[m.end():])
         sect = raw[m.end(): m.end() + end.start() if end else len(raw)]
         info["outputs"] = list(dict.fromkeys(re.findall(rf"emit:\s*({IDENT})", sect)))
+        # per output: "tuple" ([meta, files], per sample) or "path"/"val" (no sample information)
+        info["output_shapes"] = {e: ("tuple" if ln.strip().startswith("tuple") else ln.strip().split("(")[0].split()[0])
+                                 for ln in sect.splitlines() for e in re.findall(rf"emit:\s*({IDENT})", ln)}
     m = re.search(r"(?m)^\s*container\s+(.+)$", raw)
     if m:
         names = re.findall(r"(?:biocontainers/|depot\.galaxyproject\.org/singularity/|/)([a-z0-9][a-z0-9_.-]*?)[:@]", m.group(1))
@@ -277,6 +280,7 @@ def build_map(pipeline_dir: str | Path) -> dict[str, Any]:
                 "name": info["name"], "file": info.get("file"), "outputs": info.get("outputs", []),
                 "container": info.get("container"), "resource_label": info.get("label"), "steps": info.get("steps"),
                 "step_info": info.get("step_info"), "supports_when": bool(info.get("supports_when")),
+                "output_shapes": info.get("output_shapes") or {},
                 "supports_args": bool(info.get("supports_args")),
                 "condition": " and ".join(conds) if conds else None,
             })
@@ -308,7 +312,7 @@ def build_map(pipeline_dir: str | Path) -> dict[str, Any]:
 def _sub_info(f: "_File | None", name: str, scope) -> dict[str, Any]:
     """Emitted channels and the steps a subworkflow calls (one level)."""
     if not f or name not in f.workflows:
-        return {"outputs": [], "steps": []}
+        return {"outputs": [], "steps": [], "step_info": [], "output_shapes": {}}
     a, b = f.workflows[name]
     body = f.text[a:b]
     emit = re.search(r"(?m)^\s*emit:\s*$", body)
@@ -316,10 +320,17 @@ def _sub_info(f: "_File | None", name: str, scope) -> dict[str, Any]:
     main = body[:emit.start()] if emit else body
     comps = scope(f)
     steps = [c for c in dict.fromkeys(re.findall(rf"(?<![.\w])({IDENT})\s*\(", main)) if c in comps]
+    shapes = {}
+    for o in outputs:
+        m = re.search(rf"(?m)^\s*{o}\s*=\s*({IDENT})\.out\.({IDENT})", body[emit.end():]) if emit else None
+        if m and m.group(1) in comps:
+            shapes[o] = (comps[m.group(1)].get("output_shapes") or {}).get(m.group(2), "unknown")
+        else:
+            shapes[o] = "unknown"
     info = [{"id": c, "name": comps[c]["name"], "kind": comps[c]["kind"], "file": comps[c].get("file"),
              "supports_when": bool(comps[c].get("supports_when")), "supports_args": bool(comps[c].get("supports_args")),
              "container": comps[c].get("container"), "resource_label": comps[c].get("label")} for c in steps]
-    return {"outputs": outputs, "steps": steps, "step_info": info}
+    return {"outputs": outputs, "steps": steps, "step_info": info, "output_shapes": shapes}
 
 
 def _layout(nodes: dict[str, dict[str, Any]], edges: set[tuple[str, str]]) -> None:
