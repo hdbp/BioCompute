@@ -52,7 +52,13 @@ if [ -z "${BIOCOMPUTE_AGENT_LISTEN:-}" ] && command -v tailscale >/dev/null 2>&1
   export BIOCOMPUTE_AGENT_LISTEN=tailscale
 fi
 cd "$root/backend"
-[ -d .venv ] || { python3 -m venv .venv && .venv/bin/pip install -q -r requirements-dev.txt; }
+# Python packages: (re)installed when the requirement files changed since the last install (e.g. after git pull)
+[ -d .venv ] || python3 -m venv .venv
+if ! cat requirements*.txt | cmp -s - .venv/.biocompute-reqs; then
+  echo "Installing the Python packages (requirements changed)"
+  .venv/bin/python -m pip --version >/dev/null 2>&1 || .venv/bin/python -m ensurepip --upgrade >/dev/null
+  .venv/bin/python -m pip install -q -r requirements-dev.txt && cat requirements*.txt > .venv/.biocompute-reqs
+fi
 if [ "${1:-}" = "admin" ]; then
   shift
   exec .venv/bin/python -m app.cli "$@"
@@ -109,5 +115,10 @@ else
   echo "Agent listener off: other machines cannot enroll (start Tailscale, or set BIOCOMPUTE_AGENT_LISTEN=<ip>:8765)"
 fi
 cd "$root/frontend"
-[ -d node_modules ] || npm ci
+# web packages: (re)installed when package-lock.json changed since the last install (e.g. after git pull added one);
+# the same marker as install.sh
+if [ ! -d node_modules ] || ! cmp -s package-lock.json node_modules/.biocompute-lock; then
+  echo "Installing the web interface's packages (package-lock.json changed)"
+  npm ci --no-audit --no-fund --loglevel=error && cp package-lock.json node_modules/.biocompute-lock
+fi
 BIOCOMPUTE_API="http://127.0.0.1:$port" npm run dev -- --host 127.0.0.1 --port "$ui_port" --strictPort
