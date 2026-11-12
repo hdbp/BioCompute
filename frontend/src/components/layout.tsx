@@ -57,7 +57,7 @@ export function Layout() {
   useLiveUpdates();
   useEffect(() => setMobileOpen(false), [loc.pathname]);
   const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api.get<Dash>("/api/dashboard"), refetchInterval: 15000 });
-  const fullBleed = loc.pathname.startsWith("/studio") || loc.pathname.startsWith("/explore");
+  const fullBleed = loc.pathname.startsWith("/studio") || loc.pathname.startsWith("/explore") || /^\/pipelines\/[^/]+\/map$/.test(loc.pathname);
 
   const nav = (
     <nav className="flex flex-col gap-0.5 px-2" aria-label="Main">

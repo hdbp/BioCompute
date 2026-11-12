@@ -266,7 +266,7 @@ function CompareDialog({ preset, current, defaults, onClose }: { preset: Preset;
   );
 }
 
-function DuplicateDialog({ open, onOpenChange, pid, name }: { open: boolean; onOpenChange: (o: boolean) => void; pid: string; name: string }) {
+export function DuplicateDialog({ open, onOpenChange, pid, name }: { open: boolean; onOpenChange: (o: boolean) => void; pid: string; name: string }) {
   const nav = useNavigate();
   const [n, setN] = useState(`${name} copy`);
   const dup = useMutation({ mutationFn: () => api.post<{ id: string }>(`/api/pipelines/${pid}/duplicate`, { name: n }), onSuccess: (r) => { onOpenChange(false); nav(`/pipelines/${r.id}`); }, onError: (e) => toast.error(errMsg(e)) });

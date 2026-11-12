@@ -47,7 +47,11 @@ file** nodes likewise take a *default path* (an index, a FASTA, a GTF). All path
 
 ## Pipeline map and versions
 
-Every pipeline page opens on a **Map** tab (also available in the launch form: *Show pipeline map*):
+Every pipeline page opens on a **Map** tab (also available in the launch form: *Show pipeline map*). **Open full view**
+shows the map on its own page, laid out like Studio: the steps on the left (search, click to find one on the map), the
+graph in the middle, and the selected step's details on the right (settings, container, condition, what it receives
+from and sends to). Large pipelines open at a readable zoom starting at their inputs; pan, zoom, or use the minimap
+for the rest.
 
 * **Built in Studio:** the graph of the selected version. Each published version keeps the graph it was built from
   (`studio_graph.json` next to its files), so earlier versions can still be viewed. *Edit in Pipeline Studio* opens the

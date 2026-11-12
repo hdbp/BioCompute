@@ -198,7 +198,7 @@ export default function LaunchPage() {
                 {showMap && (
                   <div className="mt-2">
                     <Suspense fallback={<Skeleton className="h-[560px]" />}>
-                      <PipelineMap pid={pipelineId} versionId={versionId || undefined} canCopy={false} onCopy={() => undefined} />
+                      <PipelineMap pid={pipelineId} versionId={versionId || undefined} canCopy={false} onCopy={() => undefined} newTab />
                     </Suspense>
                   </div>
                 )}
