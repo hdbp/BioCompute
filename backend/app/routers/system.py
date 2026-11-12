@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..db import get_db
 from ..models import AppSetting, Experiment, Node, NodeMetric, Pipeline, Run, RunEvent, User
-from ..security import audit, get_current_user, require_admin, require_viewer
+from ..security import audit, require_admin, require_media_viewer, require_viewer
 from ..services import cluster, events, fs, tools
 
 router = APIRouter(prefix="/api", tags=["system"])
@@ -144,7 +144,7 @@ def refresh_tools(_: User = Depends(require_admin)):
 
 
 @router.get("/events")
-async def event_stream(request: Request, _: User = Depends(get_current_user)):
+async def event_stream(request: Request, _: User = Depends(require_media_viewer)):
     sub = events.subscribe()
 
     async def gen():

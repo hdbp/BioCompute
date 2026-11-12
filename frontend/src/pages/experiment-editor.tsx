@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ShareButton, SharingBadge } from "@/components/sharing";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, Dna, Download, FilePlus2, FlaskConical, Play, Redo2, Save, Table2, Undo2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
@@ -28,9 +29,29 @@ export default function ExperimentEditorPage() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
   const user = useAuth((s) => s.user);
-  const readOnly = !can(user, "scientist");
   const q = useQuery({ queryKey: ["experiment", id], queryFn: () => api.get<ExperimentDetail>(`/api/experiments/${id}`) });
   const exp = q.data;
+  // someone else's experiment opens read-only: it can be used in runs, or copied to change it
+  const readOnly = !can(user, "scientist") || exp?.can_edit === false;
+  const nav = useNavigate();
+  const [sharing, setSharing] = useState(false);
+  const setVisibility = async (v: "private" | "lab") => {
+    setSharing(true);
+    try {
+      const r = await api.put<ExperimentDetail>(`/api/experiments/${id}/visibility`, { visibility: v });
+      qc.setQueryData(["experiment", id], r);
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+      toast.success(v === "lab" ? "Shared with the lab: everyone can see and use it; only you can change it" : "Private: only you (and administrators) can see it");
+    } catch (e) { toast.error(errMsg(e)); } finally { setSharing(false); }
+  };
+  const copyMine = async () => {
+    try {
+      const r = await api.post<ExperimentDetail>(`/api/experiments/${id}/duplicate`);
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+      toast.success(`“${r.name}” is your own copy`);
+      nav(`/experiments/${r.id}`);
+    } catch (e) { toast.error(errMsg(e)); }
+  };
 
   const [rows, setRows] = useState<Row[]>([]);
   const [baseline, setBaseline] = useState("[]");
@@ -226,8 +247,16 @@ export default function ExperimentEditorPage() {
                 </Select>
               )}
               <GenomeSelect value={exp.genome ?? ""} disabled={readOnly} onChange={(g) => updateMeta({ genome: g || null })} />
-              <span className="text-xs text-muted">Updated <Ago ts={exp.updated_at} />{exp.created_by ? ` by ${exp.created_by}` : ""}</span>
+              <span className="text-xs text-muted">Updated <Ago ts={exp.updated_at} />{exp.created_by ? ` · owner ${exp.created_by === user?.username ? "you" : exp.created_by}` : ""}</span>
+              {exp.can_edit && exp.created_by && <ShareButton visibility={exp.visibility ?? "lab"} onChange={setVisibility} loading={sharing} compact />}
+              {!exp.can_edit && <SharingBadge owner={exp.created_by} visibility={exp.visibility} />}
             </div>
+            {exp.can_edit === false && can(user, "scientist") && (
+              <p className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted">
+                This experiment belongs to {exp.created_by}: you can use it in runs, but not change it.
+                <Button size="sm" variant="secondary" onClick={copyMine}>Make my own copy</Button>
+              </p>
+            )}
             {!readOnly && (
               <p className="flex items-center gap-1 pt-0.5 text-xs text-muted">
                 <Check className="size-3 text-ok" />Name, description, assay, genome and the design are saved automatically. Sample rows are saved with the Save button.

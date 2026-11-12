@@ -128,7 +128,8 @@ class Experiment(TimestampMixin, Base):
     custom_columns: Mapped[list[str]] = mapped_column(JSON, default=list)
     conditions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{name,color,description}]
     contrasts: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{id,name,treatment,reference}]
-    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)  # the owner
+    visibility: Mapped[str] = mapped_column(String(10), default="lab", server_default="lab")  # private | lab
 
     samples: Mapped[list[Sample]] = relationship(
         back_populates="experiment", cascade="all, delete-orphan", order_by="Sample.position"

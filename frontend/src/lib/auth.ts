@@ -25,6 +25,8 @@ export const useAuth = create<AuthState>((set) => ({
   },
   logout: () => {
     try { localStorage.removeItem(KEY); } catch { /* ignore */ }
+    // the file cookie is HttpOnly: only the server can remove it
+    fetch("/api/auth/media-cookie", { method: "DELETE", credentials: "same-origin" }).catch(() => undefined);
     set({ token: null, user: null });
   },
 }));

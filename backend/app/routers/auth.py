@@ -3,13 +3,15 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import AuditEvent, User
 from ..schemas import LoginIn, PasswordChange, PasswordReset, PasswordResetOut, TokenOut, UserCreate, UserOut, UserUpdate
-from ..security import audit, create_access_token, get_current_user, hash_secret, require_admin, verify_secret
+from ..config import get_settings
+from ..security import (MEDIA_COOKIE, audit, create_access_token, create_media_token, get_current_user, hash_secret,
+                        require_admin, verify_secret)
 from ..services import accounts
 from ..services import setup as setup_svc
 from pydantic import BaseModel
@@ -245,3 +247,23 @@ def accept_invite(body: InviteAcceptIn, db: Session = Depends(get_db)):
     audit(db, u.username, "auth.invite_accepted", u.username, role=u.role)
     db.commit()
     return TokenOut(access_token=create_access_token(u), user=UserOut.model_validate(u))
+
+
+def _cookie_kwargs(request: Request) -> dict:
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    return {"httponly": True, "samesite": "strict", "path": "/api", "secure": secure}
+
+
+@router.post("/media-cookie")
+def media_cookie(request: Request, response: Response, user: User = Depends(get_current_user)):
+    """Give the browser the cookie that opens files, downloads and live updates (no token in their URLs)."""
+    response.set_cookie(MEDIA_COOKIE, create_media_token(user), max_age=get_settings().token_ttl_minutes * 60,
+                        **_cookie_kwargs(request))
+    return {"ok": True}
+
+
+@router.delete("/media-cookie")
+def clear_media_cookie(request: Request, response: Response):
+    """Sign-out: forget the file cookie."""
+    response.delete_cookie(MEDIA_COOKIE, **_cookie_kwargs(request))
+    return {"ok": True}

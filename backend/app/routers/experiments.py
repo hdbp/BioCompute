@@ -4,6 +4,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -11,57 +12,74 @@ from ..models import Experiment, Sample, User
 from ..schemas import (ExperimentDetail, ExperimentIn, ExperimentOut, ExperimentValidateIn, PairDetectIn, SampleIn,
                        SampleOut, SamplesheetImportIn, SamplesReplace)
 from ..security import audit, require_scientist, require_viewer
-from ..services import fs, samplesheet
+from ..services import access, fs, samplesheet
 from .pipelines import get_pipeline, get_version
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 samples_router = APIRouter(prefix="/api/samples", tags=["experiments"])
 
 
-def get_exp(db: Session, eid: str) -> Experiment:
+def get_exp(db: Session, eid: str, user: User | None = None, edit: bool = False) -> Experiment:
+    """An experiment the user may see (someone else's private one is "not found"); `edit` needs owner or admin."""
     e = db.get(Experiment, eid)
     if not e:
         raise HTTPException(404, "Experiment not found")
+    if user is not None:
+        access.check_view(user, e.created_by, e.visibility, "Experiment")
+        if edit:
+            access.check_edit(user, e.created_by, f"“{e.name}”")
     return e
 
 
-def _out(e: Experiment) -> ExperimentOut:
+def _out(e: Experiment, user: User) -> ExperimentOut:
     o = ExperimentOut.model_validate(e)
     o.sample_count = len(e.samples)
+    o.can_edit = access.can_edit(user, e.created_by)
+    return o
+
+
+def _detail(e: Experiment, user: User) -> ExperimentDetail:
+    o = ExperimentDetail.model_validate(e)
+    o.sample_count = len(e.samples)
+    o.can_edit = access.can_edit(user, e.created_by)
     return o
 
 
 @router.get("", response_model=list[ExperimentOut])
-def list_experiments(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    return [_out(e) for e in db.query(Experiment).order_by(Experiment.updated_at.desc()).all()]
+def list_experiments(user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    q = db.query(Experiment)
+    f = access.visible_filter(user, Experiment.created_by, Experiment.visibility)
+    if f is not None:
+        q = q.filter(f)
+    return [_out(e, user) for e in q.order_by(Experiment.updated_at.desc()).all()]
 
 
 @router.post("", response_model=ExperimentDetail)
 def create_experiment(body: ExperimentIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
     e = Experiment(**body.model_dump(), created_by=user.username)
     db.add(e)
-    audit(db, user.username, "experiment.create", body.name)
+    audit(db, user.username, "experiment.create", body.name, visibility=e.visibility)
     db.commit()
-    return e
+    return _detail(e, user)
 
 
 @router.get("/{eid}", response_model=ExperimentDetail)
-def experiment_detail(eid: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    return get_exp(db, eid)
+def experiment_detail(eid: str, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    return _detail(get_exp(db, eid, user), user)
 
 
 @router.put("/{eid}", response_model=ExperimentDetail)
 def update_experiment(eid: str, body: ExperimentIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    e = get_exp(db, eid)
+    e = get_exp(db, eid, user, edit=True)
     for k, v in body.model_dump(exclude_unset=True).items():  # fields a client does not send stay as they are
         setattr(e, k, v)
     db.commit()
-    return e
+    return _detail(e, user)
 
 
 @router.delete("/{eid}")
 def delete_experiment(eid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    e = get_exp(db, eid)
+    e = get_exp(db, eid, user, edit=True)
     from ..models import Run
 
     if db.query(Run).filter(Run.experiment_id == e.id).count():
@@ -74,9 +92,11 @@ def delete_experiment(eid: str, user: User = Depends(require_scientist), db: Ses
 
 @router.post("/{eid}/duplicate", response_model=ExperimentDetail)
 def duplicate_experiment(eid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    e = get_exp(db, eid)
-    n = Experiment(name=f"{e.name} (copy)", description=e.description, assay=e.assay, custom_columns=list(e.custom_columns),
-                   conditions=list(e.conditions), contrasts=list(e.contrasts), created_by=user.username)
+    """Your own copy of an experiment you can see."""
+    e = get_exp(db, eid, user)
+    n = Experiment(name=f"{e.name} (copy)", description=e.description, assay=e.assay, genome=e.genome,
+                   custom_columns=list(e.custom_columns), conditions=list(e.conditions), contrasts=list(e.contrasts),
+                   created_by=user.username, visibility=e.visibility)
     db.add(n)
     db.flush()
     for s in e.samples:
@@ -85,13 +105,13 @@ def duplicate_experiment(eid: str, user: User = Depends(require_scientist), db: 
                       is_control=s.is_control, control_id=s.control_id, files=dict(s.files), attributes=dict(s.attributes)))
     db.commit()
     db.refresh(n)
-    return n
+    return _detail(n, user)
 
 
 @router.put("/{eid}/samples", response_model=ExperimentDetail)
 def replace_samples(eid: str, body: SamplesReplace, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
     """Bulk save from the spreadsheet editor (the table is the source of truth)."""
-    e = get_exp(db, eid)
+    e = get_exp(db, eid, user, edit=True)
     existing = {s.id: s for s in e.samples}
     keep: set[str] = set()
     for i, s in enumerate(body.samples):
@@ -111,7 +131,7 @@ def replace_samples(eid: str, body: SamplesReplace, user: User = Depends(require
             db.delete(obj)
     db.commit()
     db.refresh(e)
-    return e
+    return _detail(e, user)
 
 
 def _check_files(files: dict) -> None:
@@ -133,7 +153,7 @@ def _check_files(files: dict) -> None:
 
 @router.post("/{eid}/samples", response_model=SampleOut)
 def add_sample(eid: str, body: SampleIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    e = get_exp(db, eid)
+    e = get_exp(db, eid, user, edit=True)
     _check_files(body.files)
     s = Sample(experiment_id=e.id, position=len(e.samples), **body.model_dump(exclude={"id"}))
     db.add(s)
@@ -146,6 +166,7 @@ def patch_sample(sid: str, body: SampleIn, user: User = Depends(require_scientis
     s = db.get(Sample, sid)
     if not s:
         raise HTTPException(404)
+    get_exp(db, s.experiment_id, user, edit=True)
     _check_files(body.files)
     for k, v in body.model_dump(exclude={"id"}).items():
         setattr(s, k, v)
@@ -158,6 +179,7 @@ def delete_sample(sid: str, user: User = Depends(require_scientist), db: Session
     s = db.get(Sample, sid)
     if not s:
         raise HTTPException(404)
+    get_exp(db, s.experiment_id, user, edit=True)
     db.delete(s)
     db.commit()
     return {"ok": True}
@@ -180,7 +202,7 @@ def detect_pairs(body: PairDetectIn, _: User = Depends(require_viewer)):
 def import_samplesheet(eid: str, body: SamplesheetImportIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
     """Import a CSV/TSV samplesheet or metadata table. Known columns map to sample fields,
     file columns to files, everything else becomes custom metadata."""
-    e = get_exp(db, eid)
+    e = get_exp(db, eid, user, edit=True)
     cols, rows = samplesheet.parse_table(body.content)
     if not rows:
         raise HTTPException(400, "No rows found")
@@ -228,7 +250,11 @@ def import_samplesheet(eid: str, body: SamplesheetImportIn, user: User = Depends
             elif file_re.match(c):
                 key = {"fq1": "fastq_1", "r1": "fastq_1", "read1": "fastq_1", "fq2": "fastq_2", "r2": "fastq_2",
                        "read2": "fastq_2", "spectra_filepath": "raw"}.get(lc, lc.replace("fastq1", "fastq_1").replace("fastq2", "fastq_2"))
-                files[key] = samplesheet.guess_virtual(v)
+                vp = samplesheet.guess_virtual(v)
+                if ":" not in vp.split("/", 1)[0] or vp.startswith("/"):
+                    raise HTTPException(400, f"Sample {sid}: {v} is not inside a data folder. An admin can add its folder in "
+                                             "Settings, Controller, Data folders.")
+                files[key] = vp
             else:
                 attrs[c] = v
                 if c not in new_custom:
@@ -240,7 +266,7 @@ def import_samplesheet(eid: str, body: SamplesheetImportIn, user: User = Depends
     audit(db, user.username, "experiment.import_samplesheet", e.name, rows=len(rows), mode=body.mode)
     db.commit()
     db.refresh(e)
-    return e
+    return _detail(e, user)
 
 
 def _pipeline_schema(db: Session, body: ExperimentValidateIn, user: User):
@@ -252,13 +278,13 @@ def _pipeline_schema(db: Session, body: ExperimentValidateIn, user: User):
 
 @router.post("/{eid}/validate")
 def validate_experiment(eid: str, body: ExperimentValidateIn, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    e = get_exp(db, eid)
+    e = get_exp(db, eid, user)
     return samplesheet.validate_experiment(e, _pipeline_schema(db, body, user), body.column_map)
 
 
 @router.post("/{eid}/samplesheet")
 def generate_samplesheet(eid: str, body: ExperimentValidateIn, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    e = get_exp(db, eid)
+    e = get_exp(db, eid, user)
     if e.assay == "proteomics" and not body.pipeline_id:
         cols, rows = samplesheet.proteomics_design(e)
         return {"columns": cols, "rows": rows, "csv": samplesheet.to_csv(rows, cols, "\t"), "format": "openms-design-tsv"}
@@ -269,8 +295,8 @@ def generate_samplesheet(eid: str, body: ExperimentValidateIn, user: User = Depe
 
 
 @router.get("/{eid}/export", response_class=PlainTextResponse)
-def export_metadata(eid: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    e = get_exp(db, eid)
+def export_metadata(eid: str, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    e = get_exp(db, eid, user)
     cols = ["sample_id", "condition", "replicate", "technical_replicate", "batch", "is_control", "control_id",
             "fastq_1", "fastq_2", "raw", *e.custom_columns]
     rows = []
@@ -281,3 +307,17 @@ def export_metadata(eid: str, _: User = Depends(require_viewer), db: Session = D
              **(s.attributes or {})}
         rows.append({k: ("" if v is None else v) for k, v in r.items()})
     return samplesheet.to_csv(rows, cols, "\t")
+
+
+class _VisIn(BaseModel):
+    visibility: str
+
+
+@router.put("/{eid}/visibility", response_model=ExperimentDetail)
+def set_visibility(eid: str, body: _VisIn, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
+    """Share an experiment with the lab, or make it private (owner or admin)."""
+    e = get_exp(db, eid, user, edit=True)
+    e.visibility = access.check_visibility_value(body.visibility)
+    audit(db, user.username, "experiment.visibility", e.name, visibility=e.visibility)
+    db.commit()
+    return _detail(e, user)

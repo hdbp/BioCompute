@@ -74,7 +74,7 @@ export default function JobsPage() {
   const activeTasks = (tasks.data ?? []).filter((t) => !["COMPLETED", "CACHED"].includes((t.status ?? "").toUpperCase()));
   const filtered = !!q.trim() || mine || !!status;
 
-  const cancellable = page.filter((r) => !TERMINAL.includes(r.status) && r.status !== "cancelling");
+  const cancellable = page.filter((r) => !TERMINAL.includes(r.status) && r.status !== "cancelling" && r.can_edit !== false);
   const selected = cancellable.filter((r) => picked.includes(r.id));
   const allPicked = cancellable.length > 0 && selected.length === cancellable.length;
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));

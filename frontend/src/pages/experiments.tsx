@@ -9,6 +9,7 @@ import type { Experiment, ExperimentDetail } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Badge, Empty, Skeleton } from "@/components/ui/misc";
+import { SharingBadge } from "@/components/sharing";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/menu";
 import { Ago, PageHeader, QueryError, usePageTitle } from "@/components/page";
@@ -93,6 +94,7 @@ export default function ExperimentsPage() {
                 <tr key={e.id} className="border-t border-line hover:bg-raised/40">
                   <td className="px-4 py-2.5 max-w-md">
                     <Link to={`/experiments/${e.id}`} className="font-medium hover:text-accent">{e.name}</Link>
+                    <SharingBadge owner={e.created_by} visibility={e.visibility} />
                     {e.description && <p className="truncate text-xs text-muted mt-0.5">{e.description}</p>}
                   </td>
                   <td className="px-3 py-2.5"><Badge>{assayLabel(e.assay)}</Badge></td>
@@ -117,8 +119,8 @@ export default function ExperimentsPage() {
                       <DropdownMenuContent>
                         <DropdownMenuItem onSelect={() => nav(`/experiments/${e.id}`)}><FlaskConical />Open</DropdownMenuItem>
                         <DropdownMenuItem disabled={!e.sample_count} onSelect={() => nav(`/jobs/new?experiment=${e.id}`)}><Play />Run analysis</DropdownMenuItem>
-                        {editor && <DropdownMenuItem onSelect={() => duplicate(e)}><Copy />Duplicate</DropdownMenuItem>}
-                        {editor && <><DropdownMenuSeparator /><DropdownMenuItem danger onSelect={() => setToDelete(e)}><Trash2 />Delete</DropdownMenuItem></>}
+                        {editor && <DropdownMenuItem onSelect={() => duplicate(e)}><Copy />{e.can_edit ? "Duplicate" : "Make my own copy"}</DropdownMenuItem>}
+                        {editor && e.can_edit && <><DropdownMenuSeparator /><DropdownMenuItem danger onSelect={() => setToDelete(e)}><Trash2 />Delete</DropdownMenuItem></>}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </td>

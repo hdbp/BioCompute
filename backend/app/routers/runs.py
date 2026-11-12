@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 from ..db import SessionLocal, get_db
 from ..models import Experiment, Node, Pipeline, PipelineVersion, Run, RunEvent, User
 from ..schemas import RunCreate, RunDetail, RunOut
-from ..security import audit, get_current_user, require_scientist, require_viewer
+from ..security import audit, require_media_viewer, require_scientist, require_viewer
 import shutil
 
-from ..services import cluster, events, fs, runner
+from ..services import access, cluster, events, fs, runner
 from ..services.pipelines import runnable_engines
 from .pipelines import get_pipeline, get_version
 
@@ -24,8 +24,9 @@ jobs_router = APIRouter(prefix="/api/jobs", tags=["runs"])
 results_router = APIRouter(prefix="/api/results", tags=["results"])
 
 
-def _out(db: Session, r: Run, cls=RunOut, **extra):
+def _out(db: Session, r: Run, cls=RunOut, user: User | None = None, **extra):
     o = cls.model_validate({**{c: getattr(r, c) for c in RunOut.model_fields if hasattr(r, c)}, **extra})
+    o.can_edit = bool(user) and access.can_edit(user, r.created_by)
     p = db.get(Pipeline, r.pipeline_id)
     v = db.get(PipelineVersion, r.pipeline_version_id)
     o.pipeline_name = p.name if p else None
@@ -140,22 +141,47 @@ def scan_inputs(exp: Experiment | None, params: dict) -> tuple[bool, int, list[s
     return restricted, total, outside
 
 
-def get_run(db: Session, rid: str) -> Run:
+def can_view_run(db: Session, user: User, r: Run) -> bool:
+    """A run is visible to whoever may see its pipeline and its experiment (private ones stay private)."""
+    if user.role == "admin" or r.created_by == user.username:
+        return True
+    p = db.get(Pipeline, r.pipeline_id)
+    if p is not None and not access.can_view(user, p.owner, p.visibility):
+        return False
+    if r.experiment_id:
+        e = db.get(Experiment, r.experiment_id)
+        if e is not None and not access.can_view(user, e.created_by, e.visibility):
+            return False
+    return True
+
+
+def get_run(db: Session, rid: str, user: User | None = None, edit: bool = False) -> Run:
+    """A run the user may see; `edit` (cancel, resume, delete) needs who started it, or an administrator."""
     r = db.get(Run, rid)
-    if not r:
+    if not r or (user is not None and not can_view_run(db, user, r)):
         raise HTTPException(404, "Run not found")
+    if user is not None and edit:
+        access.check_edit(user, r.created_by, f"Run “{r.name}”")
     return r
 
 
 @router.get("", response_model=list[RunOut])
-def list_runs(status: str | None = None, pipeline_id: str | None = None, limit: int = 200,
-              _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+def list_runs(status: str | None = None, pipeline_id: str | None = None, limit: int = 200, mine: bool = False,
+              user: User = Depends(require_viewer), db: Session = Depends(get_db)):
     q = db.query(Run)
     if status:
         q = q.filter(Run.status.in_(status.split(",")))
     if pipeline_id:
         q = q.filter(Run.pipeline_id == pipeline_id)
-    return [_out(db, r) for r in q.order_by(Run.created_at.desc()).limit(min(limit, 1000)).all()]
+    if mine:
+        q = q.filter(Run.created_by == user.username)
+    out = []
+    for r in q.order_by(Run.created_at.desc()).limit(min(limit, 1000) * 2).all():
+        if can_view_run(db, user, r):
+            out.append(_out(db, r, user=user))
+        if len(out) >= min(limit, 1000):
+            break
+    return out
 
 
 @router.post("", response_model=RunDetail)
@@ -170,7 +196,7 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
                                      f"(supports {v.engines}); see Settings → Execution environment")
         engine = avail[0]["engine"]
     exp = db.get(Experiment, body.experiment_id) if body.experiment_id else None
-    if body.experiment_id and not exp:
+    if body.experiment_id and (not exp or not access.can_view(user, exp.created_by, exp.visibility)):
         raise HTTPException(404, "Experiment not found")
     res = clean_resources(body.resources)
     # data-locality-aware placement: every input counts, not only the experiment's files
@@ -223,7 +249,7 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
         shutil.rmtree(run.run_dir, ignore_errors=True)
         raise HTTPException(422, {"message": "Validation failed", "issues": issues})
     if body.dry_run:
-        detail = _detail(db, run)
+        detail = _detail(db, run, user)
         db.rollback()
         shutil.rmtree(run.run_dir, ignore_errors=True)
         return detail
@@ -232,7 +258,6 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
     audit(db, user.username, "run.launch", run.id, pipeline=p.slug, engine=engine, output=body.output_dir)
     if body.project_id:  # list the run in the project; a project the user cannot change is ignored, not an error
         from ..models import Project
-        from ..services import access
         from .projects import add_item
         proj = db.get(Project, body.project_id)
         if proj and access.can_view(user, proj.owner, proj.visibility) and access.can_edit(user, proj.owner):
@@ -240,60 +265,60 @@ def create_run(body: RunCreate, user: User = Depends(require_scientist), db: Ses
     db.commit()
     runner.start(db, run)
     db.commit()
-    return _detail(db, run)
+    return _detail(db, run, user)
 
 
-def _detail(db: Session, r: Run) -> RunDetail:
+def _detail(db: Session, r: Run, user: User | None = None) -> RunDetail:
     evs = db.query(RunEvent).filter(RunEvent.run_id == r.id).order_by(RunEvent.id).all() if r.id else []
-    return _out(db, r, RunDetail, provenance=r.provenance or {},
+    return _out(db, r, RunDetail, user=user, provenance=r.provenance or {},
                 events=[{"id": e.id, "ts": e.ts, "kind": e.kind, "message": e.message, "data": e.data} for e in evs])
 
 
 @router.get("/{rid}", response_model=RunDetail)
-def run_detail(rid: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    return _detail(db, get_run(db, rid))
+def run_detail(rid: str, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    return _detail(db, get_run(db, rid, user), user)
 
 
 @router.post("/{rid}/cancel", response_model=RunOut)
 def cancel_run(rid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    r = get_run(db, rid)
+    r = get_run(db, rid, user, edit=True)
     runner.cancel(db, r)
     audit(db, user.username, "run.cancel", r.id)
     db.commit()
-    return _out(db, r)
+    return _out(db, r, user=user)
 
 
 @router.post("/{rid}/resume", response_model=RunOut)
 def resume_run(rid: str, user: User = Depends(require_scientist), db: Session = Depends(get_db)):
-    r = get_run(db, rid)
+    r = get_run(db, rid, user, edit=True)
     runner.resume(db, r, user.username)
     audit(db, user.username, "run.resume", r.id, attempt=r.attempt)
     db.commit()
-    return _out(db, r)
+    return _out(db, r, user=user)
 
 
 @router.get("/{rid}/log")
-def run_log(rid: str, which: str = "stdout", offset: int = 0, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    return runner.read_log(get_run(db, rid), which, offset)
+def run_log(rid: str, which: str = "stdout", offset: int = 0, user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    return runner.read_log(get_run(db, rid, user), which, offset)
 
 
 @router.get("/{rid}/files/{name}")
-def run_file(rid: str, name: str, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
+def run_file(rid: str, name: str, user: User = Depends(require_media_viewer), db: Session = Depends(get_db)):
     allowed = {"params.json", "samplesheet.csv", "experimental_design.tsv", "provenance.json", "trace.txt",
                "report.html", "timeline.html", "biocompute.config", "command.json", "nextflow.log", "stdout.log"}
     if name not in allowed:
         raise HTTPException(404)
-    p = Path(get_run(db, rid).run_dir) / name
+    p = Path(get_run(db, rid, user).run_dir) / name
     if not p.exists():
         raise HTTPException(404, f"{name} not available for this run")
     return FileResponse(p, media_type="text/html" if name.endswith(".html") else "text/plain")
 
 
 @router.get("/{rid}/stream")
-async def stream_run(rid: str, request: Request, user: User = Depends(get_current_user)):
+async def stream_run(rid: str, request: Request, user: User = Depends(require_media_viewer)):
     """Server-sent events: incremental log lines and status/progress changes for one run."""
     with SessionLocal() as db:
-        run = get_run(db, rid)
+        run = get_run(db, rid, user)
         offset = max(0, runner.read_log(run, "stdout", 0, 0)["size"] - 64_000)
     sub = events.subscribe()
 
@@ -326,9 +351,11 @@ async def stream_run(rid: str, request: Request, user: User = Depends(get_curren
 
 # --------------------------------------------------------------------------- jobs (tasks)
 @jobs_router.get("")
-def list_jobs(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
+def list_jobs(user: User = Depends(require_viewer), db: Session = Depends(get_db)):
     out = []
     for r in db.query(Run).filter(Run.status.in_(("running", "cancelling", "queued"))).all():
+        if not can_view_run(db, user, r):
+            continue
         for t in (r.progress or {}).get("tasks", []):
             out.append({**t, "run_id": r.id, "run_name": r.name})
     return out
@@ -336,19 +363,21 @@ def list_jobs(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
 
 # --------------------------------------------------------------------------- results
 @results_router.get("")
-def list_results(_: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    runs = db.query(Run).filter(Run.status.in_(("completed", "failed", "cancelled"))).order_by(Run.finished_at.desc()).limit(200).all()
+def list_results(user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    runs = db.query(Run).filter(Run.status.in_(("completed", "failed", "cancelled"))).order_by(Run.finished_at.desc()).limit(400).all()
     out = []
     for r in runs:
-        o = _out(db, r)
+        if not can_view_run(db, user, r) or len(out) >= 200:
+            continue
+        o = _out(db, r, user=user)
         outputs = (r.provenance or {}).get("outputs", [])
         out.append({**o.model_dump(), "output_count": len(outputs), "output_bytes": sum(x.get("size", 0) for x in outputs)})
     return out
 
 
 @results_router.get("/{rid}")
-def run_results(rid: str, path: str = "", _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    r = get_run(db, rid)
+def run_results(rid: str, path: str = "", user: User = Depends(require_viewer), db: Session = Depends(get_db)):
+    r = get_run(db, rid, user)
     base = Path(r.output_dir).resolve()
     target = (base / path).resolve()
     if not target.is_relative_to(base):
@@ -367,8 +396,8 @@ def run_results(rid: str, path: str = "", _: User = Depends(require_viewer), db:
 
 
 @results_router.get("/{rid}/file")
-def result_file(rid: str, path: str, download: bool = False, _: User = Depends(require_viewer), db: Session = Depends(get_db)):
-    r = get_run(db, rid)
+def result_file(rid: str, path: str, download: bool = False, user: User = Depends(require_media_viewer), db: Session = Depends(get_db)):
+    r = get_run(db, rid, user)
     base = Path(r.output_dir).resolve()
     target = (base / path).resolve()
     if not target.is_relative_to(base) or not target.is_file():

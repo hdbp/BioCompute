@@ -8,7 +8,7 @@ import {
 import { can } from "@/lib/auth";
 import type { Run } from "@/lib/types";
 import { Breadcrumbs, ErrorBoundary } from "@/components/page";
-import { api, authed } from "@/lib/api";
+import { api, authed, ensureMediaCookie } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/theme";
@@ -39,10 +39,17 @@ function useLiveUpdates() {
   const told = useRef(new Set<string>());
   useEffect(() => {
     if (!token) return;
-    const es = new EventSource(authed("/api/events"));
+    let es: EventSource | null = null;
+    let closed = false;
+    ensureMediaCookie().then(() => { if (!closed) es = openStream(); });
+    function openStream() {
+      const s = new EventSource(authed("/api/events"));
+      s.onmessage = onMessage;
+      return s;
+    }
     let t: ReturnType<typeof setTimeout> | null = null;
     const pending = new Set<string>();
-    es.onmessage = (m) => {
+    function onMessage(m: MessageEvent) {
       try {
         const d = JSON.parse(m.data);
         if (d.topic === "run") {
@@ -67,8 +74,8 @@ function useLiveUpdates() {
         pending.clear();
         t = null;
       }, 400);
-    };
-    return () => { es.close(); if (t) clearTimeout(t); };
+    }
+    return () => { closed = true; es?.close(); if (t) clearTimeout(t); };
   }, [token, qc, me, nav]);
 }
 

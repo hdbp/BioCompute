@@ -173,6 +173,7 @@ class ExperimentIn(BaseModel):
     description: str = ""
     assay: Literal["genomics", "rnaseq", "chipseq", "atacseq", "cutandrun", "methylation", "proteomics", "generic"] = "genomics"
     genome: str | None = Field(default=None, max_length=120)
+    visibility: Literal["private", "lab"] = "lab"
     custom_columns: list[str] = []
     conditions: list[dict[str, Any]] = []
     contrasts: list[dict[str, Any]] = []
@@ -188,6 +189,8 @@ class ExperimentOut(ORM):
     conditions: list[dict[str, Any]]
     contrasts: list[dict[str, Any]]
     created_by: str | None
+    visibility: str = "lab"
+    can_edit: bool = False
     created_at: datetime
     updated_at: datetime
     sample_count: int = 0
@@ -260,6 +263,7 @@ class RunOut(ORM):
     pipeline_version: str | None = None
     experiment_name: str | None = None
     output_vpath: str | None = None
+    can_edit: bool = False  # cancel, resume, delete: who started it, or an administrator
 
 
 class RunDetail(RunOut):

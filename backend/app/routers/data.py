@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Dataset, User
-from ..security import audit, require_admin, require_scientist, require_viewer
+from ..security import audit, require_admin, require_media_viewer, require_scientist, require_viewer
 from ..services import data_roots, fs
 
 router = APIRouter(prefix="/api/datasets", tags=["data"])
@@ -109,7 +109,7 @@ def preview(path: str, _: User = Depends(require_viewer)):
 
 
 @router.get("/download")
-def download(path: str, user: User = Depends(require_viewer)):
+def download(path: str, user: User = Depends(require_media_viewer)):
     root, p = fs.resolve(path)
     if not p.is_file():
         raise HTTPException(400, "Not a file")

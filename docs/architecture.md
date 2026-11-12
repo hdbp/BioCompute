@@ -167,4 +167,7 @@ uses Nextflow's HTCondor executor, which needs a shared filesystem.
   What a machine reports about itself (hostname, addresses) cannot attach it to the controller's record or to an
   already enrolled machine, and its own claim of tailnet membership is kept apart from the controller's
   `tailscale status`. Discovery reports need a token flagged for them.
-* **HTML reports** are served with `Content-Security-Policy: sandbox`.
+* **HTML reports** are served with `Content-Security-Policy: sandbox` (SVG files too, without scripts).
+* **No token in URLs:** the bearer token lives in the browser's storage and goes in the `Authorization` header.
+  Links, downloads, the genome browser and live updates use a separate HttpOnly, SameSite=Strict cookie that only
+  works for GET/HEAD on those endpoints, so tokens do not end up in server logs or browser history.

@@ -44,6 +44,7 @@ export interface Sample {
 }
 export interface Experiment {
   id: string; name: string; description: string; assay: string; genome?: string | null; custom_columns: string[];
+  visibility?: "private" | "lab"; can_edit?: boolean;
   conditions: { name: string; color?: string; description?: string }[];
   contrasts: { id?: string; name: string; treatment: string; reference: string }[];
   created_by: string | null; created_at: string; updated_at: string; sample_count: number;
@@ -62,6 +63,7 @@ export interface Run {
   output_dir: string; run_dir: string; work_dir: string | null; exit_code: number | null; error: string | null;
   progress: { processes?: Record<string, ProcessProgress>; tasks?: Task[]; total?: number; done?: number; failed?: number };
   started_at: string | null; finished_at: string | null; created_at: string; attempt: number; created_by: string | null;
+  can_edit?: boolean;
   pipeline_name: string | null; pipeline_version: string | null; experiment_name: string | null; output_vpath: string | null;
 }
 export type RunStatus = "pending" | "preflight" | "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "lost";

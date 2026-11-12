@@ -87,19 +87,66 @@ def _decode(token: str) -> dict[str, Any]:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token") from exc
 
 
+# Links, downloads, live updates and the genome browser cannot send an Authorization header. Instead of putting the
+# login token in their URLs (where it ends up in logs and browser history), the browser holds a second, narrower
+# token in an HttpOnly cookie: it only works for GET/HEAD on the endpoints that use require_media_viewer, and it is
+# not accepted as a bearer token.
+MEDIA_COOKIE = "bc_media"
+
+
+def create_media_token(user: User) -> str:
+    s = get_settings()
+    now = datetime.now(timezone.utc)
+    payload = {"sub": user.username, "scope": "media", "iat": int(now.timestamp()),
+               "exp": int((now + timedelta(minutes=s.token_ttl_minutes)).timestamp())}
+    return jwt.encode(payload, signing_key(), algorithm="HS256")
+
+
+def _user_from(db: Session, payload: dict[str, Any]) -> User:
+    user = db.query(User).filter(User.username == payload.get("sub")).one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User inactive or missing")
+    # a token issued before the password was changed or the account was reset no longer works
+    changed = (user.prefs or {}).get("credentials_changed_at")
+    if changed and int(payload.get("iat", 0)) < int(changed):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session ended: sign in again")
+    return user
+
+
 def get_current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> User:
-    token = creds.credentials if creds else request.query_params.get("access_token")  # SSE can't set headers
-    if not token:
+    """The signed-in user, from the Authorization header only (never from the URL)."""
+    if not creds:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
+    payload = _decode(creds.credentials)
+    if payload.get("scope") == "media":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "This token only opens files")
+    return _user_from(db, payload)
+
+
+def end_sessions(user: User) -> None:
+    """Sign the user out everywhere: tokens issued before now stop working (after a password reset)."""
+    user.prefs = {**(user.prefs or {}), "credentials_changed_at": int(datetime.now(timezone.utc).timestamp())}
+
+
+def get_media_user(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    """For files, downloads and event streams: the Authorization header, or the media cookie on GET/HEAD."""
+    if creds:
+        return get_current_user(request, creds, db)
+    token = request.cookies.get(MEDIA_COOKIE)
+    if not token or request.method not in ("GET", "HEAD"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
     payload = _decode(token)
-    user = db.query(User).filter(User.username == payload.get("sub")).one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User inactive or missing")
-    return user
+    if payload.get("scope") != "media":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
+    return _user_from(db, payload)
 
 
 def require_role(role: str):
@@ -112,6 +159,12 @@ def require_role(role: str):
 
 
 require_viewer = require_role("viewer")
+
+
+def require_media_viewer(user: User = Depends(get_media_user)) -> User:
+    if ROLE_RANK.get(user.role, -1) < ROLE_RANK["viewer"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires role 'viewer'")
+    return user
 require_scientist = require_role("scientist")
 require_admin = require_role("admin")
 

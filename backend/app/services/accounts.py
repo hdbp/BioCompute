@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from ..models import AppSetting, User
-from ..security import hash_secret
+from ..security import end_sessions, hash_secret
 
 USERNAME = re.compile(r"^[A-Za-z0-9_.-]{2,80}$")
 ROLES = ("viewer", "scientist", "admin")
@@ -237,5 +237,6 @@ def reset_password(db: Session, actor: User, user_id: str, password: str | None)
     elif len(password) < 10:
         raise HTTPException(400, "Password: at least 10 characters")
     u.password_hash = hash_secret(password)
+    end_sessions(u)  # whoever was signed in as this account is signed out
     db.flush()
     return u, generated

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowDownToLine, ArrowLeft, Ban, CheckCircle2, CircleAlert, FileText, FolderOpen, RotateCw, SlidersHorizontal, Telescope } from "lucide-react";
-import { api, ApiError, authed, errMsg, qs } from "@/lib/api";
+import { api, ApiError, authed, errMsg, qs, ensureMediaCookie } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { setLaunchPrefill } from "@/lib/handoff";
 import type { FormSchema, ProcessProgress, RunDetail, Task } from "@/lib/types";
@@ -68,7 +68,7 @@ export default function RunPage() {
   const pct = r.progress.total ? Math.round(((r.progress.done ?? 0) / r.progress.total) * 100) : r.status === "completed" ? 100 : 0;
   const preflight = r.events.find((e) => e.kind === "preflight");
   const checks = ((preflight?.data.checks as Check[] | undefined) ?? []);
-  const mayAct = can(user, "scientist");
+  const mayAct = can(user, "scientist") && r.can_edit !== false;  // whoever started it, or an administrator
   const askCancel = async () => {
     if (await confirmDialog({ title: `Cancel ${r.name}?`, body: "The steps that are still running are stopped. Results written so far stay in the output folder, and the run can be resumed later.", confirmLabel: "Cancel run", cancelLabel: "Keep running", danger: true })) cancel.mutate();
   };
@@ -489,18 +489,24 @@ function LiveLog({ runId, active, engine }: { runId: string; active: boolean; en
     setLog(EMPTY_LOG);
     setState({ loading: false, error: null, partial: false });
     if (which === "stdout" && active) {
-      const es = new EventSource(authed(`/api/runs/${runId}/stream`));
-      let lastStatus = "";
-      // every (re)connection starts again from the recent end of the log, so what is on screen is replaced, not repeated
-      es.addEventListener("open", () => { setLive(true); setLog(EMPTY_LOG); });
-      es.addEventListener("log", (e) => { const chunk = JSON.parse((e as MessageEvent).data) as string; setLog((s) => appendLog(s, chunk)); });
-      es.addEventListener("status", (e) => {   // sent every few seconds; refresh the page only when something changed
-        const data = (e as MessageEvent).data as string;
-        if (data !== lastStatus) { if (lastStatus) qc.invalidateQueries({ queryKey: ["run", runId] }); lastStatus = data; }
+      let es: EventSource | null = null;
+      let closed = false;
+      // the stream is opened with the file cookie, which must be there first (an EventSource refused once does not retry)
+      ensureMediaCookie().then(() => {
+        if (closed) return;
+        const src = es = new EventSource(authed(`/api/runs/${runId}/stream`));
+        let lastStatus = "";
+        // every (re)connection starts again from the recent end of the log, so what is on screen is replaced, not repeated
+        src.addEventListener("open", () => { setLive(true); setLog(EMPTY_LOG); });
+        src.addEventListener("log", (e) => { const chunk = JSON.parse((e as MessageEvent).data) as string; setLog((s) => appendLog(s, chunk)); });
+        src.addEventListener("status", (e) => {   // sent every few seconds; refresh the page only when something changed
+          const data = (e as MessageEvent).data as string;
+          if (data !== lastStatus) { if (lastStatus) qc.invalidateQueries({ queryKey: ["run", runId] }); lastStatus = data; }
+        });
+        src.addEventListener("end", () => { src.close(); setLive(false); qc.invalidateQueries({ queryKey: ["run", runId] }); });
+        src.onerror = () => setLive(false);
       });
-      es.addEventListener("end", () => { es.close(); setLive(false); qc.invalidateQueries({ queryKey: ["run", runId] }); });
-      es.onerror = () => setLive(false);
-      return () => { es.close(); setLive(false); };
+      return () => { closed = true; es?.close(); setLive(false); };
     }
     let stale = false;
     setState({ loading: true, error: null, partial: false });

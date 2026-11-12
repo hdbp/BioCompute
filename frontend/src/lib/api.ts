@@ -67,10 +67,26 @@ export const qs = (o: Record<string, string | number | boolean | undefined | nul
   return r ? `?${r}` : "";
 };
 
-/** URL usable in <a>/<iframe>/EventSource, which cannot send Authorization headers. */
-export const authed = (path: string) => {
+/**
+ * URL for <a>/<iframe>/<img>/EventSource, which cannot send an Authorization header. The login token is never put
+ * in a URL: these requests carry the HttpOnly file cookie set by ensureMediaCookie() (GET/HEAD only).
+ */
+export const authed = (path: string) => path;
+
+let cookieFor: string | null = null;
+/** Ask the server for the file cookie once per login (also after a page reload with a stored session). */
+export async function ensureMediaCookie(force = false): Promise<void> {
   const t = useAuth.getState().token;
-  return `${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(t ?? "")}`;
-};
+  if (!t || (!force && cookieFor === t)) return;
+  cookieFor = t;
+  try {
+    await fetch("/api/auth/media-cookie", { method: "POST", headers: { Authorization: `Bearer ${t}` }, credentials: "same-origin" });
+  } catch { cookieFor = null; /* retried on the next call */ }
+}
+
+export function clearMediaCookie() {
+  cookieFor = null;
+  fetch("/api/auth/media-cookie", { method: "DELETE", credentials: "same-origin" }).catch(() => undefined);
+}
 
 export const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));

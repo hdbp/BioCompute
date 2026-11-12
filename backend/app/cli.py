@@ -113,6 +113,8 @@ def cmd_reset(a) -> int:
             db.add(u)
         u.password_hash = hash_secret(pw)
         u.is_active = True
+        from .security import end_sessions
+        end_sessions(u)
         if a.role:
             u.role = a.role
         from .security import audit

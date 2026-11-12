@@ -2,7 +2,7 @@
 
 Interactive docs: `http://127.0.0.1:8000/docs` (Swagger) or `/redoc`. Machine-readable spec: [`openapi.json`](openapi.json), generated from the running app.
 
-Authentication: `POST /api/auth/login` returns a bearer token; send `Authorization: Bearer <token>`. Server-sent event endpoints (`/api/events`, `/api/runs/{id}/stream`) and file links also accept `?access_token=` because browsers cannot set headers on EventSource or links. Worker agents use their own agent token on `/api/agent/*`.
+Authentication: `POST /api/auth/login` returns a bearer token; send `Authorization: Bearer <token>`. The token is never accepted in a URL. Browsers cannot send headers on EventSource, links, images or iframes, so `POST /api/auth/media-cookie` (with the bearer token) sets an HttpOnly, SameSite=Strict cookie limited to `/api`. It is accepted only for GET/HEAD on file, download and event-stream endpoints (`/api/events`, `/api/runs/{id}/stream`, `/api/runs/{id}/files/*`, `/api/results/{id}/file`, `/api/explore/raw`, `/api/explore/de/export`, `/api/datasets/download`), never as a bearer token. `DELETE /api/auth/media-cookie` removes it. An admin password reset signs the account out everywhere. Worker agents use their own agent token on `/api/agent/*`.
 
 File paths in requests are *virtual paths*: `<data-root>:<relative/path>`.
 

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from ..models import User
-from ..security import require_viewer
+from ..security import require_media_viewer, require_viewer
 from ..services import explore, fs
 
 router = APIRouter(prefix="/api/explore", tags=["explore"])
@@ -18,7 +18,7 @@ def info(path: str, _: User = Depends(require_viewer)):
 
 @router.get("/raw", operation_id="explore_raw")
 @router.head("/raw", operation_id="explore_raw_head")
-def raw(path: str, request: Request, _: User = Depends(require_viewer)):
+def raw(path: str, request: Request, _: User = Depends(require_media_viewer)):
     """Serve a file inline with HTTP Range support (genome browser tracks read only the bytes they need)."""
     _, p = fs.resolve(path)
     if not p.is_file():
@@ -77,7 +77,7 @@ def de_data(path: str, lfc: str | None = None, padj: str | None = None, p: str |
 @router.get("/de/export")
 def de_export(path: str, use: str = "padj", p_cut: float = 0.05, lfc_cut: float = 1.0, mean_cut: float | None = None,
               direction: str = "both", fmt: str = "csv", lfc: str | None = None, padj: str | None = None, p: str | None = None,
-              mean: str | None = None, id: str | None = None, label: str | None = None, _: User = Depends(require_viewer)):
+              mean: str | None = None, id: str | None = None, label: str | None = None, _: User = Depends(require_media_viewer)):
     """Rows passing the cut-offs, as a CSV/TSV download (all original columns plus 'regulation')."""
     if fmt not in ("csv", "tsv"):
         raise HTTPException(400, "fmt must be csv or tsv")
