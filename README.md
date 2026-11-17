@@ -1,6 +1,6 @@
 # BioCompute
 
-BioCompute is a self-hosted platform for running bioinformatics pipelines on a small lab cluster.
+BioCompute is a self-hosted platform (in development!) for running bioinformatics pipelines on a small lab cluster.
 You use it from a browser to:
 
 - manage Nextflow and nf-core pipelines, with parameter forms generated from each pipeline's schema;
